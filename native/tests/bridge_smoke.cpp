@@ -39,6 +39,93 @@ template <typename T> void put(std::uintptr_t address, const T& value) {
     std::memcpy(reinterpret_cast<void*>(address), &value, sizeof(value));
 }
 
+float __fastcall original_gameplay_weight(void*) {
+    return 0.75f;
+}
+
+int __fastcall original_gameplay_option(void*, std::uint32_t key, int fallback) {
+    require(key == 123, "Render-option key was changed");
+    return fallback;
+}
+
+void gameplay_effect_filter_checks() {
+    Allocation controller(0x1000), damage(0x1000), death(0x1000), blinded(0x1000);
+    for (unsigned i = 0; i < 3; ++i) {
+        put(controller.address() + 0x20 + i * 0x28, std::int32_t(2));
+        put(controller.address() + 0x28 + i * 0x28, i == 0   ? damage.address()
+                                                    : i == 1 ? death.address()
+                                                             : blinded.address());
+    }
+    const auto old_client = gClient;
+    const auto old_command = std::atomic_load(&gCommand);
+    const auto old_original = gOriginalGameplayEffectWeight;
+    const auto old_option = gOriginalGameplayRenderOption;
+    const auto old_beat = gHeartbeatTime.load();
+    const auto old_error = gWorkerError.load();
+    const auto old_active = gGameplayCameraActive.load();
+    gClient = controller.address() - kGameplayEffectsController;
+    gOriginalGameplayEffectWeight = original_gameplay_weight;
+    gOriginalGameplayRenderOption = original_gameplay_option;
+    gHeartbeatTime = now_seconds();
+    gWorkerError = 0;
+    gGameplayCameraActive = true;
+    auto command = std::make_shared<Command>();
+    command->wire.mode = std::uint32_t(Mode::Manual);
+    auto publish = [&] { std::atomic_store(&gCommand, std::shared_ptr<const Command>(command)); };
+    publish();
+    const auto caller = gClient + kGameplayEffectWeightCaller;
+    const auto screen_caller = gClient + kGameplayScreenParticlesCaller;
+    auto screen = [&] { return gameplay_render_option(nullptr, 123, 1, screen_caller); };
+    require(screen() == 0, "Dolly retained selected-player screen particles");
+    require(gameplay_render_option(nullptr, 123, 7, screen_caller + 1) == 7,
+            "Unrelated render option was changed");
+    auto weight = [&](std::uintptr_t row, std::uintptr_t from) {
+        return gameplay_effect_weight(reinterpret_cast<void*>(row), from);
+    };
+    close_to(weight(damage.address(), caller), 0, "Damage leaks into Dolly camera");
+    close_to(weight(death.address() + 32, caller), 0, "Death leaks into Dolly camera");
+    close_to(weight(blinded.address(), caller), .75, "Unrelated game effect was filtered");
+    close_to(weight(damage.address() + 1, caller), .75, "Misaligned event was accepted");
+    close_to(weight(damage.address() + 64, caller), .75, "Past-end event was accepted");
+    close_to(weight(damage.address(), caller + 1), .75, "Non-render caller was filtered");
+    require(gameplay_damage_or_death(controller.address(), damage.address()),
+            "Damage event queue was changed by filtering");
+    command->wire.flags = kGamePov;
+    publish();
+    close_to(weight(death.address(), caller), .75, "Player POV lost death effects");
+    require(screen() == 1, "Player POV lost screen particles");
+    command->wire.flags = 0;
+    command->wire.mode = std::uint32_t(Mode::Release);
+    publish();
+    close_to(weight(damage.address(), caller), .75, "F9 release lost damage effects");
+    require(screen() == 1, "F9 lost screen particles");
+    command->wire.mode = std::uint32_t(Mode::Play);
+    publish();
+    close_to(weight(damage.address(), caller), 0, "Authored shot lost damage filtering");
+    require(screen() == 0, "Authored shot retained screen particles");
+    gGameplayCameraActive = false;
+    close_to(weight(damage.address(), caller), .75, "Unowned camera was filtered");
+    require(screen() == 1, "Unowned camera lost screen particles");
+    gGameplayCameraActive = true;
+    gWorkerError = 30;
+    close_to(weight(damage.address(), caller), .75, "Dead editor retained filtering");
+    require(screen() == 1, "Failed editor retained screen-particle suppression");
+    gWorkerError = 0;
+    gHeartbeatTime = now_seconds() - 3;
+    close_to(weight(damage.address(), caller), .75, "Expired heartbeat retained filtering");
+    require(screen() == 1, "Expired heartbeat retained screen-particle suppression");
+    gHeartbeatTime = now_seconds();
+    put(controller.address() + 0x20, std::int32_t(-1));
+    close_to(weight(damage.address(), caller), .75, "Invalid event count was accepted");
+    std::atomic_store(&gCommand, old_command);
+    gOriginalGameplayEffectWeight = old_original;
+    gOriginalGameplayRenderOption = old_option;
+    gClient = old_client;
+    gHeartbeatTime = old_beat;
+    gWorkerError = old_error;
+    gGameplayCameraActive = old_active;
+}
+
 void bone_string_bounds() {
     Allocation text(0x1000);
     char name[65];
@@ -176,6 +263,37 @@ void owned_model_bones() {
     gRenderAttach[0].source = {};
     gRenderAttach[0].history.reset();
     gRenderAttach[0].handle.store(0);
+    // Bebop starts with pelvis; root_motion is a later bone. The movement
+    // correction must preserve anatomical height in both camera and picker.
+    const char* pelvis_first[] = {"pelvis", "head",   "spine_0",     "neck_0",
+                                  "hand_L", "hand_R", "arm_upper_L", "leg_upper_L"};
+    for (unsigned i = 0; i < 64; ++i) {
+        const auto name = names.address() + i * 64;
+        std::strcpy(reinterpret_cast<char*>(name), i < 8     ? pelvis_first[i]
+                                                   : i == 32 ? "root_motion"
+                                                             : "extra_bone");
+        put(vector.address() + i * 8, name);
+    }
+    put(model.address() + 0x170, std::uint32_t(64));
+    put(model.address() + 0x178, std::uint32_t(64));
+    put(node.address() + 0x150 + 0x90, std::uint32_t(64));
+    put(poses.address() + 2 * 4, 365.0f);
+    std::memcpy(reinterpret_cast<void*>(poses.address() + 32 * 32), current_origin,
+                sizeof(current_origin));
+    require(attach_runtime::resolve_bone(offsets, node.address(), segment, cache, error) &&
+                cache.root_index == 32,
+            "Pelvis-first movement root was not resolved by name");
+    require(attach_runtime::sample(offsets, cache, segment, sample, error),
+            "Pelvis-first skeleton sample rejected");
+    close_to(sample.origin[2], 401, "Pelvis height was subtracted from attached Head");
+    AttachPreview preview{};
+    preview.cache = cache;
+    preview.cache.picker = std::make_shared<PickerCatalog>();
+    preview.schema = offsets;
+    PickerSample picked{};
+    require(sample_picker(&preview, picked, error), "Pelvis-first picker sample rejected");
+    close_to(picked.transforms[1][2], 401, "Picker Head was lowered by pelvis height");
+    close_to(picked.transforms[0][2], 365, "Picker pelvis was moved to the scene origin");
     put(identity.address() + 0x10, std::uint32_t(1235));
     require(!attach_runtime::sample(offsets, cache, segment, sample, error),
             "A recycled entity handle was accepted as the original target");
@@ -1381,6 +1499,7 @@ void confetti_diagnostics_publish() {
 }
 
 void run() {
+    gameplay_effect_filter_checks();
     confetti_control_updates();
     confetti_diagnostics_publish();
     bone_string_bounds();

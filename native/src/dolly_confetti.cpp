@@ -57,25 +57,40 @@ constexpr std::array<Preset, kPresetCount> kPresets{{
      720.0f, 600.0f, 720.0f, 8.0f, 7.0f, 0.4f,
      1200.0f, 900.0f, 600.0f, 12.0f, 5.0f, 0.0f},
     {"snow_flakes",
-     {"particles/event/christmas/christmas_hideout_exterior_snow_flakes.vpcf"}, {}, 1, 0,
-     720.0f, 600.0f, 320.0f, 8.0f, 6.0f, 0.3f,
-     1200.0f, 900.0f, 260.0f, 12.0f, 5.0f, 0.0f},
+     {"particles/deadlock_cine/snow_light.vpcf"},
+     {"particles/deadlock_cine/snow_light_contact.vpcf"}, 1, 1,
+     720.0f, 600.0f, 480.0f, 8.0f, 6.0f, 0.3f,
+     1200.0f, 900.0f, 360.0f, 12.0f, 5.0f, 0.0f},
     {"snow_long_fall",
-     {"particles/event/christmas/christmas_hideout_exterior_snow_flakes_longerfall.vpcf"}, {}, 1, 0,
-     720.0f, 600.0f, 320.0f, 10.0f, 6.0f, 0.3f,
-     1200.0f, 900.0f, 260.0f, 14.0f, 5.0f, 0.0f},
+     {"particles/deadlock_cine/snow_long_fall.vpcf"},
+     {"particles/deadlock_cine/snow_long_fall_contact.vpcf"}, 1, 1,
+     720.0f, 600.0f, 260.0f, 10.0f, 6.0f, 0.3f,
+     1200.0f, 900.0f, 200.0f, 14.0f, 5.0f, 0.0f},
     {"snow_heavy",
-     {"particles/event/christmas/christmas_hideout_exterior_snow_longerfall.vpcf"}, {}, 1, 0,
-     900.0f, 750.0f, 480.0f, 10.0f, 7.0f, 0.3f,
-     1400.0f, 1000.0f, 360.0f, 14.0f, 6.0f, 0.0f},
+     {"particles/deadlock_cine/snow_heavy.vpcf"},
+     {"particles/deadlock_cine/snow_heavy_contact.vpcf"}, 1, 1,
+     900.0f, 750.0f, 640.0f, 10.0f, 7.0f, 0.3f,
+     1400.0f, 1000.0f, 480.0f, 14.0f, 6.0f, 0.0f},
     {"snow_machine",
-     {"particles/environment/winter/winter_shop_open_ambient_snow_machine_snow.vpcf"}, {}, 1, 0,
-     600.0f, 500.0f, 240.0f, 8.0f, 5.0f, 0.2f,
-     1000.0f, 800.0f, 200.0f, 10.0f, 4.0f, 0.0f},
+     {"particles/deadlock_cine/snow_machine.vpcf"},
+     {"particles/deadlock_cine/snow_machine_contact.vpcf"}, 1, 1,
+     600.0f, 500.0f, 360.0f, 8.0f, 5.0f, 0.2f,
+     1000.0f, 800.0f, 300.0f, 10.0f, 4.0f, 0.0f},
     {"frozen_flakes",
-     {"particles/environment/rejuv_frozen_snowflakes.vpcf"}, {}, 1, 0,
-     600.0f, 500.0f, 200.0f, 8.0f, 5.0f, 0.2f,
-     1000.0f, 800.0f, 160.0f, 10.0f, 4.0f, 0.0f},
+     {"particles/deadlock_cine/frozen_flakes.vpcf"},
+     {"particles/deadlock_cine/frozen_flakes_contact.vpcf"}, 1, 1,
+     600.0f, 500.0f, 260.0f, 8.0f, 5.0f, 0.2f,
+     1000.0f, 800.0f, 200.0f, 10.0f, 4.0f, 0.0f},
+    {"rain",
+     {"particles/deadlock_cine/rain.vpcf"},
+     {"particles/deadlock_cine/rain_contact.vpcf"}, 1, 1,
+     720.0f, 600.0f, 600.0f, 8.0f, 5.0f, 0.35f,
+     1200.0f, 900.0f, 500.0f, 12.0f, 4.0f, 0.0f},
+    {"frozen_classic",
+     {"particles/deadlock_cine/frozen_classic.vpcf"},
+     {"particles/deadlock_cine/frozen_classic_contact.vpcf"}, 1, 1,
+     600.0f, 500.0f, 260.0f, 8.0f, 5.0f, 0.2f,
+     1000.0f, 800.0f, 200.0f, 10.0f, 4.0f, 0.0f},
 }};
 
 struct BuildOffsets {
@@ -276,6 +291,11 @@ void updateVolumeLocked(const Camera& camera) {
                 camera.origin.z};
     if (close)
         origin.z -= height * preset.close_drop;
+    // Packaged effects spawn in a forward-biased local box; pull the origin
+    // back by half the depth so the volume straddles the camera instead of
+    // sitting in front of it (a 180-degree turn still has particles in frame).
+    origin.x -= forward.x * (depth + overscan) * 0.5f;
+    origin.y -= forward.y * (depth + overscan) * 0.5f;
     for (int particle : particles) {
         if (particle < 0)
             continue;

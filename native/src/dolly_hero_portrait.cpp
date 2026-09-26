@@ -102,28 +102,61 @@ std::string portrait_stem(const char* model) {
     std::string path(model);
     auto name = path.substr(path.find_last_of("/\\") + 1);
     name.resize(name.find('.') == std::string::npos ? name.size() : name.find('.'));
-    // Reviewed model aliases; all other heroes use their model stem directly.
-    // Verified against scripts/heroes.vdata: m_strModelName / m_strIconImageSmall.
-    static constexpr const char* aliases[][2] = {{"familiar_wip", "familiar"},
-                                                 {"gigawatt_prisoner", "gigawatt"},
-                                                 {"geist", "spectre"},
-                                                 {"abrams", "bull"},
-                                                 {"mcginnis", "engineer"},
-                                                 {"dynamo", "sumo"},
-                                                 {"ivy", "tengu"},
-                                                 {"pocket", "synth"},
-                                                 {"viper", "kali"},
-                                                 {"boho", "hornet"},
-                                                 {"graffiti_girl", "graf"}};
-    for (const auto& alias : aliases)
-        if (name == alias[0]) {
-            name = alias[1];
-            break;
-        }
     if (name.empty() || name.size() > 64 ||
         name.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos)
         return {};
-    return name + (name == "hornet" ? "_sm_png" : "_sm_psd");
+    // Generated from scripts/heroes.vdata: model stem -> compiled portrait
+    // stem (panorama images compile as <name>.<ext> -> <name>_<ext>).
+    static constexpr const char* portraits[][2] = {
+        {"abrams", "bull_sm_psd"},
+        {"archer", "archer_sm_psd"},
+        {"astro", "astro_sm_psd"},
+        {"bebop", "bebop_sm_psd"},
+        {"boho", "hornet_sm_png"},
+        {"bookworm", "bookworm_sm_psd"},
+        {"chrono", "swan_sm_psd"},
+        {"digger", "digger_sm_psd"},
+        {"doorman", "doorman_sm_psd"},
+        {"drifter", "drifter_sm_psd"},
+        {"dynamo", "sumo_sm_psd"},
+        {"familiar_wip", "familiar_sm_psd"},
+        {"fencer", "fencer_sm_psd"},
+        {"fortuna", "fortuna_sm_psd"},
+        {"frank", "frank_sm_psd"},
+        {"geist", "spectre_sm_psd"},
+        {"gen_man", "trapper_sm_psd"},
+        {"gigawatt_prisoner", "gigawatt_sm_psd"},
+        {"graffiti_girl", "graf_sm_psd"},
+        {"haze", "haze_sm_psd"},
+        {"hornet", "hornet_sm_png"},
+        {"inferno", "inferno_sm_psd"},
+        {"ivy", "tengu_sm_psd"},
+        {"kelvin", "kelvin_sm_psd"},
+        {"lash", "skyrunner_sm_psd"},
+        {"magician", "magician_sm_psd"},
+        {"mcginnis", "engineer_sm_psd"},
+        {"mirage", "mirage_sm_psd"},
+        {"nano", "nano_sm_psd"},
+        {"necro", "necro_sm_psd"},
+        {"operative", "operative_sm_psd"},
+        {"pocket", "synth_sm_psd"},
+        {"priest", "priest_sm_psd"},
+        {"punkgoat", "punkgoat_sm_psd"},
+        {"shiv", "shiv_sm_psd"},
+        {"unicorn", "unicorn_sm_psd"},
+        {"vampirebat", "vampirebat_sm_psd"},
+        {"viper", "kali_sm_psd"},
+        {"viscous", "viscous_sm_psd"},
+        {"warden", "warden_sm_psd"},
+        {"werewolf", "werewolf_sm_psd"},
+        {"wraith", "wraith_sm_psd"},
+        {"wrecker", "wrecker_sm_psd"},
+        {"yamato", "yamato_sm_psd"},
+    };
+    for (const auto& entry : portraits)
+        if (name == entry[0])
+            return entry[1];
+    return name + "_sm_psd";
 }
 } // namespace
 

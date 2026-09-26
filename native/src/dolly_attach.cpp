@@ -204,11 +204,53 @@ const char* attach_hero_name(const char* model_path) noexcept {
         const char* stem;
         const char* name;
     };
+    // Generated from scripts/heroes.vdata (full staged roster, 2026-09-26).
     static constexpr Entry kNames[] = {
-        {"astro", "Holliday"}, {"abrams", "Abrams"},       {"familiar_wip", "Rem"},
-        {"yamato", "Yamato"},  {"digger", "Mo and Krill"}, {"drifter", "Drifter"},
-        {"lash", "Lash"},      {"necro", "Graves"},        {"wraith", "Wraith"},
-        {"nano", "Calico"},    {"hornet", "Vindicta"},     {"warden", "Warden"}};
+        {"abrams", "Abrams"},
+        {"archer", "Grey Talon"},
+        {"astro", "Holliday"},
+        {"bebop", "Bebop"},
+        {"boho", "Boho"},
+        {"bookworm", "Paige"},
+        {"chrono", "Paradox"},
+        {"digger", "Mo and Krill"},
+        {"doorman", "Doorman"},
+        {"drifter", "Drifter"},
+        {"dynamo", "Dynamo"},
+        {"familiar_wip", "Rem"},
+        {"fencer", "Fencer"},
+        {"fortuna", "Fortuna"},
+        {"frank", "Victor"},
+        {"geist", "Lady Geist"},
+        {"gen_man", "Gen Man"},
+        {"gigawatt_prisoner", "Seven"},
+        {"graffiti_girl", "Graffiti Girl"},
+        {"haze", "Haze"},
+        {"hornet", "Vindicta"},
+        {"inferno", "Infernus"},
+        {"ivy", "Ivy"},
+        {"kelvin", "Kelvin"},
+        {"lash", "Lash"},
+        {"magician", "Sinclair"},
+        {"mcginnis", "McGinnis"},
+        {"mirage", "Mirage"},
+        {"nano", "Calico"},
+        {"necro", "Graves"},
+        {"operative", "Operative"},
+        {"pocket", "Pocket"},
+        {"priest", "Priest"},
+        {"punkgoat", "Billy"},
+        {"shiv", "Shiv"},
+        {"unicorn", "Unicorn"},
+        {"vampirebat", "Mina"},
+        {"viper", "Vyper"},
+        {"viscous", "Viscous"},
+        {"warden", "Warden"},
+        {"werewolf", "Werewolf"},
+        {"wraith", "Wraith"},
+        {"wrecker", "Wrecker"},
+        {"yamato", "Yamato"},
+    };
     for (const auto& entry : kNames) {
         if (std::strlen(entry.stem) == length && std::strncmp(stem, entry.stem, length) == 0)
             return entry.name;

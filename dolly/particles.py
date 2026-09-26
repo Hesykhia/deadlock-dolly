@@ -17,6 +17,8 @@ PARTICLES = (
     ("snow_heavy", "Snow - heavy", "Denser exterior snowfall."),
     ("snow_machine", "Snow machine", "The winter shop ambient snow machine."),
     ("frozen_flakes", "Frozen flakes", "Rejuvenation frozen snowflakes."),
+    ("rain", "Rain", "Custom falling rain streaks."),
+    ("frozen_classic", "Frozen - classic crystals", "The game's original rejuvenation crystals."),
 )
 PARTICLE_IDS = tuple(item[0] for item in PARTICLES)
 PARTICLE_LABELS = {item[0]: item[1] for item in PARTICLES}

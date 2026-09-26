@@ -29,6 +29,7 @@ struct Cache {
     std::uintptr_t model_handle_slot = 0, model_handle = 0, model_object = 0, model_state = 0;
     std::uint32_t bone_count = 0;
     std::uint32_t bone_index = 0;
+    std::uint32_t root_index = 0;
     bool bone_ready = false;
     dolly::EditorBones bones{};
     std::shared_ptr<dolly::PickerCatalog> picker;
@@ -282,7 +283,9 @@ inline bool find_bone_vector(std::uintptr_t object, std::uintptr_t& data, std::u
     unsigned name_budget = 4096; // Shared across candidate headers in this object.
     for (int pass = 0; pass < 2; ++pass) {
         const std::uint32_t stride = pass == 0 ? 8 : 16;
-        for (std::uint32_t offset = 0; offset + 0x18 <= 0x600; offset += 8) {
+        // Large hero models (for example Bebop) keep the render-skeleton name
+        // vector deeper in the resource object than the original 0x600 window.
+        for (std::uint32_t offset = 0; offset + 0x18 <= 0x4000; offset += 8) {
             std::uintptr_t pointer = 0;
             // Count fields are 32-bit. Adjacent bytes can be nonzero in
             // live resource objects; reading QWORDs made valid models fail
@@ -296,6 +299,7 @@ inline bool find_bone_vector(std::uintptr_t object, std::uintptr_t& data, std::u
             if (pointer < 0x10000 || pointer > 0x7fffffffffff || (pointer & 7))
                 continue;
             std::uint32_t index = 0;
+            bool root_first = false;
             for (; index < count && name_budget; ++index) {
                 --name_budget;
                 std::uintptr_t text = 0;
@@ -303,11 +307,8 @@ inline bool find_bone_vector(std::uintptr_t object, std::uintptr_t& data, std::u
                 if (!read_value(pointer + index * stride, text) ||
                     !read_c_string(text, name, sizeof(name)) || !valid_bone_name(name))
                     break;
-                // Reviewed render skeletons begin with root_motion. Reduced
-                // physics/attachment tables use different index spaces and must
-                // not be paired with the render pose array by name alone.
-                if (index == 0 && std::strcmp(name, "root_motion") != 0)
-                    break;
+                if (index == 0)
+                    root_first = std::strcmp(name, "root_motion") == 0;
                 if (stride == 16) {
                     std::uint32_t length = 0;
                     if (!read_value(pointer + index * stride + 8, length) || length < 1 ||
@@ -319,6 +320,12 @@ inline bool find_bone_vector(std::uintptr_t object, std::uintptr_t& data, std::u
                 continue;
             const unsigned score =
                 skeleton_name_score(pointer, static_cast<std::uint32_t>(count), stride);
+            // Reviewed render skeletons normally begin with root_motion, but
+            // Bebop's starts at the pelvis; accept a strongly marker-scored,
+            // full-length list too. Short reduced physics/attachment tables
+            // stay rejected (the smoke fixture covers that case).
+            if (!root_first && (score < 6 || count < 64))
+                continue;
             if (score &&
                 (!found || score > best_score || (score == best_score && count > entries))) {
                 data = pointer;
@@ -368,32 +375,50 @@ inline unsigned skeleton_name_score(std::uintptr_t data, std::uint32_t entries,
     return score;
 }
 
-// Pose transform array near the model state: transform 0 must sit on the node
-// origin (the same gate the field verification used).
+// A candidate pose buffer: transform 0 carries a scale and unit quaternion,
+// and its position stays near the node origin.
+inline bool pose_root_valid(std::uintptr_t pointer, const float origin[3],
+                            double max_distance) noexcept {
+    float first[8]{};
+    if (!read_memory(pointer, first, sizeof(first)))
+        return false;
+    const double dx = first[0] - origin[0], dy = first[1] - origin[1], dz = first[2] - origin[2];
+    if (dx * dx + dy * dy + dz * dz > max_distance * max_distance)
+        return false;
+    const double scale = first[3];
+    const double norm = std::sqrt(double(first[4]) * first[4] + double(first[5]) * first[5] +
+                                  double(first[6]) * first[6] + double(first[7]) * first[7]);
+    return scale > 0.01 && scale < 100.0 && norm > 0.5 && norm < 1.5;
+}
+
+// Pose transform array near the model state. The reviewed layout stores the
+// active pose buffer at +0x80 (the caller re-checks that same field), so try
+// it first with a realistic distance: the render root can sit well away from
+// the node origin (Bebop's first pose is his elevated pelvis). The scan fallback
+// keeps the tighter reviewed gate for other layouts.
 inline bool locate_bone_array(const Offsets& offsets, std::uintptr_t node,
                               std::uintptr_t model_state, std::uintptr_t& out) noexcept {
     float origin[3]{};
     if (!read_memory(node + offsets.origin, origin, sizeof(origin)))
         return false;
-    for (std::uintptr_t candidate = 0x40; candidate + 8 <= 0x140; candidate += 8) {
+    std::uintptr_t preferred = 0;
+    if (read_value(model_state + 0x80, preferred) && preferred >= 0x10000 &&
+        preferred <= 0x7fffffffffff && !(preferred & 7) &&
+        pose_root_valid(preferred, origin, 100.0)) {
+        out = preferred;
+        return true;
+    }
+    for (std::uintptr_t candidate = 0x40; candidate + 8 <= 0x400; candidate += 8) {
+        if (candidate == 0x80)
+            continue;
         std::uintptr_t pointer = 0;
         if (!read_value(model_state + candidate, pointer) || pointer < 0x10000 ||
             pointer > 0x7fffffffffff || (pointer & 7))
             continue;
-        float first[8]{};
-        if (!read_memory(pointer, first, sizeof(first)))
-            continue;
-        const double dx = first[0] - origin[0], dy = first[1] - origin[1],
-                     dz = first[2] - origin[2];
-        if (dx * dx + dy * dy + dz * dz > 25.0)
-            continue;
-        const double scale = first[3];
-        const double norm = std::sqrt(double(first[4]) * first[4] + double(first[5]) * first[5] +
-                                      double(first[6]) * first[6] + double(first[7]) * first[7]);
-        if (!(scale > 0.01 && scale < 100.0) || !(norm > 0.5 && norm < 1.5))
-            continue;
-        out = pointer;
-        return true;
+        if (pose_root_valid(pointer, origin, 5.0)) {
+            out = pointer;
+            return true;
+        }
     }
     return false;
 }
@@ -456,8 +481,8 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
     unsigned candidate_count = 0;
     const char* const* candidates = weapon_bone_candidates(candidate_count);
     cache.bones.total = hit.entries;
-    for (std::uint32_t entry = 0; entry < hit.entries && cache.bones.count < kEditorBoneCount;
-         ++entry) {
+    bool root_found = false;
+    for (std::uint32_t entry = 0; entry < hit.entries; ++entry) {
         std::uintptr_t text = 0;
         char name[65]{};
         if (!read_value(hit.data + entry * hit.stride, text) ||
@@ -465,7 +490,16 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
             !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') ||
               name[0] == '_' || name[0] == '$'))
             continue;
-        std::memcpy(cache.bones.names[cache.bones.count++], name, std::strlen(name));
+        if (std::strcmp(name, "root_motion") == 0) {
+            cache.root_index = entry;
+            root_found = true;
+        }
+        if (cache.bones.count < kEditorBoneCount)
+            std::memcpy(cache.bones.names[cache.bones.count++], name, std::strlen(name));
+    }
+    if (!root_found) {
+        error = "The skeleton's movement root could not be verified. Choose Eyes.";
+        return false;
     }
     std::uint32_t index = 0;
     bool found = false;
@@ -684,7 +718,7 @@ inline bool sample(const Offsets& offsets, const Cache& cache, const dolly::Atta
             !read_value(binding, object) || object != cache.model_object ||
             !read_value(cache.model_state + 0x80, array) || array != cache.bone_array ||
             !read_value(cache.model_state + 0x90, count) || count != cache.bone_count ||
-            cache.bone_index >= count) {
+            cache.bone_index >= count || cache.root_index >= count) {
             error = "The model or bone pose buffer changed; retry the attach camera.";
             return false;
         }
@@ -722,7 +756,10 @@ inline bool sample(const Offsets& offsets, const Cache& cache, const dolly::Atta
         // root translation. Mesh submission later uses the current scene origin.
         // Preserve the bone's local animation, then rebase the whole skeleton
         // onto that current origin before camera offsets or smoothing.
-        if (!read_memory(cache.bone_array, root_transform, sizeof(root_transform)) ||
+        // Bone zero is not necessarily the movement root (Bebop starts with
+        // pelvis). Subtract only the named root, preserving the pelvis height.
+        if (!read_memory(cache.bone_array + std::uint64_t(cache.root_index) * 32, root_transform,
+                         sizeof(root_transform)) ||
             !std::isfinite(root_transform[0]) || !std::isfinite(root_transform[1]) ||
             !std::isfinite(root_transform[2]) || std::abs(root_transform[0]) > 1e8 ||
             std::abs(root_transform[1]) > 1e8 || std::abs(root_transform[2]) > 1e8) {

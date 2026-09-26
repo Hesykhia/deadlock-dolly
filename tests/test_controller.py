@@ -80,6 +80,7 @@ class FakeConsole:
             "r_aspectratio": 0.0,
             "citadel_camera_fov": 90.0,
             "citadel_camera_spectator_fov": 80.0,
+            "citadel_spectator_mode": 0.0,
             "r_citadel_depthoffield_enable": 0.0,
             "r_citadel_depthoffield_focus_distance": 600.0,
             "r_citadel_depthoffield_aperture_diameter": 0.5,

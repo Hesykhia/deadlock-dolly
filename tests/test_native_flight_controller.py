@@ -124,6 +124,71 @@ class NativeFlightControllerTests(unittest.TestCase):
     def setUp(self):
         self.controller, self.console, self.bridge = configured_controller()
 
+    def test_player_view_detaches_after_seed_and_returns_on_f9(self):
+        self.console.values["citadel_spectator_mode"] = 3
+        selected_view = list(self.bridge.original)
+        self.controller.enter_native_flight(owner="panel")
+        self.assertEqual(self.bridge.pose, selected_view)
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 1)
+        self.assertLess(self.console.events.index("native.flight"),
+                        self.console.events.index("citadel_spectator_mode 1"))
+        # Re-entry and timeline movement must not replace the saved mode with 1.
+        self.controller.enter_native_flight()
+        self.controller.toggle_game_ui(True)
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 3)
+        self.assertFalse(self.controller._native_active)
+        self.console.values["citadel_spectator_mode"] = 2
+        self.bridge.original[2] = 900
+        self.controller.toggle_game_ui(False)
+        self.assertEqual(self.bridge.pose[2], 900)
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 1)
+        self.controller.stop()
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 2)
+
+    def test_saved_camera_detaches_player_view_without_changing_project(self):
+        self.console.values["citadel_spectator_mode"] = 3
+        project = make_project()
+        saved = project.to_dict()
+        self.controller.select_paused_camera(project, 0)
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 1)
+        self.assertEqual(project.to_dict(), saved)
+        self.controller.stop()
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 3)
+
+    def test_unapplied_spectator_detach_releases_camera_and_recovers_f9(self):
+        self.console.values["citadel_spectator_mode"] = 3
+        request = self.console.request
+
+        def ignore_detach(command, *args, **kwargs):
+            if command == "citadel_spectator_mode 1":
+                return ""
+            return request(command, *args, **kwargs)
+
+        self.console.request = ignore_detach
+        with self.assertRaisesRegex(RuntimeError, "did not apply citadel_spectator_mode"):
+            self.controller.enter_native_flight()
+        self.assertEqual(self.bridge.state, "stopped")
+        self.assertFalse(self.controller._native_active)
+        self.assertTrue(self.controller._game_ui_visible)
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 3)
+
+    def test_failed_spectator_restore_keeps_original_for_retry(self):
+        self.console.values["citadel_spectator_mode"] = 3
+        self.controller.enter_native_flight()
+        self.console.fail_commands.add("citadel_spectator_mode 3")
+        with self.assertRaises(Exception):
+            self.controller.toggle_game_ui(True)
+        self.assertEqual(self.controller._game_ui_restore["citadel_spectator_mode"], 3)
+        self.console.fail_commands.clear()
+        self.controller.toggle_game_ui(True)
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 3)
+
+    def test_pov_panel_preserves_selected_player_mode(self):
+        self.console.values["citadel_spectator_mode"] = 3
+        self.controller.open_pov_panel()
+        self.assertEqual(self.console.values["citadel_spectator_mode"], 3)
+        self.assertNotIn("citadel_spectator_mode", self.controller._game_ui_restore)
+
     def test_seek_between_keys_holds_full_native_rotation_and_lens(self):
         project = make_project()
         project.keyframes[0].curve_pitch = -20

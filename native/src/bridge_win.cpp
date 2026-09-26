@@ -336,6 +336,7 @@ static bool module_matches(HMODULE module, const char* expected, std::uint32_t i
 camera_view::Cache gCameraCache;
 #include "native_effects_win.hpp"
 #include "native_relief_win.hpp"
+#include "native_gameplay_effects_win.hpp"
 #include "dolly_attach_runtime.hpp"
 
 // Attach preview state resolved by the worker from the published selection.
@@ -461,7 +462,7 @@ static bool sample_picker(void* context, PickerSample& out, const char*& error) 
         return false;
     }
     // Keep marker positions and attached previews in the same current frame.
-    const auto root = out.transforms[0];
+    const auto root = out.transforms[cache.root_index];
     for (unsigned index = 0; index < cache.bone_count; ++index)
         for (unsigned axis = 0; axis < 3; ++axis)
             out.transforms[index][axis] =
@@ -643,11 +644,19 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     static bool started = false, completed = false;
     static CameraPose manual_pose{}, displayed_pose{};
     static bool displayed_valid = false;
+    // Lens pinning: the game's spectator view animates its FOV with the
+    // watched player, so deriving Dolly's FOV from the live view each frame
+    // made the free camera follow those transitions. Capture the handoff lens
+    // once per camera ownership and reuse it until the camera is released.
+    static double pinned_fov = 0, pinned_aspect = 0;
+    static bool lens_pinned = false;
     static unsigned fault = 0;
     static unsigned first_fault_code = 0;
     static char first_fault_message[192]{};
     static std::uint32_t previous_mode = 0;
     auto command = std::atomic_load_explicit(&gCommand, std::memory_order_acquire);
+    if (!command)
+        lens_pinned = false;
     Status status{};
     status.frame_count = ++frames;
     status.hook_calls = gHookCalls.load();
@@ -688,8 +697,10 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     status.ack_command = seen;
     status.phase = phase;
     auto finish = [&](State state, unsigned error, const char* message) {
-        if (state == State::Fault || state == State::Stopped || state == State::Unsupported)
+        if (state == State::Fault || state == State::Stopped || state == State::Unsupported) {
+            lens_pinned = false;
             confetti::disable();
+        }
         // Keep the first specific fault message: the per-frame fallback on the
         // next view would otherwise replace it before the editor reads it.
         if (state == State::Fault && error) {
@@ -713,6 +724,9 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
             message = "Native effect restoration failed; retry Stop / restore.";
         }
         status.effect_count = gEffects.count;
+        gGameplayCameraActive.store(
+            !error && command && !(command->wire.flags & kGamePov) &&
+            (state == State::Armed || state == State::Playing || state == State::Completed));
         status.effect_error = gEffects.error;
         status.effect_frames = gEffects.frames;
         status.effect_phase = gEffects.phase;
@@ -801,10 +815,11 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     const auto confetti_height = float((c.flags >> kConfettiHeightShift) & kConfettiHeightMask);
     const bool confetti_despawn = (c.flags & kConfettiDespawnOnGround) != 0;
     const int confetti_preset = int((c.flags >> kParticlePresetShift) & kParticlePresetMask);
-    const auto confetti_intensity_raw = (c.flags >> kParticleIntensityShift) & kParticleIntensityMask;
+    const auto confetti_intensity_raw =
+        (c.flags >> kParticleIntensityShift) & kParticleIntensityMask;
     // Zero means "not sent"; older editors keep the original 1.0x intensity.
-    const float confetti_intensity = confetti_intensity_raw
-        ? float(confetti_intensity_raw) / 20.0f : 1.0f;
+    const float confetti_intensity =
+        confetti_intensity_raw ? float(confetti_intensity_raw) / 20.0f : 1.0f;
     if (c.mode == std::uint32_t(Mode::Release)) {
         finish(State::Stopped, 0, "Native camera released; the game owns the view.");
         return;
@@ -992,12 +1007,17 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
                    "Native flight produced an invalid camera; camera released.");
             return;
         }
-        double fov = original_fov;
+        if (!lens_pinned) {
+            pinned_fov = original_fov > 1.0 ? original_fov : 90.0;
+            pinned_aspect = original_aspect > 0.01 ? original_aspect : 16.0 / 9.0;
+            lens_pinned = true;
+        }
+        double fov = pinned_fov;
         if (c.flags & kAspect) {
             constexpr double pi = 3.14159265358979323846;
-            fov = 2 * 180 / pi *
-                  std::atan(std::tan(double(original_fov) * pi / 360) * manual_pose[6] /
-                            original_aspect);
+            fov =
+                2 * 180 / pi *
+                std::atan(std::tan(double(pinned_fov) * pi / 360) * manual_pose[6] / pinned_aspect);
         }
         if (!std::isfinite(fov) || fov <= 1 || fov >= 179) {
             fault = 17;
@@ -1029,8 +1049,8 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         confetti::Camera confetti_camera{
             {xyz[0], xyz[1], xyz[2]}, {angles[0], angles[1], angles[2]}, float(fov)};
         confetti::on_frame(demo.time, demo.playing, demo.seeking, &confetti_camera,
-                           confetti_enabled, confetti_height, confetti_despawn,
-                           confetti_preset, confetti_intensity);
+                           confetti_enabled, confetti_height, confetti_despawn, confetti_preset,
+                           confetti_intensity);
         finish(State::Armed, 0,
                c.mode == std::uint32_t(Mode::Manual)
                    ? "Native free camera updates each rendered main view."
@@ -1196,13 +1216,18 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         applied = blend_attach_poses(applied, destination, blend_weight);
     }
     player_capture::set_hidden_handles(hidden_current, hidden_arriving, 5);
-    double fov = original_fov;
+    if (!lens_pinned) {
+        pinned_fov = original_fov > 1.0 ? original_fov : 90.0;
+        pinned_aspect = original_aspect > 0.01 ? original_aspect : 16.0 / 9.0;
+        lens_pinned = true;
+    }
+    double fov = pinned_fov;
     if (c.flags & kAspect) {
         // SetUpView has already scaled the original camera FOV by current aspect.
         // Replace that factor, preserving the game's base lens and viewport ratio.
         constexpr double pi = 3.14159265358979323846;
         fov = 2 * 180 / pi *
-              std::atan(std::tan(double(original_fov) * pi / 360) * applied[6] / original_aspect);
+              std::atan(std::tan(double(pinned_fov) * pi / 360) * applied[6] / pinned_aspect);
         if (!std::isfinite(fov) || fov <= 1 || fov >= 179) {
             fault = 17;
             finish(State::Fault, fault, "Native aspect produced an unsupported field of view.");
@@ -1341,6 +1366,12 @@ static DWORD WINAPI worker(void*) {
         // Collect shader metadata during hideout/replay loading, not only after
         // the first camera command (when character shaders may already exist).
         // Keep disk hashing off the render callback and retain the exact gate.
+        if (!install_gameplay_effect_filter(client)) {
+            startup_status(
+                State::Unsupported, 47,
+                "The selected-player effect filter could not be verified; no camera ownership was enabled.");
+            return 0;
+        }
         const auto scene_module = GetModuleHandleW(L"scenesystem.dll");
         player_capture::configure(reinterpret_cast<std::uintptr_t>(scene_module),
                                   scene_module != nullptr && hash_file(module_path(scene_module)) ==

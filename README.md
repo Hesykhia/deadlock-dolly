@@ -62,6 +62,13 @@ default: advance the replay, frame the next view and capture again.
 speed and mouse sensitivity are saved from **Settings → Controls & keybinds**. Capture also works
 while the replay is playing and leaves it paused.
 
+Returning from hero selection to Dolly's native camera keeps the chosen view
+and switches the underlying game camera to Free Cam. The native camera also
+filters death desaturation and hides the game's player screen-particle layer
+(including damage borders and low-health pulses) while it owns the view.
+F9 restores the previous spectator mode and its effects; the separate
+Player POV export keeps the game's selected-player view and effects.
+
 In the F8 panel, use **Playback speed**, **Updates / s** and **Show path guides**.
 Guides appear in paused flight and hide during playback. Native camera and
 supported effects follow each rendered frame; Updates / s controls monitoring.

@@ -1434,6 +1434,7 @@ class Controller:
                         if owner not in ("panel", "flight", "console", "game_ui"):
                             owner = "panel"
                     armed = bridge.start_flight(self._demo.name)
+                    self._detach_spectator_view()
                     bridge.configure_editor(owner=owner)
                     self._require_native_demo(armed)
                     if not armed.get("paused") or int(armed["tick"]) != int(current["tick"]):
@@ -1986,6 +1987,7 @@ class Controller:
                 bridge.prepare(project, shot_time, 1.0, True, self._demo.name)
                 self._native_active = True
                 self._native_manual = True
+                self._detach_spectator_view()
                 status = bridge.status()
                 self._require_native_demo(status)
                 frame = self._native_pose(status)
@@ -2033,6 +2035,7 @@ class Controller:
             try:
                 bridge.prepare(preview, shot_time, 1.0, True, self._demo.name)
                 result = bridge.start_flight(self._demo.name, owner="panel")
+                self._detach_spectator_view()
                 self._require_native_demo(result)
                 if not result.get("paused") or int(result["tick"]) != int(current["tick"]):
                     raise RuntimeError("The replay moved while applying DOF. Pause it and retry.")
@@ -2100,10 +2103,17 @@ class Controller:
             if isinstance(pose, dict):
                 pose = tuple(pose[name] for name in ("x", "y", "z", "pitch", "yaw", "roll", "aspect_ratio"))
             options = {"owner": owner} if owner != "flight" else {}
+            armed = None
             try:
                 armed = bridge.start_flight(self._demo.name, pose=pose, cancelled=cancelled,
                                             playback=None, **options)
+                self._native_active = self._native_manual = True
+                self._detach_spectator_view()
             except Exception:
+                if armed is not None:
+                    # A failed spectator switch must not leave the successfully
+                    # armed native camera hidden behind the recovered game UI.
+                    self._release_native_camera()
                 # start_flight releases its command on failure. Do not leave
                 # stale ownership that would make the next retry hold a path
                 # the bridge no longer has (notably after attach faults).
@@ -2199,6 +2209,7 @@ class Controller:
                 restoration_error = self._restore_playback_settings()
                 if restoration_error:
                     raise RuntimeError(restoration_error)
+                self._restore_spectator_view()
                 self._request("citadel_hud_visible 1; citadel_hide_replay_hud 0; hud_free_cursor 1")
                 self._verify_game_ui_values({"citadel_hud_visible": 1, "citadel_hide_replay_hud": 0, "hud_free_cursor": 1})
                 self._game_ui_visible = True
@@ -2213,6 +2224,32 @@ class Controller:
                     configure(owner="flight")
             self._game_ui_visible = False
             return self.status()
+
+    def _detach_spectator_view(self):
+        """Detach game hero effects only after native has captured the view.
+
+        Hiding the HUD and overriding the camera pose do not leave PlayerView:
+        the selected hero can still drive death effects behind Dolly's camera.
+        Switching first would lose the hero view used to seed a new camera.
+        POV recording deliberately never calls this helper.
+        """
+        name = "citadel_spectator_mode"
+        current = read_cvar_value(name, self._request(name))
+        if current not in (0, 1, 2, 3):
+            raise RuntimeError("The game's spectator mode is unrecognized; camera handoff stopped.")
+        self._game_ui_restore.setdefault(name, current)
+        if current != 1:
+            self._request(name + " 1")
+            self._verify_game_ui_values({name: 1})
+
+    def _restore_spectator_view(self):
+        """Return F9 to the user's selected viewing mode, retaining its target."""
+        name = "citadel_spectator_mode"
+        if name in self._game_ui_restore:
+            value = self._game_ui_restore[name]
+            self._request(name + " " + numeric(value))
+            self._verify_game_ui_values({name: value})
+            del self._game_ui_restore[name]
 
     def _remember_game_ui_settings(self):
         names = ("citadel_hud_visible", "citadel_hide_replay_hud", "hud_free_cursor")
@@ -2942,6 +2979,7 @@ class Controller:
                 self._check_position_cancelled()
                 bridge.prepare(project, shot_time, 1.0, True, self._demo.name)
                 self._native_active = self._native_manual = True
+                self._detach_spectator_view()
                 status = bridge.status()
                 self._require_native_demo(status)
                 if not status.get("paused") or int(status["tick"]) != int(positioned_demo["tick"]):
@@ -3090,6 +3128,7 @@ class Controller:
                         self._request(command)
                     self._native_active = True
                     native.prepare(project, start, speed, bool(frozen), self._demo.name)
+                    self._detach_spectator_view()
                     self._native_last_status = native.status()
                     self._require_native_demo(self._native_last_status)
                     if frozen and (not self._native_last_status.get("paused") or

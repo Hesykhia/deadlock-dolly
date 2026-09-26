@@ -6,7 +6,7 @@ namespace dolly::confetti {
 
 // Protocol-stable preset ids: append only, never reorder. The Python registry
 // mirrors this count and tests assert the two stay in step.
-constexpr int kPresetCount = 6;
+constexpr int kPresetCount = 8;
 
 struct Camera {
     struct Vec3 {
