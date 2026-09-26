@@ -17,11 +17,15 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 
+from .particles import (PARTICLE_DEFAULT, PARTICLE_IDS, PARTICLE_INTENSITY_DEFAULT,
+                        PARTICLE_INTENSITY_MAX, PARTICLE_INTENSITY_MIN)
+
 
 FORMAT_NAME = "deadlock-dolly"
 FORMAT_VERSION = 2
 VECTOR_FORMAT_VERSION = 3
 CONFETTI_FORMAT_VERSION = 7
+PARTICLE_FORMAT_VERSION = 8
 CONFETTI_SPAWN_HEIGHT_DEFAULT = 250.0
 CONFETTI_SPAWN_HEIGHT_MIN = 100.0
 CONFETTI_SPAWN_HEIGHT_MAX = 1500.0
@@ -403,6 +407,8 @@ class Project:
     confetti_enabled: bool = False
     confetti_spawn_height: float = CONFETTI_SPAWN_HEIGHT_DEFAULT
     confetti_despawn_on_ground: bool = False
+    particles_preset: str = PARTICLE_DEFAULT
+    particles_intensity: float = PARTICLE_INTENSITY_DEFAULT
 
     def validate(self) -> None:
         if not isinstance(self.name, str) or len(self.name) > 256:
@@ -419,6 +425,13 @@ class Project:
                 f"and {CONFETTI_SPAWN_HEIGHT_MAX:g} units")
         if not isinstance(self.confetti_despawn_on_ground, bool):
             raise ValueError("Confetti despawn on ground must be true or false")
+        if self.particles_preset not in PARTICLE_IDS:
+            raise ValueError("Choose a particle preset from the library")
+        intensity = _finite(self.particles_intensity, "Particle intensity")
+        if not PARTICLE_INTENSITY_MIN <= intensity <= PARTICLE_INTENSITY_MAX:
+            raise ValueError(
+                f"Particle intensity must be between {PARTICLE_INTENSITY_MIN:g} "
+                f"and {PARTICLE_INTENSITY_MAX:g}")
         standard_aspect = _finite(self.standard_aspect, "Standard aspect ratio")
         if not ASPECT_MIN <= standard_aspect <= ASPECT_MAX:
             raise ValueError(f"Standard aspect ratio must be between {ASPECT_MIN:g} and {ASPECT_MAX:g}")
@@ -566,9 +579,13 @@ class Project:
             version = VECTOR_FORMAT_VERSION
         else:
             version = FORMAT_VERSION
-        if (self.confetti_enabled or self.confetti_spawn_height != CONFETTI_SPAWN_HEIGHT_DEFAULT or
-                self.confetti_despawn_on_ground):
-            version = CONFETTI_FORMAT_VERSION
+        particles_used = (self.confetti_enabled or
+                          self.confetti_spawn_height != CONFETTI_SPAWN_HEIGHT_DEFAULT or
+                          self.confetti_despawn_on_ground or
+                          self.particles_preset != PARTICLE_DEFAULT or
+                          self.particles_intensity != PARTICLE_INTENSITY_DEFAULT)
+        if particles_used:
+            version = PARTICLE_FORMAT_VERSION
         return {
             "format": FORMAT_NAME,
             "version": version,
@@ -579,9 +596,10 @@ class Project:
             "lens_interpolation": self.lens_interpolation,
             **({"confetti_enabled": self.confetti_enabled,
                 "confetti_spawn_height": self.confetti_spawn_height,
-                "confetti_despawn_on_ground": self.confetti_despawn_on_ground}
-               if (self.confetti_enabled or self.confetti_spawn_height != CONFETTI_SPAWN_HEIGHT_DEFAULT or
-                   self.confetti_despawn_on_ground) else {}),
+                "confetti_despawn_on_ground": self.confetti_despawn_on_ground,
+                "particles_preset": self.particles_preset,
+                "particles_intensity": self.particles_intensity}
+               if particles_used else {}),
             "start_tick": self.start_tick,
             "tick_rate": self.tick_rate,
             "setup_values": {name: _json_cvar_value(value) for name, value in self.setup_values.items()},
@@ -601,9 +619,9 @@ class Project:
         if isinstance(version, bool) or not isinstance(version, int) \
                 or version not in (1, FORMAT_VERSION, VECTOR_FORMAT_VERSION, ATTACH_FORMAT_VERSION,
                                    ROTATION_FORMAT_VERSION, BLEND_FORMAT_VERSION,
-                                   CONFETTI_FORMAT_VERSION):
+                                   CONFETTI_FORMAT_VERSION, PARTICLE_FORMAT_VERSION):
             raise ValueError(f"Unsupported project version: {version!r}; expected 1 through "
-                             f"{CONFETTI_FORMAT_VERSION}")
+                             f"{PARTICLE_FORMAT_VERSION}")
         allowed = ("format", "version", "name", "interpolation", "rotation_mode",
                    "start_tick", "tick_rate", "setup_values", "keyframes", "tracks")
         if version >= FORMAT_VERSION:
@@ -611,11 +629,16 @@ class Project:
             for required in ("standard_aspect", "lens_interpolation"):
                 if required not in obj:
                     raise ValueError(f"Project version {version} is missing required field: {required}")
-        if version == CONFETTI_FORMAT_VERSION:
+        if version >= CONFETTI_FORMAT_VERSION:
             allowed += ("confetti_enabled", "confetti_spawn_height",
                         "confetti_despawn_on_ground")
             for required in ("confetti_enabled", "confetti_spawn_height",
                              "confetti_despawn_on_ground"):
+                if required not in obj:
+                    raise ValueError(f"Project version {version} is missing required field: {required}")
+        if version >= PARTICLE_FORMAT_VERSION:
+            allowed += ("particles_preset", "particles_intensity")
+            for required in ("particles_preset", "particles_intensity"):
                 if required not in obj:
                     raise ValueError(f"Project version {version} is missing required field: {required}")
         _members(obj, allowed, "project")
@@ -691,7 +714,10 @@ class Project:
                       confetti_enabled=obj.get("confetti_enabled", False),
                       confetti_spawn_height=obj.get("confetti_spawn_height",
                                                     CONFETTI_SPAWN_HEIGHT_DEFAULT),
-                      confetti_despawn_on_ground=obj.get("confetti_despawn_on_ground", False))
+                      confetti_despawn_on_ground=obj.get("confetti_despawn_on_ground", False),
+                      particles_preset=obj.get("particles_preset", PARTICLE_DEFAULT),
+                      particles_intensity=obj.get("particles_intensity",
+                                                  PARTICLE_INTENSITY_DEFAULT))
         project.validate()
         if version < VECTOR_FORMAT_VERSION and (
                 any(name in CVAR_COMPONENTS for name in project.setup_values)

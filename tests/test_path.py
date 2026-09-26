@@ -17,7 +17,7 @@ class PathTests(unittest.TestCase):
                           confetti_spawn_height=1200,
                           confetti_despawn_on_ground=True)
         encoded = project.to_dict()
-        self.assertEqual(encoded["version"], 7)
+        self.assertEqual(encoded["version"], 8)
         self.assertIs(encoded["confetti_enabled"], True)
         self.assertEqual(encoded["confetti_spawn_height"], 1200)
         self.assertIs(encoded["confetti_despawn_on_ground"], True)
@@ -27,6 +27,28 @@ class PathTests(unittest.TestCase):
             Project(confetti_enabled=1).validate()
         with self.assertRaisesRegex(ValueError, "between 100 and 1500"):
             Project(confetti_spawn_height=50).validate()
+
+    def test_particle_preset_and_intensity_are_versioned_settings(self):
+        project = Project(keyframes=[key(0)], confetti_enabled=True,
+                          particles_preset="snow_heavy", particles_intensity=1.5)
+        encoded = project.to_dict()
+        self.assertEqual(encoded["version"], 8)
+        self.assertEqual(encoded["particles_preset"], "snow_heavy")
+        self.assertEqual(encoded["particles_intensity"], 1.5)
+        self.assertEqual(Project.from_dict(encoded), project)
+        with self.assertRaisesRegex(ValueError, "preset"):
+            Project(particles_preset="missing").validate()
+        with self.assertRaisesRegex(ValueError, "between 0.25 and 3"):
+            Project(particles_intensity=9).validate()
+
+    def test_version_7_shots_gain_particle_defaults(self):
+        legacy = Project(keyframes=[key(0)], confetti_enabled=True,
+                         confetti_spawn_height=900).to_dict()
+        legacy["version"] = 7
+        del legacy["particles_preset"], legacy["particles_intensity"]
+        restored = Project.from_dict(legacy)
+        self.assertEqual(restored.particles_preset, "confetti")
+        self.assertEqual(restored.particles_intensity, 1.0)
 
     def test_vector_dof_text_and_project_roundtrip(self):
         name = "r_dof_override_ranges"

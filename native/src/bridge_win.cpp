@@ -800,6 +800,11 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     const bool confetti_enabled = (c.flags & kConfetti) != 0;
     const auto confetti_height = float((c.flags >> kConfettiHeightShift) & kConfettiHeightMask);
     const bool confetti_despawn = (c.flags & kConfettiDespawnOnGround) != 0;
+    const int confetti_preset = int((c.flags >> kParticlePresetShift) & kParticlePresetMask);
+    const auto confetti_intensity_raw = (c.flags >> kParticleIntensityShift) & kParticleIntensityMask;
+    // Zero means "not sent"; older editors keep the original 1.0x intensity.
+    const float confetti_intensity = confetti_intensity_raw
+        ? float(confetti_intensity_raw) / 20.0f : 1.0f;
     if (c.mode == std::uint32_t(Mode::Release)) {
         finish(State::Stopped, 0, "Native camera released; the game owns the view.");
         return;
@@ -1024,7 +1029,8 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         confetti::Camera confetti_camera{
             {xyz[0], xyz[1], xyz[2]}, {angles[0], angles[1], angles[2]}, float(fov)};
         confetti::on_frame(demo.time, demo.playing, demo.seeking, &confetti_camera,
-                           confetti_enabled, confetti_height, confetti_despawn);
+                           confetti_enabled, confetti_height, confetti_despawn,
+                           confetti_preset, confetti_intensity);
         finish(State::Armed, 0,
                c.mode == std::uint32_t(Mode::Manual)
                    ? "Native free camera updates each rendered main view."
@@ -1078,7 +1084,7 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
                                 {original_angles[0], original_angles[1], original_angles[2]},
                                 original_fov};
         confetti::on_frame(demo.time, demo.playing, demo.seeking, &camera, confetti_enabled,
-                           confetti_height, confetti_despawn);
+                           confetti_height, confetti_despawn, confetti_preset, confetti_intensity);
         player_capture::set_hidden_handles(0, 0, 5);
         if (c.mode == std::uint32_t(Mode::Play)) {
             video::publish_path_replay_time(true, phase);
@@ -1230,7 +1236,7 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     confetti::Camera confetti_camera{
         {xyz[0], xyz[1], xyz[2]}, {angles[0], angles[1], angles[2]}, float(fov)};
     confetti::on_frame(demo.time, demo.playing, demo.seeking, &confetti_camera, confetti_enabled,
-                       confetti_height, confetti_despawn);
+                       confetti_height, confetti_despawn, confetti_preset, confetti_intensity);
     if (c.mode == std::uint32_t(Mode::Play)) {
         video::publish_path_replay_time(true, phase);
         player_capture::publish_replay_time(phase);
@@ -1411,7 +1417,9 @@ static DWORD WINAPI worker(void*) {
                                                     control.mode == std::uint32_t(Mode::Manual))) ||
                     ((control.flags & kConfetti) &&
                      (((control.flags >> kConfettiHeightShift) & kConfettiHeightMask) < 100 ||
-                      ((control.flags >> kConfettiHeightShift) & kConfettiHeightMask) > 1500)) ||
+                      ((control.flags >> kConfettiHeightShift) & kConfettiHeightMask) > 1500 ||
+                      ((control.flags >> kParticlePresetShift) & kParticlePresetMask) >=
+                          confetti::kPresetCount)) ||
                     !std::isfinite(control.start_phase) || control.start_phase < 0 ||
                     !std::isfinite(control.speed) || control.speed < .05 || control.speed > 4 ||
                     !std::memchr(control.demo_name, 0, sizeof(control.demo_name))) {

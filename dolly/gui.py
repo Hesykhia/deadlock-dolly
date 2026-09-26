@@ -37,6 +37,8 @@ from dolly.path import (AttachKey, CONFETTI_SPAWN_HEIGHT_DEFAULT, CURVE_CHANNELS
                         CvarTrack, Keyframe, Project, TrackKey, parse_cvar_value,
                         format_cvar_value)
 from dolly.settings import AppSettings, load_settings, save_settings
+from dolly.particles import (LABEL_TO_ID, PARTICLE_DEFAULT, PARTICLE_INTENSITY_DEFAULT,
+                             PARTICLE_INTENSITY_MAX, PARTICLE_INTENSITY_MIN, PARTICLE_LABELS)
 from dolly.smoothing import smoothing_window
 from dolly.video_export import (ACTIVE_STATES, BITRATE_PRESETS, CODEC_BY_KEY, CODEC_CHOICES,
                                 CODEC_LABEL_TO_KEY, DEFAULT_CODEC_KEY, VideoExport, VideoOptions,
@@ -147,6 +149,8 @@ class DollyApp:
         self.confetti_enabled = tk.BooleanVar(value=False)
         self.confetti_spawn_height = tk.StringVar(value=_number(CONFETTI_SPAWN_HEIGHT_DEFAULT))
         self.confetti_despawn_on_ground = tk.BooleanVar(value=False)
+        self.particles_preset = tk.StringVar(value=PARTICLE_LABELS[PARTICLE_DEFAULT])
+        self.particles_intensity = tk.StringVar(value=_number(PARTICLE_INTENSITY_DEFAULT))
         self.selected_text = tk.StringVar(value="No camera selected")
         self.path_summary = tk.StringVar(value="0 cameras · 0.00 s")
         self.coordinates_dialog = None
@@ -586,6 +590,8 @@ class DollyApp:
                     confetti_enabled=self.project.confetti_enabled,
                     confetti_spawn_height=self.project.confetti_spawn_height,
                     confetti_despawn_on_ground=self.project.confetti_despawn_on_ground,
+                    particles_preset=self.project.particles_preset,
+                    particles_intensity=self.project.particles_intensity,
                     tick_rate=self.project.tick_rate,
                     keyframes=[Keyframe(0, 0, 0, 0, 0, 0, 0), Keyframe(duration, 0, 0, 0, 0, 0, 0)])
             codec_key = CODEC_LABEL_TO_KEY.get(self.video_codec.get(), DEFAULT_CODEC_KEY)
@@ -2371,20 +2377,32 @@ class DollyApp:
         ttk.Button(intro, text="Fixed values…", command=self._show_fixed_values).pack(side="right", padx=(8, 0))
         ttk.Button(intro, text="+ Citadel DOF", command=self._dof_preset).pack(side="right", padx=(8, 0))
         ttk.Button(intro, text="+ Range DOF", command=self._range_dof_preset).pack(side="right")
-        confetti = ttk.Frame(tab, style="Card.TFrame", padding=(10, 8))
-        confetti.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        ttk.Label(confetti, text="CONFETTI", style="CardMuted.TLabel").pack(side="left")
-        ttk.Checkbutton(confetti, text="Enable rain", variable=self.confetti_enabled,
-                        command=self._confetti_changed).pack(side="left", padx=(18, 0))
-        ttk.Label(confetti, text="Spawn height", style="CardMuted.TLabel").pack(side="left", padx=(18, 5))
-        height = ttk.Entry(confetti, textvariable=self.confetti_spawn_height, width=7)
+        particles = ttk.Frame(tab, style="Card.TFrame", padding=(10, 8))
+        particles.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        ttk.Label(particles, text="PARTICLES", style="CardMuted.TLabel").pack(side="left")
+        ttk.Checkbutton(particles, text="Enable", variable=self.confetti_enabled,
+                        command=self._particles_changed).pack(side="left", padx=(16, 0))
+        preset = ttk.Combobox(particles, textvariable=self.particles_preset, width=17,
+                              state="readonly",
+                              values=[PARTICLE_LABELS[name] for name in PARTICLE_LABELS])
+        preset.pack(side="left", padx=(10, 0))
+        preset.bind("<<ComboboxSelected>>", lambda _event: self._particles_changed())
+        ttk.Label(particles, text="Intensity", style="CardMuted.TLabel").pack(side="left", padx=(10, 5))
+        intensity = ttk.Entry(particles, textvariable=self.particles_intensity, width=5)
+        intensity.pack(side="left")
+        intensity.bind("<Return>", lambda _event: self._particles_changed())
+        intensity.bind("<FocusOut>", lambda _event: self._particles_changed())
+        ttk.Label(particles, text=f"x ({PARTICLE_INTENSITY_MIN:g}–{PARTICLE_INTENSITY_MAX:g})",
+                  style="CardMuted.TLabel").pack(side="left", padx=(4, 10))
+        ttk.Label(particles, text="Height", style="CardMuted.TLabel").pack(side="left", padx=(0, 5))
+        height = ttk.Entry(particles, textvariable=self.confetti_spawn_height, width=7)
         height.pack(side="left")
-        height.bind("<Return>", lambda _event: self._confetti_changed())
-        height.bind("<FocusOut>", lambda _event: self._confetti_changed())
-        ttk.Label(confetti, text="units (100–1500)", style="CardMuted.TLabel").pack(side="left", padx=(4, 14))
-        ttk.Checkbutton(confetti, text="Despawn on ground",
+        height.bind("<Return>", lambda _event: self._particles_changed())
+        height.bind("<FocusOut>", lambda _event: self._particles_changed())
+        ttk.Label(particles, text="units (100–1500)", style="CardMuted.TLabel").pack(side="left", padx=(4, 12))
+        ttk.Checkbutton(particles, text="Despawn on ground",
                         variable=self.confetti_despawn_on_ground,
-                        command=self._confetti_changed).pack(side="left")
+                        command=self._particles_changed).pack(side="left")
         body = ttk.Frame(tab)
         body.grid(row=2, column=0, sticky="nsew")
         body.columnconfigure(0, weight=2, minsize=255)
@@ -2458,20 +2476,28 @@ class DollyApp:
         self.setup_tree.bind("<<TreeviewSelect>>", self._select_fixed)
         self.fixed_dialog.withdraw()
 
-    def _confetti_changed(self):
+    def _particles_changed(self):
         def operation():
             self._sync_options()
-            self.controller.set_native_confetti(
+            self.controller.set_native_particles(
                 self.project.confetti_enabled,
                 self.project.confetti_spawn_height,
                 self.project.confetti_despawn_on_ground,
+                self.project.particles_preset,
+                self.project.particles_intensity,
             )
-            self.status_text.set(
-                (f"Confetti rain enabled at {self.project.confetti_spawn_height:g} units; "
-                 + ("despawns on ground." if self.project.confetti_despawn_on_ground
-                    else "remains on the ground."))
-                if self.project.confetti_enabled else "Confetti rain disabled for this shot.")
-        self._guard("Confetti", operation)
+            label = PARTICLE_LABELS.get(self.project.particles_preset,
+                                        self.project.particles_preset)
+            if not self.project.confetti_enabled:
+                self.status_text.set(f"{label} disabled for this shot.")
+                return
+            message = (f"{label} enabled at {self.project.confetti_spawn_height:g} units, "
+                       f"intensity {self.project.particles_intensity:g}x")
+            if self.project.particles_preset == PARTICLE_DEFAULT:
+                message += (". Despawns on ground." if self.project.confetti_despawn_on_ground
+                            else ". Remains on the ground.")
+            self.status_text.set(message)
+        self._guard("Particles", operation)
 
     def _show_fixed_values(self):
         self.fixed_dialog.deiconify()
@@ -3004,15 +3030,24 @@ class DollyApp:
         confetti_enabled = getattr(self, "confetti_enabled", None)
         confetti_height = getattr(self, "confetti_spawn_height", None)
         confetti_despawn = getattr(self, "confetti_despawn_on_ground", None)
+        preset_variable = getattr(self, "particles_preset", None)
+        intensity_variable = getattr(self, "particles_intensity", None)
         values = dict(start_tick=int(tick), tick_rate=rate, interpolation=self.interpolation.get(),
                       rotation_mode=self.rotation.get(), standard_aspect=self._read_standard_aspect(),
                       lens_interpolation=self.lens_interpolation.get(),
                       confetti_enabled=(bool(confetti_enabled.get()) if confetti_enabled is not None
                                         else self.project.confetti_enabled),
-                      confetti_spawn_height=(_finite(confetti_height.get(), "Confetti spawn height")
+                      confetti_spawn_height=(_finite(confetti_height.get(), "Particle spawn height")
                                              if confetti_height is not None else self.project.confetti_spawn_height),
                       confetti_despawn_on_ground=(bool(confetti_despawn.get()) if confetti_despawn is not None
-                                                  else self.project.confetti_despawn_on_ground))
+                                                  else self.project.confetti_despawn_on_ground),
+                      particles_preset=(LABEL_TO_ID.get(preset_variable.get(),
+                                                        self.project.particles_preset)
+                                        if preset_variable is not None
+                                        else self.project.particles_preset),
+                      particles_intensity=(_finite(intensity_variable.get(), "Particle intensity")
+                                           if intensity_variable is not None
+                                           else self.project.particles_intensity))
         changed = any(getattr(self.project, name) != value for name, value in values.items())
         if changed:
             candidate = copy.deepcopy(self.project)
@@ -3962,6 +3997,10 @@ class DollyApp:
             self.confetti_enabled.set(self.project.confetti_enabled)
             self.confetti_spawn_height.set(_number(self.project.confetti_spawn_height))
             self.confetti_despawn_on_ground.set(self.project.confetti_despawn_on_ground)
+        if hasattr(self, "particles_preset"):
+            self.particles_preset.set(PARTICLE_LABELS.get(self.project.particles_preset,
+                                                          self.project.particles_preset))
+            self.particles_intensity.set(_number(self.project.particles_intensity))
         self.controller.standard_aspect = self.project.standard_aspect
         self._refresh_keys()
         self._refresh_tracks()

@@ -23,6 +23,8 @@ import uuid
 from .native_effects import compile_shot, EFFECTS
 from .path import (CONFETTI_SPAWN_HEIGHT_DEFAULT, CONFETTI_SPAWN_HEIGHT_MAX,
                    CONFETTI_SPAWN_HEIGHT_MIN)
+from .particles import (PARTICLE_DEFAULT, PARTICLE_IDS, PARTICLE_INTENSITY_DEFAULT,
+                        PARTICLE_INTENSITY_MAX, PARTICLE_INTENSITY_MIN)
 from .runtime import resource_root
 from .media_transport import MediaTransport
 
@@ -30,6 +32,17 @@ ABI = 4
 CONFETTI_FLAG = 8
 CONFETTI_DESPAWN_FLAG = 32
 CONFETTI_HEIGHT_SHIFT = 16
+PARTICLE_PRESET_SHIFT = 6
+PARTICLE_PRESET_MASK = 0xF
+PARTICLE_INTENSITY_SHIFT = 10
+PARTICLE_INTENSITY_MASK = 0x3F
+PARTICLE_INTENSITY_SCALE = 20
+
+
+def _intensity_bits(value: float) -> int:
+    """Quantise intensity for the six flag bits; zero means 'not sent'."""
+    raw = int(round(float(value) * PARTICLE_INTENSITY_SCALE))
+    return max(2, min(PARTICLE_INTENSITY_MASK, raw))
 CONTROL_BYTES = 2 * 1024 * 1024
 MAPPING_BYTES = CONTROL_BYTES + 24576
 PAYLOAD_OFFSET = 1024
@@ -170,6 +183,8 @@ class NativeBridge(MediaTransport):
         self._confetti_enabled = False
         self._confetti_spawn_height = round(CONFETTI_SPAWN_HEIGHT_DEFAULT)
         self._confetti_despawn_on_ground = False
+        self._particles_preset = PARTICLE_DEFAULT
+        self._particles_intensity = PARTICLE_INTENSITY_DEFAULT
         self._start = 0.0
         self._speed = 1.0
         self._demo = b""
@@ -430,6 +445,8 @@ class NativeBridge(MediaTransport):
             self._confetti_enabled = project.confetti_enabled
             self._confetti_spawn_height = round(project.confetti_spawn_height)
             self._confetti_despawn_on_ground = project.confetti_despawn_on_ground
+            self._particles_preset = project.particles_preset
+            self._particles_intensity = float(project.particles_intensity)
             self._flags = self._compose_flags()
             command = self._publish(1, payload)
             try:
@@ -445,7 +462,9 @@ class NativeBridge(MediaTransport):
         if self._confetti_enabled:
             confetti = (CONFETTI_FLAG |
                         (CONFETTI_DESPAWN_FLAG if self._confetti_despawn_on_ground else 0) |
-                        (self._confetti_spawn_height << CONFETTI_HEIGHT_SHIFT))
+                        (self._confetti_spawn_height << CONFETTI_HEIGHT_SHIFT) |
+                        (PARTICLE_IDS.index(self._particles_preset) << PARTICLE_PRESET_SHIFT) |
+                        (_intensity_bits(self._particles_intensity) << PARTICLE_INTENSITY_SHIFT))
         return (1 if self._frozen else 0) | (16 if getattr(self, "_pov", False) else 2) | (0 if self._relief else 4) | confetti
 
     def set_seek_relief(self, enabled):
@@ -461,22 +480,40 @@ class NativeBridge(MediaTransport):
             self._publish(self._mode, increment=False)
 
     def set_confetti(self, enabled, spawn_height=CONFETTI_SPAWN_HEIGHT_DEFAULT,
-                     despawn_on_ground=False):
-        """Apply confetti controls immediately to the active native view."""
+                     despawn_on_ground=False, *, preset=None, intensity=None):
+        """Apply particle controls immediately to the active native view."""
         if not isinstance(enabled, bool) or not isinstance(despawn_on_ground, bool):
-            raise ValueError("Confetti switches must be booleans")
-        height = _number(spawn_height, "Confetti spawn height", positive=True)
+            raise ValueError("Particle switches must be booleans")
+        height = _number(spawn_height, "Particle spawn height", positive=True)
         if not CONFETTI_SPAWN_HEIGHT_MIN <= height <= CONFETTI_SPAWN_HEIGHT_MAX:
             raise ValueError(
-                f"Confetti spawn height must be between {CONFETTI_SPAWN_HEIGHT_MIN:g} "
+                f"Particle spawn height must be between {CONFETTI_SPAWN_HEIGHT_MIN:g} "
                 f"and {CONFETTI_SPAWN_HEIGHT_MAX:g}")
+        if preset is not None and preset not in PARTICLE_IDS:
+            raise ValueError("Choose a particle preset from the library")
+        level = None
+        if intensity is not None:
+            level = _number(intensity, "Particle intensity", positive=True)
+            if not PARTICLE_INTENSITY_MIN <= level <= PARTICLE_INTENSITY_MAX:
+                raise ValueError(
+                    f"Particle intensity must be between {PARTICLE_INTENSITY_MIN:g} "
+                    f"and {PARTICLE_INTENSITY_MAX:g}")
         with self._operations, self._lock:
             self._check_open()
             self._confetti_enabled = enabled
             self._confetti_spawn_height = round(height)
             self._confetti_despawn_on_ground = despawn_on_ground
+            if preset is not None:
+                self._particles_preset = preset
+            if level is not None:
+                self._particles_intensity = level
             self._flags = self._compose_flags()
             self._publish(self._mode, increment=False)
+
+    def set_particles(self, enabled, spawn_height, despawn_on_ground, preset, intensity):
+        """Preset-aware entry point used by the editor's Particles panel."""
+        self.set_confetti(enabled, spawn_height, despawn_on_ground,
+                          preset=preset, intensity=intensity)
 
     def play(self, timeout=3):
         timeout = _number(timeout, "Native acknowledgment timeout")

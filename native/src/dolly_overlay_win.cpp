@@ -1321,9 +1321,9 @@ void draw_panel(const EditorSnapshot& state) {
                 }
                 end_panel_card();
                 if (begin_panel_card("##confetti-card")) {
-                    section_title("Confetti rain", "Native effect");
+                    section_title("Particles", "Native effect");
                     bool enabled = state.confetti_enabled;
-                    if (compact_checkbox("Enable rain", &enabled, panel_scale))
+                    if (compact_checkbox("Enable particles", &enabled, panel_scale))
                         editor_enqueue(EditorAction::SetConfettiEnabled, enabled ? 1 : 0);
                     static float height_draft = 250.0f;
                     static bool height_editing = false;
@@ -1339,7 +1339,7 @@ void draw_panel(const EditorSnapshot& state) {
                     bool despawn = state.confetti_despawn_on_ground;
                     if (compact_checkbox("Despawn on ground", &despawn, panel_scale))
                         editor_enqueue(EditorAction::SetConfettiDespawnOnGround, despawn ? 1 : 0);
-                    ImGui::TextDisabled("Rain follows the rendered camera and uses game time.");
+                    ImGui::TextDisabled("Preset is chosen in Dolly; it follows the rendered camera and game time.");
                 }
                 end_panel_card();
                 if (begin_panel_card("##dof-card")) {

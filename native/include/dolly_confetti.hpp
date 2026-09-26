@@ -4,6 +4,10 @@
 
 namespace dolly::confetti {
 
+// Protocol-stable preset ids: append only, never reorder. The Python registry
+// mirrors this count and tests assert the two stay in step.
+constexpr int kPresetCount = 6;
+
 struct Camera {
     struct Vec3 {
         float x{}, y{}, z{};
@@ -33,7 +37,8 @@ struct Diagnostics {
 bool initialize(std::uintptr_t client_base) noexcept;
 void disable() noexcept;
 void on_frame(double replay_time, bool replay_active, bool seeking, const Camera* camera,
-              bool enabled, float spawn_height, bool despawn_on_ground) noexcept;
+              bool enabled, float spawn_height, bool despawn_on_ground,
+              int preset, float intensity) noexcept;
 const char* status() noexcept;
 Diagnostics diagnostics() noexcept;
 

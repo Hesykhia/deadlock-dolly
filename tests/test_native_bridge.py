@@ -143,7 +143,20 @@ class NativeBridgeTests(unittest.TestCase):
         self.assertEqual(flags & nb.CONFETTI_FLAG, nb.CONFETTI_FLAG)
         self.assertEqual(flags & nb.CONFETTI_DESPAWN_FLAG, nb.CONFETTI_DESPAWN_FLAG)
         self.assertEqual(flags >> nb.CONFETTI_HEIGHT_SHIFT, 1250)
+        self.assertEqual((flags >> nb.PARTICLE_PRESET_SHIFT) & nb.PARTICLE_PRESET_MASK, 0)
+        self.assertEqual((flags >> nb.PARTICLE_INTENSITY_SHIFT) & nb.PARTICLE_INTENSITY_MASK, 20)
         self.bridge.release()
+
+    def test_particle_preset_and_intensity_update_live_flags(self):
+        self.bridge.set_particles(True, 1400, False, "snow_heavy", 2.0)
+        flags = self.header()[8]
+        self.assertEqual((flags >> nb.PARTICLE_PRESET_SHIFT) & nb.PARTICLE_PRESET_MASK,
+                         nb.PARTICLE_IDS.index("snow_heavy"))
+        self.assertEqual((flags >> nb.PARTICLE_INTENSITY_SHIFT) & nb.PARTICLE_INTENSITY_MASK, 40)
+        with self.assertRaisesRegex(ValueError, "preset"):
+            self.bridge.set_particles(True, 250, False, "missing", 1.0)
+        with self.assertRaisesRegex(ValueError, "between 0.25 and 3"):
+            self.bridge.set_particles(True, 250, False, "confetti", 9)
 
     def test_confetti_controls_update_live_flags_without_changing_command(self):
         sequence = self.header()[2]

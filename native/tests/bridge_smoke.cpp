@@ -1355,6 +1355,8 @@ void confetti_control_updates() {
     require(!read(), "Unchanged command should not be reprocessed");
     incoming.flags |= kConfetti | (250u << kConfettiHeightShift);
     require(read(), "Immediate confetti settings were ignored under the active command");
+    incoming.flags |= (1u << kParticlePresetShift) | (40u << kParticleIntensityShift);
+    require(read(), "Particle preset and intensity refresh were ignored under the active command");
     incoming.mode = std::uint32_t(Mode::Play);
     require(!read(), "Same-ID flag refresh must not change playback mode");
     incoming.mode = original.mode;
@@ -1367,7 +1369,7 @@ void confetti_control_updates() {
 
 void confetti_diagnostics_publish() {
     dolly::confetti::Camera camera{};
-    dolly::confetti::on_frame(10.0, true, false, &camera, true, 250.0f, false);
+    dolly::confetti::on_frame(10.0, true, false, &camera, true, 250.0f, false, 0, 1.0f);
     Fixture f;
     f.frame();
     const auto diag = f.confetti();

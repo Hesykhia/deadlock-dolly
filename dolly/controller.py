@@ -2045,8 +2045,17 @@ class Controller:
             self._message("Native DOF updated at the current camera.", time=shot_time, paused_flight=True)
             return deepcopy(frame)
 
+    def set_native_particles(self, enabled, spawn_height, despawn_on_ground, preset, intensity):
+        """Update the active particle preset without moving the camera."""
+        bridge = self._native_bridge()
+        setter = getattr(bridge, "set_particles", None)
+        if callable(setter):
+            setter(enabled, spawn_height, despawn_on_ground, preset, intensity)
+            return True
+        return False
+
     def set_native_confetti(self, enabled, spawn_height, despawn_on_ground):
-        """Update confetti without restarting or moving the active camera."""
+        """Backward-compatible path used by the in-game particle card."""
         bridge = self._native_bridge()
         setter = getattr(bridge, "set_confetti", None)
         if callable(setter):

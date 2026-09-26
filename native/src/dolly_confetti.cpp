@@ -25,21 +25,58 @@ constexpr double kRewindTolerance = 0.5;
 // 5,760 particles across the six colours. The above-250 regime already
 // saturates its cap (~85/s effective with a 12 s lifetime), so its emission
 // stays at 600/s total and the coverage grows 1.5x instead of 2x.
-constexpr float kCloseDepth = 720.0f, kCloseSpread = 600.0f, kCloseEmission = 720.0f;
-constexpr float kFarDepth = 1200.0f, kFarSpread = 900.0f, kFarEmission = 600.0f;
-constexpr std::array<const char*, 6> kPersistentEffects{
-    "particles/deadlock_cine/confetti_red.vpcf",    "particles/deadlock_cine/confetti_orange.vpcf",
-    "particles/deadlock_cine/confetti_yellow.vpcf", "particles/deadlock_cine/confetti_green.vpcf",
-    "particles/deadlock_cine/confetti_blue.vpcf",   "particles/deadlock_cine/confetti_purple.vpcf",
+// Per-preset tuning now lives in kPresets below; the confetti row keeps these
+// reviewed values exactly (720/600/720 close, 1200/900/600 far).
+// Preset library. Ids are protocol-stable: append only, never reorder, because
+// the editor sends the index. The tuning mirrors the original confetti model
+// (emission per second, forward depth, lateral spread, lifetime, size hint and
+// the downward origin shift of the close regime); snow entries start from the
+// same model and are tuned live. Despawn-on-ground uses the contact table when
+// a preset has one, and falls back to the persistent table otherwise.
+struct Preset {
+    const char* id;
+    std::array<const char*, 6> persistent;
+    std::array<const char*, 6> contact;
+    std::size_t persistent_count;
+    std::size_t contact_count;
+    float close_depth, close_spread, close_emission, close_duration, close_size, close_drop;
+    float far_depth, far_spread, far_emission, far_duration, far_size, far_drop;
 };
-constexpr std::array<const char*, 6> kContactEffects{
-    "particles/deadlock_cine/confetti_red_contact.vpcf",
-    "particles/deadlock_cine/confetti_orange_contact.vpcf",
-    "particles/deadlock_cine/confetti_yellow_contact.vpcf",
-    "particles/deadlock_cine/confetti_green_contact.vpcf",
-    "particles/deadlock_cine/confetti_blue_contact.vpcf",
-    "particles/deadlock_cine/confetti_purple_contact.vpcf",
-};
+constexpr std::array<Preset, kPresetCount> kPresets{{
+    {"confetti",
+     {"particles/deadlock_cine/confetti_red.vpcf",    "particles/deadlock_cine/confetti_orange.vpcf",
+      "particles/deadlock_cine/confetti_yellow.vpcf", "particles/deadlock_cine/confetti_green.vpcf",
+      "particles/deadlock_cine/confetti_blue.vpcf",   "particles/deadlock_cine/confetti_purple.vpcf"},
+     {"particles/deadlock_cine/confetti_red_contact.vpcf",
+      "particles/deadlock_cine/confetti_orange_contact.vpcf",
+      "particles/deadlock_cine/confetti_yellow_contact.vpcf",
+      "particles/deadlock_cine/confetti_green_contact.vpcf",
+      "particles/deadlock_cine/confetti_blue_contact.vpcf",
+      "particles/deadlock_cine/confetti_purple_contact.vpcf"},
+     6, 6,
+     720.0f, 600.0f, 720.0f, 8.0f, 7.0f, 0.4f,
+     1200.0f, 900.0f, 600.0f, 12.0f, 5.0f, 0.0f},
+    {"snow_flakes",
+     {"particles/event/christmas/christmas_hideout_exterior_snow_flakes.vpcf"}, {}, 1, 0,
+     720.0f, 600.0f, 320.0f, 8.0f, 6.0f, 0.3f,
+     1200.0f, 900.0f, 260.0f, 12.0f, 5.0f, 0.0f},
+    {"snow_long_fall",
+     {"particles/event/christmas/christmas_hideout_exterior_snow_flakes_longerfall.vpcf"}, {}, 1, 0,
+     720.0f, 600.0f, 320.0f, 10.0f, 6.0f, 0.3f,
+     1200.0f, 900.0f, 260.0f, 14.0f, 5.0f, 0.0f},
+    {"snow_heavy",
+     {"particles/event/christmas/christmas_hideout_exterior_snow_longerfall.vpcf"}, {}, 1, 0,
+     900.0f, 750.0f, 480.0f, 10.0f, 7.0f, 0.3f,
+     1400.0f, 1000.0f, 360.0f, 14.0f, 6.0f, 0.0f},
+    {"snow_machine",
+     {"particles/environment/winter/winter_shop_open_ambient_snow_machine_snow.vpcf"}, {}, 1, 0,
+     600.0f, 500.0f, 240.0f, 8.0f, 5.0f, 0.2f,
+     1000.0f, 800.0f, 200.0f, 10.0f, 4.0f, 0.0f},
+    {"frozen_flakes",
+     {"particles/environment/rejuv_frozen_snowflakes.vpcf"}, {}, 1, 0,
+     600.0f, 500.0f, 200.0f, 8.0f, 5.0f, 0.2f,
+     1000.0f, 800.0f, 160.0f, 10.0f, 4.0f, 0.0f},
+}};
 
 struct BuildOffsets {
     std::uintptr_t manager, create, control, transform, destroy, release;
@@ -109,12 +146,12 @@ enum class StopReason {
     reconfigured,
     seek,
     backward,
-    invalid_height,
+    invalid_config,
     shutdown,
     create_failed
 };
 struct StopCounts {
-    std::uint32_t disabled{}, reconfigured{}, seek{}, backward{}, invalid_height{}, shutdown{},
+    std::uint32_t disabled{}, reconfigured{}, seek{}, backward{}, invalid_config{}, shutdown{},
         create_failed{};
 };
 struct Counts {
@@ -129,6 +166,8 @@ std::uintptr_t transform_offset{}, destroy_offset{}, release_offset{};
 std::array<int, 6> particles{-1, -1, -1, -1, -1, -1};
 bool active{}, despawn{}, have_time{};
 float height{250.0f};
+int preset_index{0};
+float intensity{1.0f};
 double last_time{};
 State state{State::unavailable};
 Counts counts;
@@ -143,8 +182,8 @@ std::uint32_t& stopCount(StopReason reason) {
         return counts.stops.seek;
     case StopReason::backward:
         return counts.stops.backward;
-    case StopReason::invalid_height:
-        return counts.stops.invalid_height;
+    case StopReason::invalid_config:
+        return counts.stops.invalid_config;
     case StopReason::shutdown:
         return counts.stops.shutdown;
     case StopReason::create_failed:
@@ -216,10 +255,11 @@ float seededUnit(std::uint32_t& value) {
     return static_cast<float>(value >> 8) / 16777216.0f;
 }
 void updateVolumeLocked(const Camera& camera) {
+    const Preset& preset = kPresets[preset_index];
     const bool close = height <= 250.0f;
-    const float duration = close ? 8.0f : 12.0f;
-    const float depth = close ? kCloseDepth : kFarDepth;
-    const float spread = close ? kCloseSpread : kFarSpread;
+    const float duration = close ? preset.close_duration : preset.far_duration;
+    const float depth = close ? preset.close_depth : preset.far_depth;
+    const float spread = close ? preset.close_spread : preset.far_spread;
     constexpr float overscan = 64.0f;
     const float half_fov = std::clamp(camera.fov, 1.0f, 120.0f) * kPi / 360.0f;
     const Vec3 extent{depth + overscan, std::max(spread, depth * std::tan(half_fov)) + overscan,
@@ -235,7 +275,7 @@ void updateVolumeLocked(const Camera& camera) {
                 camera.origin.y + forward.y * forward_phase + right.y * right_phase,
                 camera.origin.z};
     if (close)
-        origin.z -= height * 0.4f;
+        origin.z -= height * preset.close_drop;
     for (int particle : particles) {
         if (particle < 0)
             continue;
@@ -245,11 +285,15 @@ void updateVolumeLocked(const Camera& camera) {
     }
 }
 bool startLocked() {
-    const auto& effects = despawn ? kContactEffects : kPersistentEffects;
+    const Preset& preset = kPresets[preset_index];
     const bool close = height <= 250.0f;
-    const Vec3 parameters{0.0f, (close ? kCloseEmission : kFarEmission) / effects.size(),
-                          close ? 7.0f : 5.0f};
-    for (std::size_t index = 0; index < effects.size(); ++index) {
+    const bool contact = despawn && preset.contact_count > 0;
+    const auto& effects = contact ? preset.contact : preset.persistent;
+    const std::size_t count = contact ? preset.contact_count : preset.persistent_count;
+    const float emission = (close ? preset.close_emission : preset.far_emission) * intensity;
+    const Vec3 parameters{0.0f, emission / static_cast<float>(count),
+                          close ? preset.close_size : preset.far_size};
+    for (std::size_t index = 0; index < count; ++index) {
         particles[index] = create(effects[index]);
         if (particles[index] < 0) {
             stopLocked(StopReason::create_failed);
@@ -310,7 +354,8 @@ void disable() noexcept {
     setStateLocked(client ? State::ready : State::unavailable);
 }
 void on_frame(double replay_time, bool replay_active, bool seeking, const Camera* camera,
-              bool requested, float requested_height, bool requested_despawn) noexcept {
+              bool requested, float requested_height, bool requested_despawn,
+              int requested_preset, float requested_intensity) noexcept {
     std::scoped_lock lock(mutex);
     ++counts.frames;
     if (!client) {
@@ -325,17 +370,23 @@ void on_frame(double replay_time, bool replay_active, bool seeking, const Camera
         return;
     }
     if (!std::isfinite(requested_height) || requested_height < 100.0f ||
-        requested_height > 1500.0f) {
-        stopLocked(StopReason::invalid_height);
+        requested_height > 1500.0f || requested_preset < 0 ||
+        requested_preset >= static_cast<int>(kPresets.size()) ||
+        !std::isfinite(requested_intensity) || requested_intensity < 0.1f ||
+        requested_intensity > 4.0f) {
+        stopLocked(StopReason::invalid_config);
         active = have_time = false;
         setStateLocked(State::unavailable);
         return;
     }
-    if (!active || height != requested_height || despawn != requested_despawn) {
+    if (!active || height != requested_height || despawn != requested_despawn ||
+        preset_index != requested_preset || intensity != requested_intensity) {
         stopLocked(StopReason::reconfigured);
         active = true;
         height = requested_height;
         despawn = requested_despawn;
+        preset_index = requested_preset;
+        intensity = requested_intensity;
         have_time = false;
         setStateLocked(State::configured);
     }
@@ -395,7 +446,7 @@ Diagnostics diagnostics() noexcept {
     result.stop_reconfigured = counts.stops.reconfigured;
     result.stop_seek = counts.stops.seek;
     result.stop_backward = counts.stops.backward;
-    result.stop_invalid = counts.stops.invalid_height;
+    result.stop_invalid = counts.stops.invalid_config;
     result.stop_shutdown = counts.stops.shutdown;
     result.stop_create_failed = counts.stops.create_failed;
     result.state_changes = counts.state_changes;

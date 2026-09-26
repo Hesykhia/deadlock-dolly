@@ -31,13 +31,22 @@ constexpr std::uint32_t kGamePov = 16;
 // Optional per-command opt-out of the seek render relief. Absent means the
 // relief is allowed, so older editors keep the safer default.
 constexpr std::uint32_t kNoSeekRelief = 4;
-// Confetti controls occupy previously unused flag bits.
+// Particle controls occupy previously unused flag bits.
 constexpr std::uint32_t kConfetti = 8;
 constexpr std::uint32_t kConfettiDespawnOnGround = 32;
 constexpr std::uint32_t kConfettiHeightShift = 16;
 constexpr std::uint32_t kConfettiHeightMask = 0xffff;
+// Particle preset id (bits 6-9) and quantised intensity (bits 10-15). Absent
+// (zero) means the original confetti preset at intensity 1.0, so every older
+// editor keeps its exact behaviour.
+constexpr std::uint32_t kParticlePresetShift = 6;
+constexpr std::uint32_t kParticlePresetMask = 0xf;
+constexpr std::uint32_t kParticleIntensityShift = 10;
+constexpr std::uint32_t kParticleIntensityMask = 0x3f;
+constexpr std::uint32_t kParticleIntensityDefault = 20;  // 20/20 = 1.0x
 constexpr std::uint32_t kConfettiControlMask =
-    kConfetti | kConfettiDespawnOnGround | (kConfettiHeightMask << kConfettiHeightShift);
+    kConfetti | kConfettiDespawnOnGround | (kConfettiHeightMask << kConfettiHeightShift) |
+    (kParticlePresetMask << kParticlePresetShift) | (kParticleIntensityMask << kParticleIntensityShift);
 #pragma pack(push, 1)
 struct ControlHeader {
     char magic[8];
