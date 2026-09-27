@@ -15,6 +15,7 @@ class MediaTransport:
         self._media_mapping = None
         self._media_sequence = 0
         self._media_last_command = ""
+        self._source_audio_recording = False
         self._media_last = {"available": False, "state": "idle", "ack": 0,
                             "reshade": {"state": 0, "open": False}}
 
@@ -121,6 +122,16 @@ class MediaTransport:
     def toggle_reshade(self):
         return self._media_command("toggle_reshade")
 
+    def start_source_audio(self, csv_path):
+        status = self._media_command("start_source_audio", path=str(csv_path))
+        self._source_audio_recording = True
+        return status
+
+    def stop_source_audio(self):
+        status = self._media_command("stop_source_audio")
+        self._source_audio_recording = False
+        return status
+
     def _close_media(self):
         """Request finalization while the game worker still has our heartbeat."""
         with self._operations:
@@ -132,6 +143,10 @@ class MediaTransport:
             return
         try:
             state = self.media_status()
+            unconfirmed_audio = (self._media_last_command == "start_source_audio"
+                                 and state.get("ack") != self._media_sequence)
+            if self._source_audio_recording or unconfirmed_audio:
+                self.stop_source_audio()
             unconfirmed_start = (self._media_last_command == "start_video"
                                  and state.get("ack") != self._media_sequence)
             if state.get("state") in ("starting", "recording", "finalizing") or unconfirmed_start:

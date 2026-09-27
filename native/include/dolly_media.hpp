@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace dolly {
-constexpr std::uint32_t kMediaAbi = 2;
+constexpr std::uint32_t kMediaAbi = 3;
 constexpr std::size_t kMediaMappingBytes = 12288, kMediaStatusOffset = 8192;
 #pragma pack(push, 1)
 struct MediaCommand {
@@ -21,10 +21,11 @@ struct MediaStatus {
     std::uint64_t frames_written, frames_dropped, duration_100ns;
     std::uint32_t video_error, reshade_error;
     char16_t video_message[384], reshade_message[384], command_message[384];
+    std::uint64_t video_first_qpc, qpc_frequency;
 };
 #pragma pack(pop)
 static_assert(sizeof(MediaCommand) == 6192, "Python media command layout");
-static_assert(sizeof(MediaStatus) == 2384, "Python media status layout");
+static_assert(sizeof(MediaStatus) == 2400, "Python media status layout");
 static_assert(offsetof(MediaStatus, frames_written) == 48, "Python media counter offset");
 static_assert(kMediaStatusOffset + sizeof(MediaStatus) <= kMediaMappingBytes,
               "Media status fits mapping");

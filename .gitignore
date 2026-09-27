@@ -10,6 +10,7 @@ venv/
 /_internal/
 /MANIFEST.json
 *.exe
+!native/bin/win64/DollyGameAudio.exe
 *.zip
 *.dem
 *.mp4

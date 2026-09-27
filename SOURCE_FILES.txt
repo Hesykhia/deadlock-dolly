@@ -388,6 +388,15 @@ tests/test_attach_shot.py
 native/src/dolly_attach_runtime.hpp
 native/tests/fixtures/attach-shot.bin
 tests/test_rotation_curve.py
+dolly/clip_audio.py
+tools/filter_captured_audio_window.py
+tools/fit_reference_voices.py
+
+native/include/dolly_sound_capture.hpp
+native/src/dolly_sound_capture_win.cpp
+native/src/dolly_game_audio.cpp
+tools/export_captured_audio.py
+tests/test_captured_audio_export.py
 docs/BONE_PICKER.md
 
 docs/RELEASE_NOTES_0.5.35-alpha.md

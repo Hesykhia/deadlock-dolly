@@ -198,7 +198,7 @@ std::atomic<std::uint64_t> gCaptureAttempts{0}, gCaptureNoLock{0};
 struct CachedStatus {
     std::atomic<State> state{State::idle};
     std::atomic<std::uint32_t> width{0}, height{0}, fps{0}, error_code{0};
-    std::atomic<std::uint64_t> written{0}, dropped{0}, duration{0};
+    std::atomic<std::uint64_t> written{0}, dropped{0}, duration{0}, first_qpc{0}, frequency{0};
     std::atomic<const wchar_t*> error{L""};
     std::atomic<bool> depth{false};
     std::atomic<bool> white_clear{false};
@@ -1330,6 +1330,8 @@ Status status() noexcept {
         result.frames_written = cached.written.load();
         result.frames_dropped = cached.dropped.load();
         result.duration_100ns = cached.duration.load();
+        result.first_qpc = cached.first_qpc.load();
+        result.qpc_frequency = cached.frequency.load();
         std::wcsncpy(result.error, cached.error.load(), 255);
         return result;
     }
@@ -1346,6 +1348,8 @@ Status status() noexcept {
     result.frames_written = s.written.load();
     result.frames_dropped = s.dropped.load();
     result.duration_100ns = s.duration.load();
+    result.first_qpc = s.first_qpc.load();
+    result.qpc_frequency = s.frequency;
     const auto* message = s.error_text.load(std::memory_order_acquire);
     std::wcsncpy(result.error, message, 255);
     cached.width.store(result.width);
@@ -1355,6 +1359,8 @@ Status status() noexcept {
     cached.written.store(result.frames_written);
     cached.dropped.store(result.frames_dropped);
     cached.duration.store(result.duration_100ns);
+    cached.first_qpc.store(result.first_qpc);
+    cached.frequency.store(result.qpc_frequency);
     cached.error.store(message);
     cached.state.store(result.state, std::memory_order_release);
     return result;

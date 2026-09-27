@@ -35,6 +35,7 @@
 // introducing a `dolly` namespace in that anonymous namespace, which would
 // shadow the real global `dolly` and make dolly::... ambiguous (MSVC C2872).
 #include "dolly_pattern_scan.hpp"
+#include "dolly_sound_capture.hpp"
 
 namespace {
 using namespace dolly;
@@ -53,6 +54,7 @@ constexpr char kUnlockerHash[] = "74047120e79245d479e61142a878f3311c8384a1f5f33e
 // this hash in the same turn as a game update.
 constexpr char kPlayerCaptureScenesystemHash[] =
     "e480a7f28ae073dd4a83833bfee8db44bfff22f097147f2f697a109b2ea2de4b";
+constexpr char kSoundSystemHash[] = "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr std::uintptr_t kDemoGlobal = 0x61b618, kDemoTable = 0x535730, kEngineTable = 0x540128;
 // Identical across every reviewed client build; the exact-hash path re-checks it.
 constexpr unsigned char kSetupPrologue[] = {
@@ -691,6 +693,8 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     // that reads the game's demo state safely, once per main view.
     gDemoSeeking.store(demo.seeking, std::memory_order_relaxed);
     status.tick = demo.tick;
+    if (demo_ok)
+        sound_capture_clock(demo.tick, demo.time);
     status.paused = demo.paused;
     status.engine_time = demo.time;
     std::snprintf(status.demo_name, sizeof(status.demo_name), "%s", demo.name);
@@ -1404,6 +1408,9 @@ static DWORD WINAPI worker(void*) {
         // or the view callback. The main camera remains usable if overlay fails.
         editor_install_input_hooks();
         install_overlay_hooks();
+        const auto sound = GetModuleHandleW(L"soundsystem.dll");
+        if (module_matches(sound, kSoundSystemHash, 0x678000))
+            sound_capture_install(sound);
         // Hook and original trampoline remain resident until process exit. Losing
         // the editor only releases ownership, avoiding code-unload races in a view.
         std::shared_ptr<const NativeShot> shot;
@@ -1412,6 +1419,7 @@ static DWORD WINAPI worker(void*) {
         std::vector<unsigned char> payload;
         HMODULE diagnostic_renderer = nullptr;
         ULONGLONG next_renderer_probe = 0;
+        ULONGLONG next_sound_probe = 0;
         for (;;) {
             if (WaitForSingleObject(gEditor, 0) != WAIT_TIMEOUT) {
                 gWorkerError = 30;
@@ -1426,6 +1434,12 @@ static DWORD WINAPI worker(void*) {
             visualization_worker_tick(mapping.c_str(), now_seconds() - gHeartbeatTime.load() < 2.0);
             media_worker_tick(mapping.c_str(), now_seconds() - gHeartbeatTime.load() < 2.0);
             const auto diagnostic_now = GetTickCount64();
+            if (!sound_capture_available() && diagnostic_now >= next_sound_probe) {
+                next_sound_probe = diagnostic_now + 1000;
+                const auto module = GetModuleHandleW(L"soundsystem.dll");
+                if (module_matches(module, kSoundSystemHash, 0x678000))
+                    sound_capture_install(module);
+            }
             if (diagnostic_now >= next_renderer_probe) {
                 next_renderer_probe = diagnostic_now + 1000;
                 const auto module = GetModuleHandleW(L"rendersystemdx11.dll");

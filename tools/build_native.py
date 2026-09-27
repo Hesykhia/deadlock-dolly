@@ -18,6 +18,7 @@ from release_files import sha256
 
 BRIDGE_ABI = 4
 DLL_RELATIVE = Path("bin/win64/DollyNative.dll")
+AUDIO_RELATIVE = Path("bin/win64/DollyGameAudio.exe")
 REQUIRED_EXPORTS = {
     "CreateInterface", "DollyNativeProtocolVersion",
     "DollyAtomicExchange32", "DollyAtomicExchange64", "DollyAtomicCompareExchange32",
@@ -58,9 +59,10 @@ def runtime_files(root: Path) -> tuple[list[tuple[Path, Path]], dict]:
     """Return an explicit runtime allowlist, rejecting missing/stale metadata."""
     native = Path(root) / "native"
     dll = native / DLL_RELATIVE
+    recorder = native / AUDIO_RELATIVE
     metadata = native / "build_info.json"
     confetti_pack = native / "assets/confetti/pak01_dir.vpk"
-    for path in (dll, metadata, confetti_pack):
+    for path in (dll, recorder, metadata, confetti_pack):
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"Missing or unsafe native runtime file: {path.name}")
     info = json.loads(metadata.read_text(encoding="utf-8"))
@@ -69,8 +71,11 @@ def runtime_files(root: Path) -> tuple[list[tuple[Path, Path]], dict]:
         raise ValueError("Native build metadata has an unsupported bridge ABI")
     if info.get("sha256") != sha256(dll):
         raise ValueError("Native bridge does not match its build metadata hash")
+    if info.get("game_audio_sha256") != sha256(recorder):
+        raise ValueError("Game audio recorder does not match its build metadata hash")
     report = verify_native_dll(dll)
-    files = [(dll, DLL_RELATIVE), (metadata, Path("build_info.json")),
+    files = [(dll, DLL_RELATIVE), (recorder, AUDIO_RELATIVE),
+             (metadata, Path("build_info.json")),
              (confetti_pack, Path("assets/confetti/pak01_dir.vpk"))]
     for profile in sorted((native / "profiles").glob("*.json")):
         if not profile.is_file() or profile.is_symlink():
@@ -137,6 +142,12 @@ def build_native(root: Path = ROOT) -> dict:
     # skipped graphics check as passing; preserve the omission in the bundle.
     if os.environ.get("DOLLY_SKIP_DEPTH_SCENE_SMOKE") == "1":
         skipped_tests.append("native_depth_scene_smoke")
+    # These WARP checks request the optional D3D11 debug layer. A desktop
+    # without Windows Graphics Tools cannot create that debug device.
+    if os.environ.get("DOLLY_SKIP_PLAYER_MATTE_SMOKE") == "1":
+        skipped_tests.append("native_player_matte_pass_tests")
+    if os.environ.get("DOLLY_SKIP_PLAYER_VERTEX_GUARD_SMOKE") == "1":
+        skipped_tests.append("native_player_vertex_guard_tests")
     if skipped_tests:
         ctest += ["-E", "^(" + "|".join(skipped_tests) + ")$"]
     commands = [
@@ -151,8 +162,12 @@ def build_native(root: Path = ROOT) -> dict:
         for command in commands:
             subprocess.run(command, cwd=root, stdout=log, stderr=subprocess.STDOUT, check=True)
     dll = native / DLL_RELATIVE
+    recorder = native / AUDIO_RELATIVE
     report = verify_native_dll(dll)
+    if not recorder.is_file():
+        raise RuntimeError("The game audio recorder did not build")
     info = {"abi": BRIDGE_ABI, "version": __version__, "sha256": sha256(dll),
+            "game_audio_sha256": sha256(recorder),
             "built_utc": datetime.now(timezone.utc).isoformat(),
             "compiler": "Visual Studio 17 2022", "configuration": "Release",
             "runtime": "static", "native_path_tests_passed": True,

@@ -2,15 +2,19 @@
 from pathlib import Path
 
 root = Path(SPECPATH).parent
+from PyInstaller.utils.hooks import collect_all
+ffmpeg_data, ffmpeg_binaries, ffmpeg_hidden = collect_all("imageio_ffmpeg")
 a = Analysis(
     [str(root / "packaging" / "entrypoint.py")],
     pathex=[str(root)],
-    binaries=[],
+    binaries=ffmpeg_binaries,
     datas=[(str(root / "assets" / "dolly.ico"), "assets"),
            (str(root / "assets" / "dolly.png"), "assets"),
            (str(root / "assets" / "reshade"), "assets/reshade"),
-           (str(root / "assets" / "editing"), "assets/editing")],
-    hiddenimports=[], hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[],
+           (str(root / "assets" / "editing"), "assets/editing"), *ffmpeg_data],
+    hiddenimports=["tools.export_captured_audio", "tools.filter_captured_audio_window",
+                   "tools.fit_reference_voices", *ffmpeg_hidden],
+    hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=[],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

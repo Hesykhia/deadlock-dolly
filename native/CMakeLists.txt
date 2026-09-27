@@ -70,6 +70,12 @@ if(BUILD_TESTING)
 endif()
 
 if(WIN32)
+    add_executable(DollyGameAudio src/dolly_game_audio.cpp)
+    target_link_libraries(DollyGameAudio PRIVATE ole32 mmdevapi)
+    set_target_properties(DollyGameAudio PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/bin/win64"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_SOURCE_DIR}/bin/win64"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}/bin/win64")
     if(BUILD_TESTING)
         add_executable(player_matte_pass_tests tests/player_matte_pass_tests.cpp)
         target_include_directories(player_matte_pass_tests PRIVATE include)
@@ -122,6 +128,7 @@ if(WIN32)
         src/dolly_video_win.cpp
         src/dolly_reshade_win.cpp
         src/dolly_media_win.cpp
+        src/dolly_sound_capture_win.cpp
         src/dolly_visualization_runtime_win.cpp
         vendor/imgui/imgui.cpp
         vendor/imgui/imgui_draw.cpp

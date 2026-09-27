@@ -10,6 +10,7 @@
 #include "dolly_editor.hpp"
 #include "dolly_video.hpp"
 #include "dolly_reshade.hpp"
+#include "dolly_sound_capture.hpp"
 
 namespace dolly {
 namespace {
@@ -137,6 +138,16 @@ void consume() noexcept {
         if (!reshade_request_overlay(!(reshade_overlay_open() || reshade_overlay_pending())))
             reject(L"Load a compatible ReShade runtime before opening its menu.");
         break;
+    case 7:
+        if (!sound_capture_start(path)) {
+            wchar_t detail[384]{};
+            MultiByteToWideChar(CP_UTF8, 0, sound_capture_error(), -1, detail, 383);
+            reject(detail[0] ? detail : L"Could not start source-audio capture.");
+        }
+        break;
+    case 8:
+        sound_capture_stop();
+        break;
     default:
         reject(L"Unknown native media command.");
         break;
@@ -161,6 +172,8 @@ void publish() noexcept {
     status.frames_written = video_state.frames_written;
     status.frames_dropped = video_state.frames_dropped;
     status.duration_100ns = video_state.duration_100ns;
+    status.video_first_qpc = video_state.first_qpc;
+    status.qpc_frequency = video_state.qpc_frequency;
     status.video_error = video_state.error_code;
     status.reshade_state = reshade.failed
                                ? 3
@@ -201,6 +214,7 @@ void media_worker_tick(const wchar_t* session_name, bool connected) noexcept {
             disconnected_since.store(0, std::memory_order_release);
             session_seen.store(0, std::memory_order_release);
             video::stop(false);
+            sound_capture_stop();
             reshade_set_enabled(false);
             close_mapping();
             return;
@@ -241,6 +255,7 @@ void media_worker_tick(const wchar_t* session_name, bool connected) noexcept {
         }
         const auto previous = accepted;
         consume();
+        sound_capture_worker_tick();
         if (previous != accepted || now >= next_status) {
             next_status = now + 50;
             publish();
@@ -248,6 +263,7 @@ void media_worker_tick(const wchar_t* session_name, bool connected) noexcept {
     } catch (...) {
         session_seen.store(0, std::memory_order_release);
         video::stop(false);
+        sound_capture_stop();
         reshade_set_enabled(false);
         close_mapping();
     }

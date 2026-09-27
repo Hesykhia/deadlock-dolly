@@ -63,6 +63,14 @@ class VideoExportTests(unittest.TestCase):
         self.controller._request.assert_not_called()
         self.controller.set_export_resolution.assert_not_called()
 
+    def test_audio_take_places_video_inside_its_export_folder(self):
+        self.export.start(VideoOptions(self.path, bundle_audio=True))
+        folder = self.path.with_suffix("")
+        self.assertTrue(folder.is_dir())
+        self.assertEqual(self.export.output_path, folder / self.path.name)
+        self.assertEqual(self.export.output_directory, self.path.parent)
+        self.assertEqual(Path(self.bridge.start_video.call_args.args[0]), folder / self.path.name)
+
     def test_players_low_space_rejected_before_any_take_or_replay_preparation(self):
         ffmpeg = self.path.parent / "ffmpeg.exe"
         ffmpeg.write_bytes(b"MZ")
@@ -514,6 +522,9 @@ class VideoGuiTests(unittest.TestCase):
         self.app.video_path = Var(str(Path(self.folder.name) / "shot.mp4"))
         self.app.video_fps = Var("60")
         self.app.video_bitrate = Var("20 Mbps")
+        self.app.video_game_audio = Var(False)
+        self.app.video_reconstructed_audio = Var(False)
+        self.app.clip_audio = None
         self.app.video_codec = Var("")
         self.app.ffmpeg_path = Var("")
         self.app.video_fixed_step = Var(False)
@@ -525,6 +536,8 @@ class VideoGuiTests(unittest.TestCase):
         self.app.video_export_speed = Var("1")
         self.app.status_text = Var("")
         self.app.video_status_text = Var("")
+        for name in ("video_game_audio_check", "video_reconstructed_audio_check"):
+            setattr(self.app, name, Mock())
         self.app._pending_auto_play = False
         self.app.video_export = Mock()
         self.app._submit = Mock(return_value=True)
@@ -1317,8 +1330,10 @@ class MediaPollIsolationTests(unittest.TestCase):
         app.video_export.status.return_value = {"state": "starting", "message": "Start not confirmed."}
         app._refresh_reshade = Mock()
         for name in ("video_start_button", "video_stop_button", "video_cancel_button", "video_path_entry", "video_browse_button",
-                     "video_fps_combo", "video_bitrate_combo", "reshade_configure_button", "reshade_forget_button"):
+                     "video_fps_combo", "video_bitrate_combo", "reshade_configure_button", "reshade_forget_button",
+                     "video_game_audio_check", "video_reconstructed_audio_check"):
             setattr(app, name, Mock())
+        app.clip_audio = None
         app._poll()
         self.assertFalse(app.busy)
         app.video_start_button.configure.assert_called_with(state="disabled")

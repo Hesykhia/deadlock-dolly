@@ -26,9 +26,11 @@ from dolly.replays import discover_replays, find_replay_folder, parse_launch_opt
 from dolly.bindings import CaptureBinding, DEFAULT_BINDING, KEY_CHOICES
 from dolly.branding import apply_window_icon
 from dolly.controller import Controller, tick_rate_advice, tick_rates_match
+from dolly.clip_audio import ClipAudioCapture
 from dolly.curve import AspectCurve, RotationCurve, TimelineView
 from dolly.display import focus_window
 from dolly.hotkey import CaptureHotkey
+from dolly.launcher import discover_game, recover_pending, validate_game
 from dolly.launcher import discover_game, recover_pending
 from dolly.memory_watch import PausedMemoryWatch
 from dolly.navigation import CameraMotion
@@ -193,6 +195,9 @@ class DollyApp:
         _bundled_ffmpeg = bundled_ffmpeg_path()
         self.ffmpeg_path = tk.StringVar(value=self.app_settings.ffmpeg_path or (str(_bundled_ffmpeg) if _bundled_ffmpeg else ""))
         self.video_status_text = tk.StringVar(value="Launch a replay to record video.")
+        self.video_game_audio = tk.BooleanVar(value=False)
+        self.video_reconstructed_audio = tk.BooleanVar(value=False)
+        self.clip_audio = None
         self._pending_auto_play = False
         # Layered takes capture exactly the authored path, so they finish
         # themselves when the shot completes instead of waiting for a manual
@@ -643,19 +648,57 @@ class DollyApp:
             # The recorder's first frame is focus-gated. A desktop Start would
             # otherwise leave focus on Dolly and time out with no game frame.
             focus_window(game_pid())
-        self._submit("Preparing replay and recording", lambda: self.video_export.start(options, project=project, frozen=frozen, pov=pov), self._video_operation_done)
+        game_audio = self.video_game_audio.get()
+        reconstructed = self.video_reconstructed_audio.get()
+        if game_audio or reconstructed:
+            options = replace(options, bundle_audio=True)
+        def start():
+            audio = None
+            if game_audio or reconstructed:
+                bridge = self.controller._native_bridge()
+                if bridge is None:
+                    raise RuntimeError("The native media bridge is not connected")
+                color = options.path.with_suffix("") / options.path.name
+                audio = ClipAudioCapture(color, game_audio=game_audio, reconstructed=reconstructed,
+                                         bridge=bridge, game=validate_game(self.game_path.get()).executable,
+                                         game_pid=self.controller.game_pid())
+                audio.start()
+            try:
+                status = self.video_export.start(options, project=project, frozen=frozen, pov=pov)
+            except BaseException:
+                if audio:
+                    if self.video_export.status().get("state") in ACTIVE_STATES:
+                        self.clip_audio = audio
+                    else:
+                        audio.cancel()
+                raise
+            self.clip_audio = audio
+            return status
+        self._submit("Preparing replay and recording", start, self._video_operation_done)
 
     def _stop_video_recording(self, cancel=False):
         if self.busy:
             self.status_text.set("Finish the current operation before stopping the recording.")
             return
         self._auto_finish_layered = False
+        def finish():
+            status = self.video_export.stop(cancel=cancel)
+            audio = self.clip_audio
+            self.clip_audio = None
+            if audio:
+                if cancel or status.get("state") != "completed":
+                    audio.cancel()
+                else:
+                    folder = audio.finish(status)
+                    if folder:
+                        status = {**status, "reconstructed_folder": str(folder)}
+            return status
         if getattr(self, "_pov_project", None) is not None and self.controller.status().get("playing"):
             # An early Finish ends this take, including its queued passes.
             # Do not silently export longer layer takes than the color video.
             self._layer_queue = []
         self._submit("Discarding recording" if cancel else "Finishing video recording",
-                     lambda: self.video_export.stop(cancel=cancel), self._video_operation_done)
+                     finish, self._video_operation_done)
 
     def _next_take_directory(self):
         """The folder that receives new takes, never the inside of a take."""
@@ -676,6 +719,8 @@ class DollyApp:
         self.status_text.set(self.video_status_text.get())
         self._last_video_state = state
         if state == "completed" and self.video_export.output_path:
+            if status.get("reconstructed_folder"):
+                self._log("Reconstructed audio saved to " + status["reconstructed_folder"])
             master = status.get("master")
             if master:
                 self._log("Layer alpha saved to " + str(master))
@@ -1027,8 +1072,14 @@ class DollyApp:
         previous = getattr(self, "_last_video_state", "idle")
         if state != previous:
             if state == "completed":
+                if self.clip_audio is not None and not self.busy:
+                    self._stop_video_recording()
+                    return
                 self._video_operation_done(status)
             elif state == "failed":
+                if self.clip_audio is not None and not self.busy:
+                    self._stop_video_recording(cancel=True)
+                    return
                 message = format_video_status(status)
                 self._log(message)
                 # A take can fail after playback started, when no worker is
@@ -1072,6 +1123,9 @@ class DollyApp:
                        getattr(self, "video_speed_combo", None)):
             if widget is not None:
                 widget.configure(state="disabled" if active or self.busy else "readonly")
+        for widget in (self.video_game_audio_check, self.video_reconstructed_audio_check):
+            widget.configure(state="disabled" if active or self.busy else "normal")
+        self.reshade_configure_button.configure(state="normal" if ready and not active and not self.busy and not self.playing else "disabled")
         self.reshade_forget_button.configure(state="normal" if not active and not self.busy and not self.playing else "disabled")
         self._refresh_reshade(controller_status, active)
         self._advance_layer_pipeline()

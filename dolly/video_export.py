@@ -142,6 +142,8 @@ class VideoOptions:
     shot_only: bool = False
     # Inherited by the extra passes of a depth take so their geometry matches.
     full_resolution: bool = False
+    # Group the video and optional audio deliverables in one take folder.
+    bundle_audio: bool = False
 
     def validated(self) -> VideoOptions:
         if type(self.fps) is not int or self.fps not in (30, 60, 120, 300, 600):
@@ -188,6 +190,8 @@ class VideoOptions:
             raise ValueError("The white matte background must be on or off.")
         if type(self.full_resolution) is not bool:
             raise ValueError("Full-resolution export must be on or off.")
+        if type(self.bundle_audio) is not bool:
+            raise ValueError("Audio folder export must be on or off.")
         if type(self.shot_only) is not bool:
             raise ValueError("Shot-only capture must be on or off.")
         if isinstance(self.speed, bool) or not isinstance(self.speed, (int, float)):
@@ -202,7 +206,8 @@ class VideoOptions:
         # check gives a useful error; it is not the overwrite safety boundary.
         result = VideoOptions(path, self.fps, self.bitrate, self.codec, self.quality, self.preset,
                               ffmpeg, self.fixed_step, speed, self.depth, self.depth_exr,
-                              self.layers, self.white_clear, self.shot_only, self.full_resolution or self.depth)
+                              self.layers, self.white_clear, self.shot_only,
+                              self.full_resolution or self.depth, self.bundle_audio)
         if self.depth:
             encoder, _codec_id = resolve_backend(result)
             if encoder != 1:
@@ -388,10 +393,8 @@ class VideoExport:
             prepare(project, frozen=frozen)
         if options.full_resolution:
             self.controller.set_export_resolution()
-        # A take with any side layer records into its own folder: the full
-        # color video at the root plus one subfolder per layer. Color-only
-        # takes keep the flat layout beside the chosen path.
-        folder = options.path.with_suffix("") if (options.depth or options.layers) else None
+        # Layered and audio takes keep their video and sidecars in one folder.
+        folder = options.path.with_suffix("") if (options.depth or options.layers or options.bundle_audio) else None
         color_path = options.path
         if folder is not None:
             try:
