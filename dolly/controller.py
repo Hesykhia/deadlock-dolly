@@ -2770,6 +2770,35 @@ class Controller:
         return actual_time
 
     def _seek_tick(self, target, *, allow_start_boundary=False):
+        """Pin fast-goto on for the seek, then verify a paused tick.
+
+        A paused ``demo_gototick`` to a far tick needs ``demo_usefastgoto``
+        enabled to fast-skip; with it off the seek stalls and can even unload the
+        demo (verified by an A/B test). Dolly normally benefits from the default,
+        but pin it explicitly so a user setting or a future default cannot break
+        seeking, and restore the exact prior value afterward.
+        """
+        fast_original = None
+        try:
+            fast_original = read_cvar_value("demo_usefastgoto",
+                                            self._request("demo_usefastgoto"))
+        except (ValueError, RuntimeError):
+            fast_original = None
+        if fast_original is not None and not fast_original:
+            try:
+                self._request("demo_usefastgoto 1")
+            except (RuntimeError, OSError):
+                pass
+        try:
+            return self._seek_tick_run(target, allow_start_boundary=allow_start_boundary)
+        finally:
+            if fast_original is not None and not fast_original:
+                try:
+                    self._request("demo_usefastgoto 0")
+                except (RuntimeError, OSError):
+                    pass
+
+    def _seek_tick_run(self, target, *, allow_start_boundary=False):
         """Verify a paused tick; optionally recognize the replay's packet-1 floor."""
         self._recording_replay = None
         target = int(target)

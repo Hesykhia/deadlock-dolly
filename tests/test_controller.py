@@ -1219,7 +1219,8 @@ class ControllerTests(unittest.TestCase):
                          "Only initial validation and exit cleanup may have independent status round trips")
         self.assertNotIn("demo_info", self.console.requests)
         self.assertFalse(any(key.startswith("spec_goto ") for key in self.controller._last_output))
-        self.assertLess(len(self.controller._last_output), 20)
+        # One extra diagnostic key since seeking pins demo_usefastgoto.
+        self.assertLess(len(self.controller._last_output), 21)
         with tempfile.TemporaryDirectory() as directory:
             destination = self.controller.export_diagnostics(Path(directory) / "playback.zip")
             with zipfile.ZipFile(destination) as archive:

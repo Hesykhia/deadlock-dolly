@@ -834,11 +834,28 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
                "Native camera stopped; restart the shot after checking diagnostics.");
         return;
     }
-    if (!gCameraCache.basis || !view_ok || !pose_valid(original) || !std::isfinite(original_fov) ||
-        original_fov <= 1 || original_fov >= 179 || width <= 0 || height <= 0 || (flags & 2)) {
+    const char* unsupported_reason = nullptr;
+    if (!gCameraCache.basis)
+        unsupported_reason = "the camera basis helper was not resolved";
+    else if (!view_ok)
+        unsupported_reason = "view fields (origin/angles/fov/aspect/flags/viewport) were unreadable";
+    else if (!pose_valid(original))
+        unsupported_reason = "the rendered camera pose is not finite";
+    else if (!std::isfinite(original_fov))
+        unsupported_reason = "the rendered field of view is not finite";
+    else if (original_fov <= 1 || original_fov >= 179)
+        unsupported_reason = "the rendered field of view is out of range";
+    else if (width <= 0 || height <= 0)
+        unsupported_reason = "the rendered viewport size is invalid";
+    else if (flags & 2)
+        unsupported_reason = "the alternate projection flag is set";
+    if (unsupported_reason) {
         fault = 11;
-        finish(State::Fault, fault,
-               "This view or projection is unsupported; native camera released.");
+        char unsupported_message[224]{};
+        std::snprintf(unsupported_message, sizeof(unsupported_message),
+                      "Native camera unsupported on this view: %s; native camera released.",
+                      unsupported_reason);
+        finish(State::Fault, fault, unsupported_message);
         return;
     }
     if (!demo_ok || !demo.playing || demo.seeking || !same_demo(c.demo_name, demo.name)) {
