@@ -7,9 +7,10 @@ from dolly.controller import Controller
 from dolly.video_export import VideoOptions
 
 
-CLASSES = ("EnvMap", "BarnLight", "DirectionalLight", "panorama_world_panel",
-           "LightProbeVolume", "SkinnedObject", "Default", "MeshBuilderObject",
-           "ParticleSystem", "InstancedMesh", "AggregateDesc", "Skybox")
+CLASSES = ("EnvMap", "BarnLight", "DirectionalLight", "OmniLight",
+           "panorama_world_panel", "LightProbeVolume", "SkinnedObject", "Default",
+           "MeshBuilderObject", "ZipLineRopeSegment", "ParticleSystem",
+           "InstancedMesh", "AggregateDesc", "Skybox", "projectedDecal")
 
 
 class LayerModeTests(unittest.TestCase):
@@ -53,14 +54,17 @@ class LayerModeTests(unittest.TestCase):
     def reset_commands(self):
         return [command for command in self.commands if command.endswith(" 0")]
 
-    def test_world_mode_hides_players_effects_and_world_ui(self):
+    def test_world_mode_shows_world_classes_and_hides_characters_effects_and_ui(self):
         applied = self.controller.apply_layer_mode("world")
+        world_keep = set(Controller.LAYER_MODES["world"]["keep"])
+        # World keeps the world/light/geometry classes and hides everything else
+        # (characters, effects and any class not in the keep-list).
         self.assertEqual(sorted(applied["hidden"]),
-                         sorted(["SkinnedObject", "ParticleSystem", "panorama_world_panel"]))
-        self.assertEqual(sorted(self.hide_commands()),
-                         sorted(["sc_setclassflags SkinnedObject 8",
-                                 "sc_setclassflags ParticleSystem 8",
-                                 "sc_setclassflags panorama_world_panel 8"]))
+                         sorted(name for name in CLASSES if name not in world_keep))
+        self.assertIn("sc_setclassflags SkinnedObject 8", self.commands)
+        self.assertIn("sc_setclassflags ParticleSystem 8", self.commands)
+        self.assertNotIn("sc_setclassflags AggregateDesc 8", self.commands)
+        self.assertNotIn("sc_setclassflags Default 8", self.commands)
         self.assertEqual(len(self.reset_commands()), len(CLASSES))
 
     def test_players_mode_keeps_only_skinned_objects(self):
@@ -85,16 +89,29 @@ class LayerModeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ParticleSystem"):
             self.controller.apply_layer_mode("effects")
 
+    def test_missing_required_world_class_fails_instead_of_wrong_layer(self):
+        self.classes = tuple(name for name in CLASSES if name != "AggregateDesc")
+        with self.assertRaisesRegex(RuntimeError, "AggregateDesc"):
+            self.controller.apply_layer_mode("world")
+
+    def test_unknown_registry_class_is_hidden_by_default(self):
+        # A dynamic registry can add classes; the keep-list hides them so they
+        # cannot silently leak into a layer.
+        self.classes = CLASSES + ("futureNewClass",)
+        applied = self.controller.apply_layer_mode("world")
+        self.assertIn("futureNewClass", applied["hidden"])
+        self.assertIn("sc_setclassflags futureNewClass 8", self.commands)
+
     def test_a_class_that_cannot_be_set_fails_the_mode(self):
         original = self.request
 
         def failing(command):
-            if command == "sc_setclassflags SkinnedObject 8":
+            if command == "sc_setclassflags ParticleSystem 8":
                 raise RuntimeError("console busy")
             return original(command)
 
         self.controller._request = failing
-        with self.assertRaisesRegex(RuntimeError, "SkinnedObject"):
+        with self.assertRaisesRegex(RuntimeError, "ParticleSystem"):
             self.controller.apply_layer_mode("world")
 
     def test_unknown_mode_is_rejected(self):
@@ -102,9 +119,18 @@ class LayerModeTests(unittest.TestCase):
             self.controller.apply_layer_mode("hud")
 
     def test_reset_restores_every_reported_class(self):
+        # With no layer applied, reset restores the live registry.
         self.controller.reset_layer_modes()
         self.assertEqual(sorted(self.reset_commands()),
                          sorted("sc_setclassflags " + name + " 0" for name in CLASSES))
+
+    def test_reset_after_a_layer_restores_only_what_was_hidden(self):
+        applied = self.controller.apply_layer_mode("world")
+        self.commands.clear()
+        self.controller.reset_layer_modes()
+        self.assertEqual(sorted(self.reset_commands()),
+                         sorted("sc_setclassflags " + name + " 0"
+                                for name in applied["hidden"]))
 
 
 class LayerOptionsTests(unittest.TestCase):

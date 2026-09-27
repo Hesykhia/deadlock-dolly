@@ -233,6 +233,7 @@ class Controller:
         self._restore = {}
         self._demo_speed_changed = False
         self._playback_restore = {}
+        self._layer_hidden = None
         self._healthbar_restore = {}
         self._glow_disabled = False
         self._playback_details = None
@@ -3901,8 +3902,23 @@ class Controller:
     # hides a class for the current frames; 0 restores it. The live registry
     # is read with sc_showclasses so a game update is detected instead of
     # silently producing a wrong layer.
+    #
+    # Every mode is expressed as a KEEP-list: the layer shows exactly the listed
+    # classes and hides the rest of the live registry. This is deliberate — the
+    # registry is dynamic (a build can add or drop classes such as
+    # ``projectedDecal``), so a hide-list would silently leak an unlisted class
+    # into the layer. A keep-list excludes unknown classes by default and fails
+    # closed when a required class disappears (`apply_layer_mode`).
+    #
+    # Owners (verified live 2026-09-27 by hiding each class and comparing the
+    # rendered frame): characters -> SkinnedObject, effects -> ParticleSystem,
+    # static world/lighting -> AggregateDesc/BarnLight/Default and the remaining
+    # scene classes.
     LAYER_MODES = {
-        "world": {"hide": ("SkinnedObject", "ParticleSystem", "panorama_world_panel")},
+        "world": {"keep": ("AggregateDesc", "BarnLight", "DirectionalLight", "OmniLight",
+                           "LightProbeVolume", "Default", "MeshBuilderObject",
+                           "ZipLineRopeSegment", "InstancedMesh", "projectedDecal",
+                           "EnvMap", "Skybox")},
         "players": {"keep": ("SkinnedObject",)},
         "effects": {"keep": ("ParticleSystem",)},
     }
@@ -3919,10 +3935,12 @@ class Controller:
         return classes
 
     def apply_layer_mode(self, mode):
-        """Hide every scene class the selected layer does not contain.
+        """Show exactly the selected layer's keep-list; hide every other class.
 
-        Confirmed live against Deadlock: hiding SkinnedObject removes players,
-        ParticleSystem removes effects, panorama_world_panel removes world UI.
+        Owners verified live: characters -> SkinnedObject, effects ->
+        ParticleSystem, static world/lighting -> AggregateDesc/BarnLight/Default
+        and the remaining scene classes. Unknown/new registry classes are hidden
+        by default (keep-list), so the layer fails closed instead of leaking.
         """
         if mode not in self.LAYER_MODES:
             raise ValueError("Unknown layer mode: " + str(mode))
@@ -3954,6 +3972,10 @@ class Controller:
         if failures:
             raise RuntimeError("Could not hide scene classes for the " + mode + " layer: "
                                + ", ".join(failures))
+        # Remember exactly which classes this layer hid so reset restores only
+        # what needs restoring (the registry is dynamic; a keep-list can hide
+        # many classes).
+        self._layer_hidden = set(targets)
         return {"mode": mode, "hidden": targets, "classes": classes}
 
     def reset_layer_modes(self):
@@ -3962,11 +3984,16 @@ class Controller:
         Raises when any class could not be shown again: a silently failed
         restore would leave the game hiding players or effects.
         """
-        try:
-            classes = self.scene_classes()
-        except (RuntimeError, ValueError, OSError):
-            classes = [name for spec in self.LAYER_MODES.values()
-                       for name in (*spec.get("keep", ()), *spec.get("hide", ()))]
+        pending = getattr(self, "_layer_hidden", None)
+        if pending is None:
+            # No layer applied this session; try the live registry so a stray
+            # flag cannot persist, but send nothing if it is unreadable.
+            try:
+                classes = self.scene_classes()
+            except (RuntimeError, ValueError, OSError):
+                classes = []
+        else:
+            classes = sorted(pending)
         failures = []
         for name in classes:
             try:
@@ -3975,6 +4002,7 @@ class Controller:
                 failures.append(name + " (" + str(exc) + ")")
         if failures:
             raise RuntimeError("Could not restore scene classes: " + ", ".join(failures))
+        self._layer_hidden = None
 
     # Screen post-processing that contaminates black/white matte passes.
     # Bloom spills over the layer and the forced white clear; eye-adaptation
