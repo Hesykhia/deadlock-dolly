@@ -19,6 +19,10 @@ class PreloadError(RuntimeError):
     """Verification unavailable; never permission to dispatch a replay."""
 
 
+class _ReviewedBuildMismatch(PreloadError):
+    """A successful read disagreed with the reviewed build; never retried away."""
+
+
 CLIENT_SHA256 = "cb831d124403ee2f3afa54981e69d8acf71251ba1129d0733757251f74a157c2"
 RESOURCE_SHA256 = "55ca9912cd80a08ea233d31a215236a0bc601139877eacc0cbd296b6f5bb192b"
 MANAGER = 0x2dd3ef0
@@ -218,15 +222,28 @@ class PreloadMonitor:
     def sample(self):
         if not self.session.running:
             raise PreloadError('Deadlock closed during preload verification.')
+        try:
+            return self._sample()
+        except _ReviewedBuildMismatch:
+            raise
+        except PreloadError:
+            # The preload object lives in the game's writable data and can be
+            # briefly unreadable while the hideout is still loading. That is
+            # "not ready yet", not an incompatible build, so keep polling
+            # rather than abort automatic startup. A read that succeeds but
+            # contradicts the reviewed build still fails closed above.
+            return {'coherent': False}
+
+    def _sample(self):
         memory = self.memory
         raw = memory.read(self.base+MANAGER, 64)
         if raw != memory.read(self.base+MANAGER, 64):
             return {'coherent': False}
         if struct.unpack_from('<Q', raw)[0] != self.base+MANAGER_VTABLE:
-            raise PreloadError('Preload object type differs from the reviewed build.')
+            raise _ReviewedBuildMismatch('Preload object type differs from the reviewed build.')
         completed, total = struct.unpack_from('<ii', raw, 0x24)
         if not 0 <= completed <= 10000000 or not 0 <= total <= 10000000:
-            raise PreloadError('Preload counters are outside their reviewed range.')
+            raise _ReviewedBuildMismatch('Preload counters are outside their reviewed range.')
         resource = struct.unpack_from('<Q', raw, 0x30)[0]
         job = struct.unpack_from('<i', raw, 0x38)[0]
         # The resource-system global is populated partway through the hideout
@@ -242,7 +259,7 @@ class PreloadMonitor:
             return {'coherent': False}
         if (vtable != self.resource_base+RESOURCE_VTABLE
                 or memory.pointer(vtable+0xc0) != self.resource_base+RESOURCE_QUERY):
-            raise PreloadError('Resource completion query differs from the reviewed build.')
+            raise _ReviewedBuildMismatch('Resource completion query differs from the reviewed build.')
         resource_done = memory.read(resource+0x44, 1)[0] if resource else 1
         if resource_done not in (0, 1) or raw != memory.read(self.base+MANAGER, 64):
             return {'coherent': False}
@@ -255,10 +272,10 @@ class PreloadMonitor:
                 except PreloadError:
                     return {'coherent': False}
                 if struct.unpack_from('<Q', state)[0] != self.base+INTRO_VTABLE:
-                    raise PreloadError('Intro object type differs from the reviewed build.')
+                    raise _ReviewedBuildMismatch('Intro object type differs from the reviewed build.')
                 intro_phase = struct.unpack_from('<i', state, 0x80)[0]
                 if intro_phase not in (0, 1, 2, 3):
-                    raise PreloadError('Unrecognized Deadlock intro state.')
+                    raise _ReviewedBuildMismatch('Unrecognized Deadlock intro state.')
                 if (memory.pointer(self.base+INTRO_GLOBAL) != intro
                         or memory.read(intro+0x80, 4) != state[0x80:0x84]):
                     return {'coherent': False}

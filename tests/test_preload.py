@@ -83,6 +83,21 @@ class PreloadTests(unittest.TestCase):
         m.memory.read.side_effect = guarded
         self.assertEqual(m.sample(), {'coherent': False})
 
+    def test_transient_status_read_failure_is_not_ready_and_does_not_abort(self):
+        m, _, _ = self.monitor()
+        read = m.memory.read.side_effect
+        failing = {m.base+preload.MANAGER}
+
+        def guarded(address, size):
+            if address in failing:
+                failing.discard(address)
+                raise preload.PreloadError('Could not read complete preload status; replay remains unloaded.')
+            return read(address, size)
+
+        m.memory.read.side_effect = guarded
+        self.assertEqual(m.sample(), {'coherent': False})
+        self.assertTrue(m.sample()['coherent'])
+
     def test_changed_resource_query_fails_closed(self):
         m, _, pointers = self.monitor()
         pointers[m.resource_base+preload.RESOURCE_VTABLE+0xc0] += 1
