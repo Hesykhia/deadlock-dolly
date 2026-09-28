@@ -271,6 +271,16 @@ def build_export(app):
     app.video_path_entry = field(destination, "Output file", app.video_path)
     app.video_browse_button = actions(destination, (("Browse...", app._browse_video),
                               ("Open output folder", app._open_output_folder)), 2)[0]
+    audio_options = ttk.Frame(destination, style="Card.TFrame")
+    audio_options.pack(anchor="w", pady=(0, GAP))
+    app.video_game_audio_check = ttk.Checkbutton(
+        audio_options, style="Card.TCheckbutton", text="Include game audio",
+        variable=app.video_game_audio)
+    app.video_game_audio_check.pack(side="left", padx=(0, 18))
+    app.video_reconstructed_audio_check = ttk.Checkbutton(
+        audio_options, style="Card.TCheckbutton", text="Include reconstructed audio",
+        variable=app.video_reconstructed_audio)
+    app.video_reconstructed_audio_check.pack(side="left")
     options = ttk.Frame(body)
     options.pack(fill="x", pady=(0, GAP))
     for i in (0, 1):

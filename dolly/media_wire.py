@@ -4,14 +4,15 @@ from __future__ import annotations
 import ntpath
 import struct
 
-ABI = 2
+ABI = 3
 MAPPING_BYTES = 12288
 STATUS_OFFSET = 8192
 COMMAND = struct.Struct("<8s6I4I2048s2048s2048s")
-STATUS = struct.Struct("<8s10I3Q2I768s768s768s")
+STATUS = struct.Struct("<8s10I3Q2I768s768s768s2Q")
 VIDEO_STATES = ("idle", "starting", "recording", "finalizing", "completed", "cancelled", "failed")
 COMMANDS = {"start_video": 1, "stop_video": 2, "cancel_video": 3,
-            "configure_reshade": 4, "disable_reshade": 5, "toggle_reshade": 6}
+            "configure_reshade": 4, "disable_reshade": 5, "toggle_reshade": 6,
+            "start_source_audio": 7, "stop_source_audio": 8}
 # Encoder values match native dolly::video::Encoder.
 ENCODERS = ("media_foundation", "ffmpeg")
 # Codec values match native dolly::video::Codec. libx264/libx265 require a GPL
@@ -77,7 +78,7 @@ def pack_command(sequence, command, *, path="", config_path="", fps=60, bitrate=
     return COMMAND.pack(b"DLYMED01", sequence, ABI, COMMANDS[command], fps, bitrate,
                         reserved,
                         encoder, codec, quality, preset,
-                        _path(path, command in ("start_video", "configure_reshade")),
+                        _path(path, command in ("start_video", "configure_reshade", "start_source_audio")),
                         _path(config_path, command == "configure_reshade"),
                         _path(ffmpeg_path, needs_ffmpeg))
 
@@ -95,7 +96,8 @@ def unpack_status(data):
     fields = STATUS.unpack(data)
     (magic, seq, abi, ack, command_error, video_state, fps, width, height,
      reshade_state, reshade_open, written, dropped, duration, video_error,
-     reshade_error, video_message, reshade_message, command_message) = fields
+     reshade_error, video_message, reshade_message, command_message,
+     video_first_qpc, qpc_frequency) = fields
     if (magic != b"DLYMDS01" or abi != ABI or seq & 1 or video_state >= len(VIDEO_STATES)
             or reshade_open not in (0, 1) or fps not in (0, 30, 60, 120, 300, 600)
             or width > 16384 or height > 16384):
@@ -105,6 +107,7 @@ def unpack_status(data):
             "fps": fps, "width": width, "height": height, "frames_written": written,
             "frames_dropped": dropped, "duration_100ns": duration,
             "duration": duration / 10000000, "error_code": video_error,
+            "video_first_qpc": video_first_qpc, "qpc_frequency": qpc_frequency,
             "error": _text(video_message),
             "reshade": {"state": reshade_state, "open": bool(reshade_open),
                         "error_code": reshade_error, "message": _text(reshade_message)}}

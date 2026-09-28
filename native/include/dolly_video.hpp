@@ -73,6 +73,7 @@ struct Status {
     State state = State::idle;
     std::uint32_t width = 0, height = 0, fps = 0, error_code = 0;
     std::uint64_t frames_written = 0, frames_dropped = 0, duration_100ns = 0;
+    std::uint64_t first_qpc = 0, qpc_frequency = 0;
     wchar_t error[256]{};
 };
 // Starts a video-only, real-time recording. The encoder initializes

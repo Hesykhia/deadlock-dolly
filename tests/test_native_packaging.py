@@ -85,7 +85,10 @@ class NativePackagingTests(unittest.TestCase):
         dll = native / build_native.DLL_RELATIVE
         dll.parent.mkdir(parents=True)
         dll.write_bytes(b"Dolly test fixture, never executable")
-        info = {"abi": build_native.BRIDGE_ABI, "sha256": sha256(dll)}
+        recorder = native / build_native.AUDIO_RELATIVE
+        recorder.write_bytes(b"Audio recorder fixture, never executable")
+        info = {"abi": build_native.BRIDGE_ABI, "sha256": sha256(dll),
+                "game_audio_sha256": sha256(recorder)}
         metadata = native / "build_info.json"
         metadata.write_text(json.dumps(info))
         confetti = native / "assets/confetti/pak01_dir.vpk"
@@ -134,7 +137,7 @@ class NativePackagingTests(unittest.TestCase):
         with patch.object(build_native, "verify_native_dll", return_value={"machine": "x64"}):
             build_native.copy_native_runtime(self.root, output)
         self.assertEqual({p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()},
-                         {"bin/win64/DollyNative.dll", "build_info.json",
+                         {"bin/win64/DollyNative.dll", "bin/win64/DollyGameAudio.exe", "build_info.json",
                           "assets/confetti/pak01_dir.vpk", "profiles/supported-build.json"})
         self.assertEqual(sha256(output / build_native.DLL_RELATIVE), sha256(dll))
 

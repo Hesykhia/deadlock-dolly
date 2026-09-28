@@ -38,7 +38,8 @@ class MediaTransportTests(unittest.TestCase):
             self.state = 4
         packet = wire.STATUS.pack(b"DLYMDS01", 2, wire.ABI, command[1], self.command_error,
                                   self.state, 60, 1920, 1080, 2, 0, 120, 3, 20000000,
-                                  0, 0, b"", b"", "Rejected".encode("utf-16-le"))
+                                  0, 0, b"", b"", "Rejected".encode("utf-16-le"),
+                                  123456, 10000000)
         memory[wire.STATUS_OFFSET:wire.STATUS_OFFSET + len(packet)] = packet
 
     def tearDown(self):
@@ -151,13 +152,37 @@ class MediaTransportTests(unittest.TestCase):
 
     def test_protocol_layout_and_invalid_paths(self):
         self.assertEqual(wire.COMMAND.size, 6192)
-        self.assertEqual(wire.STATUS.size, 2384)
+        self.assertEqual(wire.STATUS.size, 2400)
         for path in ("relative.mp4", "C:relative.mp4", "\\root-only.mp4", "C:\\bad\0.mp4", "C:\\" + "x" * 1024):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 wire.pack_command(2, "start_video", path=path)
         for fps in (True, 0, 24, 200):
             with self.subTest(fps=fps), self.assertRaises(ValueError):
                 wire.pack_command(2, "start_video", path="C:\\ok.mp4", fps=fps)
+
+    def test_source_audio_commands_share_verified_media_mapping(self):
+        path = "C:\\Videos\\selected_voices.csv"
+        self.bridge.start_source_audio(path)
+        command = wire.COMMAND.unpack_from(self.bridge._media_mapping)
+        self.assertEqual(command[3], 7)
+        self.assertEqual(command[11].decode("utf-16-le").rstrip("\0"), path)
+        self.assertTrue(self.bridge._source_audio_recording)
+        self.bridge.stop_source_audio()
+        self.assertEqual(wire.COMMAND.unpack_from(self.bridge._media_mapping)[3], 8)
+        self.assertFalse(self.bridge._source_audio_recording)
+
+    def test_source_audio_capture_stops_on_disconnect(self):
+        self.bridge.start_source_audio("C:\\Videos\\selected_voices.csv")
+        self.bridge._close_media()
+        self.assertIn(8, self.observed_commands)
+
+    def test_unacknowledged_source_audio_start_is_stopped_on_disconnect(self):
+        self.respond = False
+        with self.assertRaises(NativeBridgeError):
+            self.bridge.start_source_audio("C:\\Videos\\selected_voices.csv")
+        self.respond = True
+        self.bridge._close_media()
+        self.assertIn(8, self.observed_commands)
 
     def test_close_supersedes_an_unacknowledged_start(self):
         self.respond = False
