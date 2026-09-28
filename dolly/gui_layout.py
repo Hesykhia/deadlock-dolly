@@ -6,6 +6,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
 
+from . import ui_theme
+
 GAP = 14
 
 
@@ -13,7 +15,7 @@ class ScrollPage(ttk.Frame):
     """One vertical scroll region; wheel events stay within this page."""
     def __init__(self, parent):
         super().__init__(parent)
-        self.canvas = tk.Canvas(self, background="#10171b", highlightthickness=0)
+        self.canvas = tk.Canvas(self, background=ui_theme.TOKENS["bg"], highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -129,7 +131,7 @@ def build_library(app):
     page.pack(fill="both", expand=True)
     app.library_page = page
     body = page.body
-    ttk.Label(body, text="Replays & shots", style="Section.TLabel").pack(anchor="w", pady=(0, GAP))
+    ttk.Label(body, text="REPLAYS & SHOTS", style="Section.TLabel").pack(anchor="w", pady=(0, GAP))
     pair = ttk.Frame(body)
     pair.pack(fill="both", expand=True, pady=(0, GAP))
     for col in (0, 1):
@@ -211,7 +213,7 @@ def build_settings(app):
     page.pack(fill="both", expand=True)
     app.settings_page = page
     body = page.body
-    ttk.Label(body, text="Settings", style="Section.TLabel").pack(anchor="w", pady=(0, GAP))
+    ttk.Label(body, text="SETTINGS", style="Section.TLabel").pack(anchor="w", pady=(0, GAP))
     updates = card(body, "Updates")
     app.auto_updates = tk.BooleanVar(value=app.app_settings.auto_updates)
     app.update_status = tk.StringVar(value="Checks published Latest releases; experimental pre-releases are ignored.")
@@ -255,7 +257,7 @@ def build_export(app):
     app.export_page = page
     recording_holder.configure(padding=(16, GAP, 16 + page.scrollbar.winfo_reqwidth(), 0))
     body = page.body
-    ttk.Label(body, text="Export", style="Section.TLabel").pack(anchor="w", pady=(0, GAP))
+    ttk.Label(body, text="EXPORT", style="Section.TLabel").pack(anchor="w", pady=(0, GAP))
     source = card(body, "Camera source")
     app.video_source_combo = field(source, "Source", app.video_source, values=("Camera path", "Player POV"))
     app.video_source_combo.bind("<<ComboboxSelected>>", app._video_source_changed)

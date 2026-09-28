@@ -82,8 +82,12 @@ class EditorBinding:
 def default_action_bindings(capture_binding: CaptureBinding = DEFAULT_BINDING) -> dict[str, EditorBinding | None]:
     if not isinstance(capture_binding, CaptureBinding):
         raise ValueError("capture_binding must be a CaptureBinding.")
+    # Stop / restore defaults to Backspace rather than F6: Deadlock's developer
+    # Panorama/debug UI also opens on F6, so the old default made one keypress
+    # both open the game's UI and release Dolly's camera. Only the default
+    # changes; ACTION_ORDER/IDs (the ABI) are untouched.
     result = {name: EditorBinding(key) for name, key in zip(ACTION_ORDER, (
-        "K", "R", "P", "F5", "F6", "PageUp", "PageDown", "Comma", "Period",
+        "K", "R", "P", "F5", "Backspace", "PageUp", "PageDown", "Comma", "Period",
         "F8", "F9", "F10", "W", "S", "A", "D", "Space", "Ctrl", "Shift", "Alt",
         "Left", "Right", "Up", "Down", "Q", "E",
     ))}

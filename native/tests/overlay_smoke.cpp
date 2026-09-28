@@ -489,6 +489,25 @@ namespace dolly {
 EditorSnapshot editor_snapshot() noexcept {
     return snapshot;
 }
+EditorBinding editor_binding_snapshot(EditorAction action) noexcept {
+    EditorBinding binding{};
+    // A representative default so the key-cap hints render in the smoke test.
+    if (action == EditorAction::Capture) {
+        binding.vk = 'K';
+        binding.modifiers = 3;
+    } else if (action == EditorAction::PlayPath) {
+        binding.vk = 0x74; // F5
+    } else if (action == EditorAction::PlayPause) {
+        binding.vk = 'P';
+    } else if (action == EditorAction::Stop) {
+        binding.vk = 0x08; // Backspace
+    } else if (action == EditorAction::Flight) {
+        binding.vk = 0x79; // F10
+    } else if (action == EditorAction::GameUI) {
+        binding.vk = 0x78; // F9
+    }
+    return binding;
+}
 bool editor_roster_snapshot(EditorRoster& out) noexcept {
     out = EditorRoster{};
     if (!snapshot.attach_available)
@@ -657,7 +676,7 @@ int main(int argc, char** argv) {
             require(SUCCEEDED(chain->Present(0, 0)), "Synthetic Present failed");
             if (screenshot && i == 0) {
                 const char* page =
-                    lens_screenshot ? "Look" : (export_screenshot ? "Export" : "Camera");
+                    lens_screenshot ? "LOOK" : (export_screenshot ? "EXPORT" : "CAMERA");
                 require(screenshot_context != nullptr, "Overlay ImGui context missing");
                 auto& bars = screenshot_context->TabBars;
                 bool found = false;

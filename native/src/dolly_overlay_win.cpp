@@ -2,6 +2,7 @@
 // second window, console-command renderer, or replacement for path evaluation.
 #include "dolly_overlay.hpp"
 #include "dolly_attach.hpp"
+#include "dolly_ui_tokens_generated.hpp"
 #include "dolly_editor.hpp"
 #include "dolly_bone_picker.hpp"
 #include "dolly_visualization.hpp"
@@ -362,7 +363,11 @@ ImVec4 panel_color(unsigned rgb, float alpha = 1.0f) {
 void style_panel() {
     ImGui::StyleColorsDark();
     auto& style = ImGui::GetStyle();
-    // Keep the in-game editor on the launcher's slate/teal palette.
+    // Dolly palette, shared with the desktop Tk UI. The values live in
+    // dolly/ui_theme.py and reach here through dolly_ui_tokens_generated.hpp
+    // (regenerate with tools/generate_ui_tokens.py); tests/test_ui_theme.py
+    // fails if the two drift apart.
+    namespace ui = dolly::ui;
     style.WindowPadding = ImVec2(16, 14);
     style.FramePadding = ImVec2(10, 5);
     style.ItemSpacing = ImVec2(8, 6);
@@ -375,46 +380,53 @@ void style_panel() {
     style.ScrollbarRounding = 6;
     style.WindowBorderSize = 1;
     style.ChildBorderSize = 1;
-    style.FrameBorderSize = 0;
+    style.FrameBorderSize = 1;
     style.ScrollbarSize = 10;
     style.GrabMinSize = 14;
     style.DisabledAlpha = .45f;
-    style.Colors[ImGuiCol_WindowBg] = panel_color(0x10171b, .985f);
-    style.Colors[ImGuiCol_ChildBg] = panel_color(0x192329);
-    style.Colors[ImGuiCol_PopupBg] = panel_color(0x192229);
-    style.Colors[ImGuiCol_Border] = panel_color(0x26343b);
-    style.Colors[ImGuiCol_Text] = panel_color(0xe1e8eb);
-    style.Colors[ImGuiCol_TextDisabled] = panel_color(0xa6b7c0);
-    style.Colors[ImGuiCol_Button] = panel_color(0x25313e);
-    style.Colors[ImGuiCol_ButtonHovered] = panel_color(0x203039);
-    style.Colors[ImGuiCol_ButtonActive] = panel_color(0x233c3b);
-    style.Colors[ImGuiCol_FrameBg] = panel_color(0x10171c);
-    style.Colors[ImGuiCol_FrameBgHovered] = panel_color(0x25313e);
-    style.Colors[ImGuiCol_FrameBgActive] = panel_color(0x2f4150);
-    style.Colors[ImGuiCol_SliderGrab] = panel_color(0x95dbcb);
-    style.Colors[ImGuiCol_SliderGrabActive] = panel_color(0xafe8dc);
-    style.Colors[ImGuiCol_CheckMark] = panel_color(0x95dbcb);
-    style.Colors[ImGuiCol_Header] = panel_color(0x274e4b);
+    // Native-feeling tabs: soft corners and a slim accent overline on the active
+    // tab, no heavy tab-bar border.
+    style.TabRounding = 4;
+    style.TabBarBorderSize = 0;
+    style.TabBarOverlineSize = 2;
+    style.Colors[ImGuiCol_WindowBg] = panel_color(ui::BG, .97f);
+    style.Colors[ImGuiCol_ChildBg] = panel_color(ui::PANEL);
+    style.Colors[ImGuiCol_PopupBg] = panel_color(ui::PANEL);
+    style.Colors[ImGuiCol_Border] = panel_color(ui::EDGE);
+    style.Colors[ImGuiCol_Text] = panel_color(ui::TEXT);
+    style.Colors[ImGuiCol_TextDisabled] = panel_color(ui::MUTED);
+    style.Colors[ImGuiCol_Button] = panel_color(ui::BUTTON);
+    style.Colors[ImGuiCol_ButtonHovered] = panel_color(ui::BUTTON_HOVER);
+    style.Colors[ImGuiCol_ButtonActive] = panel_color(ui::BUTTON_ACTIVE);
+    // Recessed field surface so checkboxes, dropdowns and inputs read as
+    // interactive controls against the panel background.
+    style.Colors[ImGuiCol_FrameBg] = panel_color(ui::FIELD);
+    style.Colors[ImGuiCol_FrameBgHovered] = panel_color(ui::PANEL_ALT);
+    style.Colors[ImGuiCol_FrameBgActive] = panel_color(ui::BUTTON);
+    style.Colors[ImGuiCol_SliderGrab] = panel_color(ui::ACCENT);
+    style.Colors[ImGuiCol_SliderGrabActive] = panel_color(ui::ACCENT_HOVER);
+    style.Colors[ImGuiCol_CheckMark] = panel_color(ui::ACCENT);
+    style.Colors[ImGuiCol_Header] = panel_color(ui::SELECTED);
     style.Colors[ImGuiCol_HeaderHovered] = style.Colors[ImGuiCol_ButtonHovered];
     style.Colors[ImGuiCol_HeaderActive] = style.Colors[ImGuiCol_ButtonActive];
-    style.Colors[ImGuiCol_Separator] = panel_color(0x2b3941);
-    style.Colors[ImGuiCol_ScrollbarBg] = panel_color(0x11171c, 0);
-    style.Colors[ImGuiCol_ScrollbarGrab] = panel_color(0x354150);
-    style.Colors[ImGuiCol_ScrollbarGrabHovered] = panel_color(0x526577);
-    style.Colors[ImGuiCol_ScrollbarGrabActive] = panel_color(0x95dbcb);
-    style.Colors[ImGuiCol_ResizeGrip] = panel_color(0x95dbcb, .15f);
-    style.Colors[ImGuiCol_ResizeGripHovered] = panel_color(0x95dbcb, .45f);
-    style.Colors[ImGuiCol_ResizeGripActive] = panel_color(0x95dbcb, .75f);
-    style.Colors[ImGuiCol_NavCursor] = panel_color(0x95dbcb);
-    style.Colors[ImGuiCol_TextSelectedBg] = panel_color(0x274e4b);
-    style.Colors[ImGuiCol_PlotHistogram] = panel_color(0x95dbcb);
-    style.Colors[ImGuiCol_Tab] = panel_color(0x1b232d);
-    style.Colors[ImGuiCol_TabHovered] = panel_color(0x2b3a47);
-    style.Colors[ImGuiCol_TabSelected] = panel_color(0x274e4b);
-    style.Colors[ImGuiCol_TabSelectedOverline] = panel_color(0x95dbcb);
-    style.Colors[ImGuiCol_TabDimmed] = panel_color(0x161d25);
-    style.Colors[ImGuiCol_TabDimmedSelected] = panel_color(0x203a39);
-    style.Colors[ImGuiCol_TabDimmedSelectedOverline] = panel_color(0x3f6f68);
+    style.Colors[ImGuiCol_Separator] = panel_color(ui::EDGE);
+    style.Colors[ImGuiCol_ScrollbarBg] = panel_color(ui::BG, 0);
+    style.Colors[ImGuiCol_ScrollbarGrab] = panel_color(ui::EDGE);
+    style.Colors[ImGuiCol_ScrollbarGrabHovered] = panel_color(ui::SCROLL_HOVER);
+    style.Colors[ImGuiCol_ScrollbarGrabActive] = panel_color(ui::ACCENT);
+    style.Colors[ImGuiCol_ResizeGrip] = panel_color(ui::ACCENT, .15f);
+    style.Colors[ImGuiCol_ResizeGripHovered] = panel_color(ui::ACCENT, .45f);
+    style.Colors[ImGuiCol_ResizeGripActive] = panel_color(ui::ACCENT, .75f);
+    style.Colors[ImGuiCol_NavCursor] = panel_color(ui::ACCENT);
+    style.Colors[ImGuiCol_TextSelectedBg] = panel_color(ui::SELECTED);
+    style.Colors[ImGuiCol_PlotHistogram] = panel_color(ui::ACCENT);
+    style.Colors[ImGuiCol_Tab] = panel_color(ui::PANEL);
+    style.Colors[ImGuiCol_TabHovered] = panel_color(ui::BUTTON);
+    style.Colors[ImGuiCol_TabSelected] = panel_color(ui::SELECTED);
+    style.Colors[ImGuiCol_TabSelectedOverline] = panel_color(ui::ACCENT);
+    style.Colors[ImGuiCol_TabDimmed] = panel_color(ui::TAB_DIM);
+    style.Colors[ImGuiCol_TabDimmedSelected] = panel_color(ui::TAB_DIM_SELECTED);
+    style.Colors[ImGuiCol_TabDimmedSelectedOverline] = panel_color(ui::TAB_DIM_OVERLINE);
 }
 bool compact_checkbox(const char* label, bool* value, float scale) {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * scale, 2 * scale));
@@ -473,7 +485,33 @@ struct DeviceStateScope {
     }
 };
 
+// Diagnostic-only timing for the overlay startup path. Inert unless the game is
+// launched with DOLLY_OVERLAY_TIMING=1; writes to %TEMP%\dolly_overlay_timing.log.
+void overlay_timing(const char* message) {
+    if (GetEnvironmentVariableW(L"DOLLY_OVERLAY_TIMING", nullptr, 0) == 0)
+        return;
+    wchar_t dir[MAX_PATH]{};
+    if (GetTempPathW(MAX_PATH, dir) == 0)
+        return;
+    wchar_t path[MAX_PATH]{};
+    _snwprintf_s(path, MAX_PATH, _TRUNCATE, L"%sdolly_overlay_timing.log", dir);
+    FILE* file = nullptr;
+    if (_wfopen_s(&file, path, L"a") == 0 && file) {
+        std::fprintf(file, "%s\n", message);
+        std::fclose(file);
+    }
+}
+
 bool initialize_device(IDXGISwapChain* chain) {
+    const ULONGLONG t_start = GetTickCount64();
+    ULONGLONG t_phase = t_start;
+    auto mark = [&](const char* label) {
+        const ULONGLONG now = GetTickCount64();
+        char text[160]{};
+        std::snprintf(text, sizeof(text), "init %-28s %5llu ms", label, now - t_phase);
+        overlay_timing(text);
+        t_phase = now;
+    };
     diagnostic_init_attempts.fetch_add(1, std::memory_order_relaxed);
     DXGI_SWAP_CHAIN_DESC description{};
     if (FAILED(chain->GetDesc(&description)) || !suitable_window(description.OutputWindow))
@@ -509,11 +547,13 @@ bool initialize_device(IDXGISwapChain* chain) {
     // shaders or output UAVs. Context swapping covers those and other overlays.
     game_window = description.OutputWindow;
     swapchain = chain;
+    mark("device_state");
     if (!create_target(chain)) {
         last_error = "Could not create the editor render target.";
         release_device();
         return false;
     }
+    mark("create_target");
     IMGUI_CHECKVERSION();
     auto* previous = ImGui::GetCurrentContext();
     imgui = ImGui::CreateContext();
@@ -537,6 +577,7 @@ bool initialize_device(IDXGISwapChain* chain) {
         release_device();
         return false;
     }
+    mark("imgui_fonts");
     bool gpu_ready = false;
     {
         GuiContextScope scope(imgui);
@@ -549,6 +590,7 @@ bool initialize_device(IDXGISwapChain* chain) {
         release_device();
         return false;
     }
+    mark("device_objects");
     // Install exactly once on the actual swapchain window. A property retains
     // its original callback even if another overlay chains us during a resize.
     auto prior = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(game_window, GWLP_WNDPROC));
@@ -582,17 +624,24 @@ bool initialize_device(IDXGISwapChain* chain) {
     editor_attach_window(game_window);
     editor_overlay_available(true);
     diagnostic_init_successes.fetch_add(1, std::memory_order_relaxed);
+    mark("window_attach");
+    {
+        char text[160]{};
+        std::snprintf(text, sizeof(text), "init TOTAL                     %5llu ms",
+                      GetTickCount64() - t_start);
+        overlay_timing(text);
+    }
     return true;
 }
 
 void action_button(const char* label, EditorAction action, float width = 0, double value = 0,
                    bool primary = false) {
     if (primary) {
-        ImGui::PushStyleColor(ImGuiCol_Button, panel_color(0x95dbcb));
-        ImGui::PushStyleColor(ImGuiCol_Border, panel_color(0x95dbcb));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, panel_color(0xafe8dc));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, panel_color(0x77beaf));
-        ImGui::PushStyleColor(ImGuiCol_Text, panel_color(0x092620));
+    ImGui::PushStyleColor(ImGuiCol_Button, panel_color(dolly::ui::ACCENT));
+    ImGui::PushStyleColor(ImGuiCol_Border, panel_color(dolly::ui::ACCENT));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, panel_color(dolly::ui::ACCENT_HOVER));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, panel_color(dolly::ui::ACCENT_ACTIVE));
+    ImGui::PushStyleColor(ImGuiCol_Text, panel_color(dolly::ui::ACCENT_INK));
         ImGui::PushFont(heading_font);
     }
     if (ImGui::Button(label, ImVec2(width, 0)))
@@ -602,6 +651,76 @@ void action_button(const char* label, EditorAction action, float width = 0, doub
         ImGui::PopStyleColor(5);
     }
 }
+// Stock key-cap glyph: a light cap with a dark label for the bound action,
+// rendered from the live editor binding. key_cap_width() lets a caller reserve
+// room so the chip never spills past the panel edge; key_cap() draws it.
+bool key_cap_text(EditorAction action, char* out, std::size_t capacity) {
+    const EditorBinding binding = editor_binding_snapshot(action);
+    const std::uint16_t vk = binding.vk;
+    if (!vk || capacity == 0)
+        return false;
+    std::size_t n = 0;
+    auto append = [&](const char* s) {
+        while (*s && n < capacity - 1)
+            out[n++] = *s++;
+    };
+    if (binding.modifiers & 1)
+        append("CTRL+");
+    if (binding.modifiers & 2)
+        append("ALT+");
+    if (binding.modifiers & 4)
+        append("SHIFT+");
+    // Function keys and single characters read cleanly; named keys use short forms.
+    if (vk >= 0x70 && vk <= 0x87) {
+        char fn[4] = {'F', char('1' + (vk - 0x70)), 0, 0};
+        append(fn);
+    } else if ((vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z')) {
+        char ch[2] = {char(vk), 0};
+        append(ch);
+    } else if (vk == 0x20) {
+        append("SPACE");
+    } else if (vk == 0x08) {
+        append("BACKSPACE");
+    } else if (vk == 0x21) {
+        append("PGUP");
+    } else if (vk == 0x22) {
+        append("PGDN");
+    } else if (vk == 0xBC) {
+        append(",");
+    } else if (vk == 0xBE) {
+        append(".");
+    } else {
+        return false; // Unnamed key: skip the chip rather than guess.
+    }
+    out[n] = 0;
+    return n != 0;
+}
+// Total horizontal room the chip needs, including the gap after it (0 if none).
+float key_cap_width(EditorAction action, float scale) {
+    char text[24]{};
+    if (!key_cap_text(action, text, sizeof(text)))
+        return 0;
+    return ImGui::CalcTextSize(text).x + 18 * scale;
+}
+// Draw the chip at the current cursor and advance it. Returns the width used.
+float key_cap(EditorAction action, float scale) {
+    char text[24]{};
+    if (!key_cap_text(action, text, sizeof(text)))
+        return 0;
+    const ImVec2 size = ImGui::CalcTextSize(text);
+    const float pad_x = 6 * scale, pad_y = 3 * scale;
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float height = size.y + pad_y * 2;
+    const float width = size.x + pad_x * 2;
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, ImVec2(origin.x + width, origin.y + height),
+                        ImGui::GetColorU32(panel_color(dolly::ui::KEYCAP)), 4 * scale);
+    draw->AddText(ImVec2(origin.x + pad_x, origin.y + pad_y),
+                  ImGui::GetColorU32(panel_color(dolly::ui::KEYCAP_INK)), text);
+    ImGui::Dummy(ImVec2(width, height));
+    return width;
+}
+
 void roster_label(const EditorRosterEntry& entry, char* out, std::size_t capacity) {
     const char* hero = attach_hero_name(entry.model_path);
     if (hero) {
@@ -641,12 +760,12 @@ SliderRow slider_row(const char* id, const char* label, float* value, float mini
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 2 * panel_scale));
     ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, 5 * panel_scale);
     for (const auto color : {ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive,
-                             ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive})
+                             ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive, ImGuiCol_Border})
         ImGui::PushStyleColor(color, ImVec4(0, 0, 0, 0));
     ImGui::SliderFloat(id, value, minimum, maximum, "", ImGuiSliderFlags_AlwaysClamp);
     result.committed = ImGui::IsItemDeactivatedAfterEdit();
     result.active = ImGui::IsItemActive();
-    ImGui::PopStyleColor(5);
+    ImGui::PopStyleColor(6);
     ImGui::PopStyleVar(2);
     if (!(result.active && ImGui::GetIO().WantTextInput)) {
         const auto lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
@@ -655,9 +774,9 @@ SliderRow slider_row(const char* id, const char* label, float* value, float mini
         const float t = std::clamp((*value - minimum) / (maximum - minimum), 0.0f, 1.0f);
         const float x = x0 + (x1 - x0) * t;
         auto* draw = ImGui::GetWindowDrawList();
-        draw->AddLine(ImVec2(x0, y), ImVec2(x1, y), ImGui::GetColorU32(panel_color(0x0e171d)),
+        draw->AddLine(ImVec2(x0, y), ImVec2(x1, y), ImGui::GetColorU32(panel_color(dolly::ui::TRACK)),
                       6 * panel_scale);
-        draw->AddLine(ImVec2(x0, y), ImVec2(x, y), ImGui::GetColorU32(panel_color(0x385d59)),
+        draw->AddLine(ImVec2(x0, y), ImVec2(x, y), ImGui::GetColorU32(panel_color(dolly::ui::ACCENT_ACTIVE)),
                       6 * panel_scale);
         if (timeline && maximum > minimum) {
             for (const auto& camera : timeline->cameras()) {
@@ -674,7 +793,7 @@ SliderRow slider_row(const char* id, const char* label, float* value, float mini
         }
         draw->AddRectFilled(ImVec2(x - 2.5f * panel_scale, y - 6 * panel_scale),
                             ImVec2(x + 2.5f * panel_scale, y + 6 * panel_scale),
-                            ImGui::GetColorU32(panel_color(0x95dbcb)), 2.5f * panel_scale);
+                            ImGui::GetColorU32(panel_color(dolly::ui::ACCENT)), 2.5f * panel_scale);
     }
     char readout[32]{};
     std::snprintf(readout, sizeof(readout), format, *value);
@@ -683,8 +802,17 @@ SliderRow slider_row(const char* id, const char* label, float* value, float mini
     return result;
 }
 void section_title(const char* title, const char* detail = nullptr) {
+    // Deadlock draws section headers in caps; uppercase the title for a native
+    // look without shipping the game font.
+    char upper[96]{};
+    std::size_t n = 0;
+    for (; title[n] && n < sizeof(upper) - 1; ++n)
+        upper[n] = (title[n] >= 'a' && title[n] <= 'z') ? char(title[n] - 32) : title[n];
+    upper[n] = 0;
     ImGui::PushFont(heading_font);
-    ImGui::TextUnformatted(title);
+    ImGui::PushStyleColor(ImGuiCol_Text, panel_color(dolly::ui::MUTED));
+    ImGui::TextUnformatted(upper);
+    ImGui::PopStyleColor();
     ImGui::PopFont();
     if (detail) {
         const float width = ImGui::CalcTextSize(detail).x;
@@ -698,7 +826,7 @@ void section_title(const char* title, const char* detail = nullptr) {
 }
 bool begin_panel_card(const char* name) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14 * panel_scale, 12 * panel_scale));
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, panel_color(0x192329));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, panel_color(dolly::ui::PANEL));
     return ImGui::BeginChild(name, ImVec2(0, 0),
                              ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
                                  ImGuiChildFlags_AlwaysUseWindowPadding,
@@ -719,14 +847,14 @@ void replay_badge(const EditorSnapshot& state) {
     const ImVec2 text_size = ImGui::CalcTextSize(text);
     const ImVec2 size(text_size.x + 30 * panel_scale, text_size.y + 10 * panel_scale);
     ImGui::GetWindowDrawList()->AddRectFilled(start, ImVec2(start.x + size.x, start.y + size.y),
-                                              ImGui::GetColorU32(panel_color(0x203a39)),
+                                              ImGui::GetColorU32(panel_color(dolly::ui::SELECTED)),
                                               5 * panel_scale);
     ImGui::GetWindowDrawList()->AddCircleFilled(
         ImVec2(start.x + 11 * panel_scale, start.y + size.y / 2), 3 * panel_scale,
-        ImGui::GetColorU32(panel_color(0x95dbcb)));
+        ImGui::GetColorU32(panel_color(dolly::ui::ACCENT)));
     ImGui::GetWindowDrawList()->AddText(
         ImVec2(start.x + 20 * panel_scale, start.y + 5 * panel_scale),
-        ImGui::GetColorU32(panel_color(0x9be5d9)), text);
+        ImGui::GetColorU32(panel_color(dolly::ui::ACCENT_HOVER)), text);
     ImGui::Dummy(size);
     if (state.tick > 0) {
         char tick[48]{};
@@ -878,20 +1006,38 @@ void draw_panel(const EditorSnapshot& state) {
         if (ImGui::BeginChild("##editor-content", ImVec2(0, -footer_height),
                               ImGuiChildFlags_None)) {
             ImGui::BeginTabBar("##dolly-pages", ImGuiTabBarFlags_None);
-            if (ImGui::BeginTabItem("Camera")) {
+            if (ImGui::BeginTabItem("CAMERA")) {
                 ImGui::BeginDisabled(!state.ready || state.busy);
                 if (begin_panel_card("##cameras-card")) {
                     char count[32]{};
                     std::snprintf(count, sizeof(count), "%u saved", state.camera_count);
                     section_title("Cameras", count);
+                    const float transport_spacing = ImGui::GetStyle().ItemSpacing.x;
+                    // Keep both transport buttons and their key chips inside the
+                    // panel; reserve each chip's room rather than drawing past the
+                    // edge (which clipped hints on narrow layouts).
+                    const float pause_hint = key_cap_width(EditorAction::PlayPause, panel_scale);
+                    const float play_hint = key_cap_width(EditorAction::PlayPath, panel_scale);
+                    const float reserved =
+                        (pause_hint > 0 ? pause_hint : 0) + (play_hint > 0 ? play_hint : 0);
                     const float transport_half =
-                        (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
+                        (ImGui::GetContentRegionAvail().x - 3 * transport_spacing - reserved) / 2;
                     action_button(state.paused ? "Play replay" : "Pause replay",
                                   EditorAction::PlayPause, transport_half);
+                    if (pause_hint > 0) {
+                        ImGui::SameLine();
+                        ImGui::AlignTextToFramePadding();
+                        key_cap(EditorAction::PlayPause, panel_scale);
+                    }
                     ImGui::SameLine();
                     ImGui::BeginDisabled(state.camera_count < 2);
                     action_button("Play shot", EditorAction::PlayPath, transport_half);
                     ImGui::EndDisabled();
+                    if (play_hint > 0) {
+                        ImGui::SameLine();
+                        ImGui::AlignTextToFramePadding();
+                        key_cap(EditorAction::PlayPath, panel_scale);
+                    }
                     const auto guides = visualization_snapshot();
                     ImGui::BeginDisabled(!state.camera_count || state.playing);
                     static float seek_time = 0;
@@ -959,8 +1105,16 @@ void draw_panel(const EditorSnapshot& state) {
                         ImGui::EndCombo();
                     }
                     ImGui::Separator();
+                    const float capture_hint = key_cap_width(EditorAction::Capture, panel_scale);
                     action_button("Capture camera here", EditorAction::Capture,
-                                  ImGui::GetContentRegionAvail().x, 0, true);
+                                  ImGui::GetContentRegionAvail().x -
+                                      (capture_hint > 0 ? capture_hint + ImGui::GetStyle().ItemSpacing.x : 0),
+                                  0, true);
+                    if (capture_hint > 0) {
+                        ImGui::SameLine();
+                        ImGui::AlignTextToFramePadding();
+                        key_cap(EditorAction::Capture, panel_scale);
+                    }
                     ImGui::BeginDisabled(!state.ready || state.busy || state.playing ||
                                          !state.camera_count);
                     if (ImGui::Button("Reset camera path",
@@ -1061,11 +1215,20 @@ void draw_panel(const EditorSnapshot& state) {
                     if (speed_committed)
                         editor_enqueue(EditorAction::SetSpeed, double(speed_draft));
                     ImGui::Spacing();
+                    // Fly camera is used after F8 closes Dolly, so no key cap for
+                    // it; Heroes / game UI keeps its cap.
+                    const float gameui_hint = key_cap_width(EditorAction::GameUI, panel_scale);
                     const float half =
-                        (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
+                        (ImGui::GetContentRegionAvail().x - 2 * ImGui::GetStyle().ItemSpacing.x -
+                         (gameui_hint > 0 ? gameui_hint : 0)) / 2;
                     action_button("Fly camera", EditorAction::Flight, half);
                     ImGui::SameLine();
                     action_button("Heroes / game UI", EditorAction::GameUI, half, 1);
+                    if (gameui_hint > 0) {
+                        ImGui::SameLine();
+                        ImGui::AlignTextToFramePadding();
+                        key_cap(EditorAction::GameUI, panel_scale);
+                    }
                     ImGui::Spacing();
                     ImGui::BeginDisabled(state.playing);
                     ImGui::TextUnformatted("Updates / s");
@@ -1090,7 +1253,7 @@ void draw_panel(const EditorSnapshot& state) {
                 ImGui::EndDisabled();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Bone Picker")) {
+            if (ImGui::BeginTabItem("BONE PICKER")) {
                 ImGui::BeginDisabled(!state.ready || state.busy);
                 if (begin_panel_card("##attach-card")) {
                     section_title("Attach camera");
@@ -1159,8 +1322,8 @@ void draw_panel(const EditorSnapshot& state) {
                             for (int index = 0; index < 6; ++index)
                                 attach_draft[index] = float(state.attach_offsets[index]);
                         }
-                        static const char* const kAttachAxis[6] = {"Forward", "Sideways", "Up",
-                                                                   "Pitch",   "Yaw",      "Roll"};
+                        static const char* const kAttachAxis[6] = {"Forward", "L/R", "Up",
+                                                                   "Pitch",   "Yaw", "Roll"};
                         bool attach_commit = false, attach_active = false;
                         for (int index = 0; index < 4; ++index) {
                             char id[32]{};
@@ -1169,7 +1332,7 @@ void draw_panel(const EditorSnapshot& state) {
                             const SliderRow row =
                                 slider_row(id, kAttachAxis[index], &attach_draft[index],
                                            position ? -10.0f : -180.0f, position ? 10.0f : 180.0f,
-                                           position ? "%.2f" : "%.1f");
+                                           position ? "%.2f" : "%.1f", 74.0f);
                             attach_active = attach_active || row.active;
                             attach_commit = attach_commit || row.committed;
                         }
@@ -1179,7 +1342,7 @@ void draw_panel(const EditorSnapshot& state) {
                                 std::snprintf(id, sizeof(id), "##attach-offset-%d", index);
                                 const auto row =
                                     slider_row(id, kAttachAxis[index], &attach_draft[index], -180,
-                                               180, "%.1f");
+                                               180, "%.1f", 74.0f);
                                 attach_active |= row.active;
                                 attach_commit |= row.committed;
                             }
@@ -1281,7 +1444,7 @@ void draw_panel(const EditorSnapshot& state) {
                 ImGui::EndDisabled();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Look")) {
+            if (ImGui::BeginTabItem("LOOK")) {
                 ImGui::BeginDisabled(!state.ready || state.busy);
                 if (begin_panel_card("##appearance-card")) {
                     section_title("Scene appearance", "Replay view");
@@ -1339,7 +1502,9 @@ void draw_panel(const EditorSnapshot& state) {
                     bool despawn = state.confetti_despawn_on_ground;
                     if (compact_checkbox("Despawn on ground", &despawn, panel_scale))
                         editor_enqueue(EditorAction::SetConfettiDespawnOnGround, despawn ? 1 : 0);
-                    ImGui::TextDisabled("Preset is chosen in Dolly; it follows the rendered camera and game time.");
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TextWrapped("Preset is chosen in Dolly; it follows the rendered camera and game time.");
+                    ImGui::PopStyleColor();
                 }
                 end_panel_card();
                 if (begin_panel_card("##dof-card")) {
@@ -1493,7 +1658,7 @@ void draw_panel(const EditorSnapshot& state) {
                 ImGui::EndDisabled();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Export")) {
+            if (ImGui::BeginTabItem("EXPORT")) {
                 if (begin_panel_card("##export-camera")) {
                     section_title("Camera source", "Export");
                     const auto capture_state = video::status().state;
@@ -1718,7 +1883,15 @@ void draw_panel(const EditorSnapshot& state) {
         ImGui::PopStyleColor();
         ImGui::Spacing();
         ImGui::Spacing();
-        action_button("Stop / restore", EditorAction::Stop, ImGui::GetContentRegionAvail().x);
+        const float stop_cap = key_cap_width(EditorAction::Stop, panel_scale);
+        action_button("Stop / restore", EditorAction::Stop,
+                      ImGui::GetContentRegionAvail().x -
+                          (stop_cap > 0 ? stop_cap + ImGui::GetStyle().ItemSpacing.x : 0));
+        if (stop_cap > 0) {
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            key_cap(EditorAction::Stop, panel_scale);
+        }
         if (state.message[0])
             ImGui::TextWrapped("%s", state.message);
         ImGui::TextDisabled("F7  Console");

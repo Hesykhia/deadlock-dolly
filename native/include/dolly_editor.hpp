@@ -347,6 +347,9 @@ struct EditorSnapshot {
     char shot_name[96]{}, message[128]{};
 };
 EditorSnapshot editor_snapshot() noexcept;
+// Current binding for one editor action (zeroed when unset/unavailable). Used
+// by the overlay to render a key-cap hint without exposing the whole config.
+EditorBinding editor_binding_snapshot(EditorAction action) noexcept;
 // Published attach-camera schema offsets; false while no valid block arrived.
 bool editor_attach_config(EditorAttachConfig& out) noexcept;
 bool editor_bones_snapshot(EditorBones& out) noexcept;

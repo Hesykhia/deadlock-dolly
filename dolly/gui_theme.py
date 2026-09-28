@@ -6,6 +6,8 @@ import tkinter as tk
 from tkinter import ttk
 import zlib
 
+from . import ui_theme
+
 
 def _rgb(color):
     return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
@@ -54,12 +56,13 @@ def rounded_image(root, fill, outline, radius=6, *, size=64, line=1, checked=Non
     return _photo(root, size, size, pixel)
 
 
-def apply(root, bg, panel, text, muted, accent):
+def apply(root):
     style = ttk.Style(root)
     images = []
     scale = max(1, root.winfo_fpixels("1i") / 96)
-    edge = "#26343b"
-    field = "#10171c"
+    t = ui_theme.TOKENS
+    bg, panel, text, muted, accent = t["bg"], t["panel"], t["text"], t["muted"], t["accent"]
+    edge, field = t["edge"], t["field"]
     control_radius, card_radius = round(5 * scale), round(6 * scale)
     def rounded(name, fill, outline, radius=control_radius, min_width=16, **states):
         normal = rounded_image(root, fill, outline, radius, line=scale)
@@ -75,10 +78,11 @@ def apply(root, bg, panel, text, muted, accent):
     rounded("Dolly.card", panel, edge, card_radius)
     style.layout("Rounded.Card.TFrame", [("Dolly.card", {"sticky": "nsew"})])
     style.configure("Rounded.Card.TFrame", background=bg)
-    rounded("Dolly.button", "#25313e", "#25313e", disabled=("#172027", "#29353d"),
-            pressed=("#233c3b", accent), active=("#203039", accent), focus=(panel, accent))
-    rounded("Dolly.primary", accent, accent, disabled=("#24433f", "#31564f"),
-            pressed=("#77beaf", "#77beaf"), active=("#afe8dc", "#afe8dc"), focus=(accent, "#dcfff7"))
+    rounded("Dolly.button", t["button"], t["button"], disabled=(t["disabled_bg"], t["edge"]),
+            pressed=(t["button_active"], accent), active=(t["button_hover"], accent), focus=(panel, accent))
+    rounded("Dolly.primary", accent, accent, disabled=(t["disabled_bg"], t["edge"]),
+            pressed=(t["accent_active"], t["accent_active"]), active=(t["accent_hover"], t["accent_hover"]),
+            focus=(accent, t["selected_ink"]))
     def button_layout(element):
         return [(element, {"sticky": "nsew", "children": [("Button.padding", {
             "sticky": "nsew", "children": [("Button.label", {"sticky": "nsew"})]})]})]
@@ -103,8 +107,8 @@ def apply(root, bg, panel, text, muted, accent):
         style.configure(label, background=surface, foreground=text, padding=(0, 5), borderwidth=0)
         style.map(label, background=[("active", surface)], foreground=[("active", accent)])
 
-    rounded("Dolly.field", field, edge, disabled=("#172027", "#29353d"),
-            focus=(field, accent), active=(field, "#56716f"))
+    rounded("Dolly.field", field, edge, disabled=(t["disabled_bg"], t["edge"]),
+            focus=(field, accent), active=(field, t["accent_active"]))
     style.layout("TEntry", [("Dolly.field", {"sticky": "nsew", "children": [
         ("Entry.padding", {"sticky": "nsew", "children": [("Entry.textarea", {"sticky": "nsew"})]})]})])
     def arrow_pixel(x, y):
@@ -121,8 +125,8 @@ def apply(root, bg, panel, text, muted, accent):
     for name in ("TEntry", "TCombobox"):
         style.configure(name, fieldbackground=field, background=bg, foreground=text,
                         borderwidth=0, padding=(10, 5))
-        style.map(name, fieldbackground=[("disabled", "#172027"), ("readonly", field)],
-                  foreground=[("disabled", "#657780"), ("readonly", text)])
+        style.map(name, fieldbackground=[("disabled", t["disabled_bg"]), ("readonly", field)],
+                  foreground=[("disabled", t["disabled_fg"]), ("readonly", text)])
         style.configure("Card." + name, background=panel)
 
     style.configure("Numeric.TEntry", padding=(4, 1), background=panel)
@@ -131,8 +135,8 @@ def apply(root, bg, panel, text, muted, accent):
     indicator = rounded_image(root, field, edge, round(3 * scale), size=size, line=scale)
     checked = rounded_image(root, accent, accent, round(3 * scale), size=size, line=scale, checked=bg)
     hover = rounded_image(root, field, accent, round(3 * scale), size=size, line=scale)
-    disabled = rounded_image(root, "#172027", "#29353d", round(3 * scale), size=size, line=scale)
-    disabled_checked = rounded_image(root, "#31564f", "#31564f", round(3 * scale), size=size, line=scale, checked=muted)
+    disabled = rounded_image(root, t["disabled_bg"], t["edge"], round(3 * scale), size=size, line=scale)
+    disabled_checked = rounded_image(root, t["accent_active"], t["accent_active"], round(3 * scale), size=size, line=scale, checked=muted)
     images.extend((indicator, checked, hover, disabled, disabled_checked))
     style.element_create("Dolly.Checkbutton.indicator", "image", indicator,
                          ("disabled selected", disabled_checked), ("disabled", disabled),
@@ -166,8 +170,8 @@ def apply(root, bg, panel, text, muted, accent):
     for cls in ("TEntry", "TCombobox", "TButton", "TCheckbutton"):
         root.bind_class(cls, "<Map>", match_surface, add="+")
 
-    rounded("Dolly.scroll.thumb", "#3b4b55", "#3b4b55", radius=4, min_width=8,
-            active=("#526a73", "#526a73"), pressed=(accent, accent))
+    rounded("Dolly.scroll.thumb", t["edge"], t["edge"], radius=4, min_width=8,
+            active=(t["scroll_hover"], t["scroll_hover"]), pressed=(accent, accent))
     style.layout("Vertical.TScrollbar", [("Vertical.Scrollbar.trough", {"sticky": "ns", "children": [
         ("Dolly.scroll.thumb", {"sticky": "nsew", "expand": "1"})]})])
     style.configure("Vertical.TScrollbar", background=bg, troughcolor=bg, bordercolor=bg,
@@ -215,8 +219,8 @@ def compact_slider(parent, label, variable, minimum, maximum, panel, muted, acce
         if not math.isfinite(value):
             return
         x = 4 + (width - 8) * max(0, min(1, (value - minimum) / (maximum - minimum)))
-        rail.create_line(4, 11, width - 4, 11, fill="#0e171d", width=6, capstyle="round")
-        rail.create_line(4, 11, x, 11, fill="#385d59", width=6, capstyle="round")
+        rail.create_line(4, 11, width - 4, 11, fill=ui_theme.TOKENS["field"], width=6, capstyle="round")
+        rail.create_line(4, 11, x, 11, fill=ui_theme.TOKENS["accent_active"], width=6, capstyle="round")
         rail.create_line(x, 7, x, 15, fill=accent, width=5, capstyle="round")
         if rail.focus_get() == rail:
             rail.create_rectangle(1, 1, width - 1, 21, outline=muted)

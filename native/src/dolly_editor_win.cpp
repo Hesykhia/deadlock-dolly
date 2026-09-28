@@ -582,6 +582,16 @@ EditorSnapshot editor_snapshot() noexcept {
     result.ready = false;
     return result;
 }
+EditorBinding editor_binding_snapshot(EditorAction action) noexcept {
+    EditorBinding result{};
+    const auto index = static_cast<std::size_t>(action);
+    if (index >= kEditorBindingCount)
+        return result;
+    auto c = std::atomic_load(&gConfig);
+    if (c)
+        result = c->bindings[index];
+    return result;
+}
 bool editor_attach_config(EditorAttachConfig& out) noexcept {
     auto attach = std::atomic_load(&gAttachConfig);
     if (!attach || !gConnected.load())

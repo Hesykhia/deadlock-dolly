@@ -15,14 +15,17 @@ import tkinter as tk
 from tkinter import ttk
 
 from .path import ASPECT_MIN, ASPECT_MAX, CURVE_CHANNELS, Project, channel_value
+from . import ui_theme
 
 
-BACKGROUND = "#10151c"
-GRID = "#28323f"
-TEXT = "#e8edf3"
-MUTED = "#8f9eae"
-ACCENT = "#64d6c3"
-ROTATION_ACCENT = "#e3b341"
+_TOKEN = ui_theme.TOKENS
+_FONT = ui_theme.FONT_SIZES
+BACKGROUND = _TOKEN["field"]
+GRID = _TOKEN["edge"]
+TEXT = _TOKEN["strong"]
+MUTED = _TOKEN["muted"]
+ACCENT = _TOKEN["accent"]
+ROTATION_ACCENT = _TOKEN["warn"]
 CHANNEL_LABELS = {"pitch": "Pitch", "yaw": "Yaw", "roll": "Roll"}
 
 
@@ -242,7 +245,7 @@ class AspectCurve(_GraphViewMixin, ttk.Frame):
                                 borderwidth=0, height=height, width=300, takefocus=True)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         self.hint = ttk.Label(self, text="Drag a key to set framing · ↑/↓ fine tune · wheel zoom · right-drag pan",
-                              foreground=MUTED, font=("Segoe UI", 9))
+                              foreground=MUTED, font=(ui_theme.FONT_FAMILY, _FONT["small"]))
         self.hint.grid(row=1, column=0, sticky="w", pady=(5, 0))
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -295,20 +298,20 @@ class AspectCurve(_GraphViewMixin, ttk.Frame):
             _, y = bounds.point(bounds.start, value)
             canvas.create_line(bounds.left, y, bounds.right, y, fill=GRID)
             canvas.create_text(bounds.left - 9, y, text=f"{value:.2f}", anchor="e",
-                               fill=MUTED, font=("Segoe UI", 8))
+                               fill=MUTED, font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         for index in range(5):
             timestamp = bounds.start + (bounds.end - bounds.start) * index / 4
             x, _ = bounds.point(timestamp, bounds.low)
             canvas.create_line(x, bounds.top, x, bounds.bottom, fill=GRID)
             canvas.create_text(x, bounds.bottom + 14, text=f"{timestamp:g}s", fill=MUTED,
-                               font=("Segoe UI", 8))
+                               font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         canvas.create_text(bounds.left, 7, text="ASPECT RATIO", anchor="w", fill=MUTED,
-                           font=("Segoe UI", 8))
+                           font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         _, standard_y = bounds.point(bounds.start, project.standard_aspect)
         canvas.create_line(bounds.left, standard_y, bounds.right, standard_y,
                            fill=MUTED, dash=(3, 5))
         canvas.create_text(bounds.right, 7, text=f"Standard {project.standard_aspect:.3f}",
-                           anchor="e", fill=MUTED, font=("Segoe UI", 8))
+                           anchor="e", fill=MUTED, font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         samples = sample_curve(project, bounds.end, max(40, int(width / 4)), start=bounds.start)
         coordinates = [coordinate for timestamp, aspect in samples
                        for coordinate in bounds.point(timestamp, aspect)]
@@ -329,7 +332,7 @@ class AspectCurve(_GraphViewMixin, ttk.Frame):
         if not bounds.start <= self.current_time <= bounds.end:
             return
         x, _ = bounds.point(self.current_time, bounds.low)
-        self.canvas.create_line(x, bounds.top, x, bounds.bottom, fill="#6d879b",
+        self.canvas.create_line(x, bounds.top, x, bounds.bottom, fill=MUTED,
                                 width=1, dash=(2, 3), tags="playhead")
 
     def _press(self, event):
@@ -440,7 +443,7 @@ class RotationCurve(_GraphViewMixin, ttk.Frame):
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(1, weight=1)
         ttk.Label(header, text="ROTATION", foreground=MUTED,
-                  font=("Segoe UI", 8)).grid(row=0, column=0, sticky="w")
+                  font=(ui_theme.FONT_FAMILY, _FONT["tiny"])).grid(row=0, column=0, sticky="w")
         self.channel_box = ttk.Combobox(header, values=[CHANNEL_LABELS[name] for name in CURVE_CHANNELS],
                                         state="readonly", width=7)
         self.channel_box.current(CURVE_CHANNELS.index(self.channel))
@@ -452,7 +455,7 @@ class RotationCurve(_GraphViewMixin, ttk.Frame):
                                 borderwidth=0, height=height, width=300, takefocus=True)
         self.canvas.grid(row=1, column=0, sticky="nsew")
         self.hint = ttk.Label(self, text="Drag to shape rotation · wheel zoom · right-drag pan",
-                              foreground=MUTED, font=("Segoe UI", 9))
+                              foreground=MUTED, font=(ui_theme.FONT_FAMILY, _FONT["small"]))
         self.hint.grid(row=2, column=0, sticky="w", pady=(4, 0))
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -519,15 +522,15 @@ class RotationCurve(_GraphViewMixin, ttk.Frame):
             _, y = bounds.point(bounds.start, value)
             canvas.create_line(bounds.left, y, bounds.right, y, fill=GRID)
             canvas.create_text(bounds.left - 9, y, text=f"{value:.0f}°", anchor="e",
-                               fill=MUTED, font=("Segoe UI", 8))
+                               fill=MUTED, font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         for index in range(5):
             timestamp = bounds.start + (bounds.end - bounds.start) * index / 4
             x, _ = bounds.point(timestamp, bounds.low)
             canvas.create_line(x, bounds.top, x, bounds.bottom, fill=GRID)
             canvas.create_text(x, bounds.bottom + 13, text=f"{timestamp:g}s", fill=MUTED,
-                               font=("Segoe UI", 8))
+                               font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         canvas.create_text(bounds.left, 7, text=f"ROTATION · {CHANNEL_LABELS[self.channel].upper()}",
-                           anchor="w", fill=MUTED, font=("Segoe UI", 8))
+                           anchor="w", fill=MUTED, font=(ui_theme.FONT_FAMILY, _FONT["tiny"]))
         base_project = copy.copy(project)
         base_project.keyframes = [replace(key, **{"curve_" + self.channel: None})
                                   for key in project.keyframes]
@@ -567,7 +570,7 @@ class RotationCurve(_GraphViewMixin, ttk.Frame):
         if not bounds.start <= self.current_time <= bounds.end:
             return
         x, _ = bounds.point(self.current_time, bounds.low)
-        self.canvas.create_line(x, bounds.top, x, bounds.bottom, fill="#6d879b",
+        self.canvas.create_line(x, bounds.top, x, bounds.bottom, fill=MUTED,
                                 width=1, dash=(2, 3), tags="playhead")
 
     def _press(self, event):

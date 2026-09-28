@@ -20,7 +20,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer
+from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer, ui_theme
 from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, EDITOR_KEY_CHOICES, EditorBinding, default_action_bindings, validate_action_bindings
 from dolly.replays import discover_replays, find_replay_folder, parse_launch_options
 from dolly.bindings import CaptureBinding, DEFAULT_BINDING, KEY_CHOICES
@@ -48,11 +48,30 @@ from dolly.video_export import (ACTIVE_STATES, BITRATE_PRESETS, CODEC_BY_KEY, CO
 
 FIELDS = ("time", "x", "y", "z", "pitch", "yaw", "roll", "aspect_ratio")
 FIELD_LABELS = ("Shot seconds", "X", "Y", "Height · Z", "Pitch °", "Yaw °", "Bank °", "Aspect ratio")
-BG = "#10171b"
-PANEL = "#192329"
-TEXT = "#d5dfe3"
-MUTED = "#a6b7c0"
-ACCENT = "#95dbcb"
+_T = ui_theme.TOKENS
+_F = ui_theme.FONT_SIZES
+FAMILY = ui_theme.FONT_FAMILY
+MONO = ui_theme.FONT_MONO
+BG = _T["bg"]
+PANEL = _T["panel"]
+PANEL_ALT = _T["panel_alt"]
+FIELD = _T["field"]
+EDGE = _T["edge"]
+TEXT = _T["text"]
+MUTED = _T["muted"]
+STRONG = _T["strong"]
+ACCENT = _T["accent"]
+ACCENT_HOVER = _T["accent_hover"]
+ACCENT_INK = _T["accent_ink"]
+BUTTON = _T["button"]
+BUTTON_HOVER = _T["button_hover"]
+DISABLED_BG = _T["disabled_bg"]
+DISABLED_FG = _T["disabled_fg"]
+SELECTED = _T["selected"]
+SELECTED_INK = _T["selected_ink"]
+TRACK = _T["track"]
+WARN = _T["warn"]
+WARN_BG = _T["warn_bg"]
 LOG = logging.getLogger("dolly")
 ASPECT_PRESETS = {"16:9": 16 / 9, "16:10": 16 / 10, "21:9": 21 / 9, "4:3": 4 / 3}
 
@@ -270,34 +289,34 @@ class DollyApp:
         self.root.configure(bg=BG)
         style = ttk.Style(self.root)
         style.theme_use("clam")
-        style.configure(".", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure(".", background=BG, foreground=TEXT, font=(FAMILY, _F["body"]))
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=PANEL)
         style.configure("TLabel", background=BG, foreground=TEXT)
         style.configure("Muted.TLabel", foreground=MUTED)
         style.configure("Card.TLabel", background=PANEL)
         style.configure("CardMuted.TLabel", background=PANEL, foreground=MUTED)
-        style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"))
-        style.configure("Section.TLabel", font=("Segoe UI", 11, "bold"))
-        style.configure("CardTitle.TLabel", background=PANEL, font=("Segoe UI", 11, "bold"))
+        style.configure("Title.TLabel", font=(FAMILY, _F["title"], "bold"))
+        style.configure("Section.TLabel", font=(FAMILY, _F["section"], "bold"), foreground=MUTED)
+        style.configure("CardTitle.TLabel", background=PANEL, font=(FAMILY, _F["card_title"], "bold"))
         style.configure("Accent.TLabel", foreground=ACCENT)
-        style.configure("Pill.TLabel", background="#1d3a36", foreground=ACCENT,
-                        font=("Segoe UI", 9, "bold"), padding=(9, 3))
-        style.configure("PillConsole.TLabel", background="#3a3320", foreground="#e8c76a",
-                        font=("Segoe UI", 9, "bold"), padding=(9, 3))
-        style.configure("TButton", background="#28323f", foreground=TEXT, padding=(10, 6), borderwidth=0)
-        style.map("TButton", background=[("active", "#374757"), ("disabled", "#202731")],
-                  foreground=[("disabled", "#617082")])
-        style.configure("Primary.TButton", background=ACCENT, foreground="#092620", font=("Segoe UI", 10, "bold"))
-        style.map("Primary.TButton", background=[("active", "#8ee7d9"), ("disabled", "#24433f")],
-                  foreground=[("disabled", "#799e98")])
+        style.configure("Pill.TLabel", background=SELECTED, foreground=ACCENT,
+                        font=(FAMILY, _F["small"], "bold"), padding=(9, 3))
+        style.configure("PillConsole.TLabel", background=WARN_BG, foreground=WARN,
+                        font=(FAMILY, _F["small"], "bold"), padding=(9, 3))
+        style.configure("TButton", background=BUTTON, foreground=TEXT, padding=(10, 6), borderwidth=0)
+        style.map("TButton", background=[("active", BUTTON_HOVER), ("disabled", DISABLED_BG)],
+                  foreground=[("disabled", DISABLED_FG)])
+        style.configure("Primary.TButton", background=ACCENT, foreground=ACCENT_INK, font=(FAMILY, _F["body"], "bold"))
+        style.map("Primary.TButton", background=[("active", ACCENT_HOVER), ("disabled", DISABLED_BG)],
+                  foreground=[("disabled", DISABLED_FG)])
         style.configure("Quiet.TButton", background=PANEL, padding=(8, 5))
         style.configure("TMenubutton", background=PANEL, foreground=MUTED, padding=(5, 2), borderwidth=0)
-        style.configure("TEntry", fieldbackground="#0e131a", foreground=TEXT, insertcolor=TEXT,
-                        bordercolor="#34404d", lightcolor="#34404d", darkcolor="#34404d", padding=5)
-        style.configure("TCombobox", fieldbackground="#0e131a", background="#28323f", foreground=TEXT,
+        style.configure("TEntry", fieldbackground=FIELD, foreground=TEXT, insertcolor=TEXT,
+                        bordercolor=EDGE, lightcolor=EDGE, darkcolor=EDGE, padding=5)
+        style.configure("TCombobox", fieldbackground=FIELD, background=BUTTON, foreground=TEXT,
                         arrowcolor=MUTED, borderwidth=0, padding=4)
-        style.map("TCombobox", fieldbackground=[("readonly", "#0e131a")], foreground=[("readonly", TEXT)])
+        style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", TEXT)])
         style.configure("TCheckbutton", background=BG, foreground=MUTED, padding=0)
         style.map("TCheckbutton", background=[("active", BG)], foreground=[("active", TEXT)])
         style.configure("TNotebook", background=BG, borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG, tabmargins=(0, 0, 0, 6))
@@ -306,24 +325,24 @@ class DollyApp:
         style.layout("TNotebook.Tab", [("Notebook.padding", {"sticky": "nswe", "children": [("Notebook.label", {"sticky": "nswe"})]})])
         style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT,
                         rowheight=31, borderwidth=0, lightcolor=PANEL, darkcolor=PANEL)
-        style.configure("Treeview.Heading", background="#222b37", foreground=MUTED, bordercolor="#222b37", lightcolor="#222b37", darkcolor="#222b37", padding=(8, 7),
-                        relief="flat", borderwidth=0, font=("Segoe UI", 9))
-        style.map("Treeview", background=[("selected", "#274e4b")], foreground=[("selected", "#e4fffa")])
-        style.configure("Vertical.TScrollbar", background="#354150", troughcolor=PANEL, arrowcolor=MUTED,
+        style.configure("Treeview.Heading", background=PANEL_ALT, foreground=MUTED, bordercolor=PANEL_ALT, lightcolor=PANEL_ALT, darkcolor=PANEL_ALT, padding=(8, 7),
+                        relief="flat", borderwidth=0, font=(FAMILY, _F["small"]))
+        style.map("Treeview", background=[("selected", SELECTED)], foreground=[("selected", SELECTED_INK)])
+        style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=PANEL, arrowcolor=MUTED,
                         borderwidth=0, arrowsize=12, relief="flat")
-        style.configure("Horizontal.TScale", background=BG, troughcolor="#283442", sliderlength=16,
+        style.configure("Horizontal.TScale", background=BG, troughcolor=TRACK, sliderlength=16,
                         sliderthickness=14, borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
-        style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor="#283442", bordercolor=PANEL,
+        style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor=TRACK, bordercolor=PANEL,
                         lightcolor=ACCENT, darkcolor=ACCENT, thickness=5, borderwidth=0)
-        style.configure("TLabelframe", background=BG, bordercolor="#303c49")
+        style.configure("TLabelframe", background=BG, bordercolor=EDGE)
         style.configure("TLabelframe.Label", foreground=MUTED)
-        self.root.option_add("*TCombobox*Listbox.background", "#10151c")
+        self.root.option_add("*TCombobox*Listbox.background", FIELD)
         self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
         self.root.bind_class("TCombobox", "<<ComboboxSelected>>",
                              _clear_committed_combobox_selection, add="+")
 
         from dolly import gui_theme
-        gui_theme.apply(self.root, BG, PANEL, TEXT, MUTED, ACCENT)
+        gui_theme.apply(self.root)
         gui_theme.install_wheel_guard(self.root)
 
     def _build_menu(self):
@@ -372,7 +391,7 @@ class DollyApp:
         self.notebook.grid(row=0, column=1, sticky="nsew")
         self.full_editor_switch = ttk.Checkbutton(heading, text="Full editor", variable=self.full_editor,
             command=self._toggle_full_editor, style="FullEditor.TCheckbutton")
-        style.configure("FullEditor.TCheckbutton", font=("Segoe UI", 12, "bold"), padding=(16, 10))
+        style.configure("FullEditor.TCheckbutton", font=(FAMILY, _F["callout"], "bold"), padding=(16, 10))
         self.full_editor_switch.grid(row=0, column=2, rowspan=2, padx=(18, 0))
         self.setup_tab = ttk.Frame(self.notebook)
         self.camera_tab = ttk.Frame(self.notebook)
@@ -415,8 +434,8 @@ class DollyApp:
         self.log_dialog.protocol("WM_DELETE_WINDOW", self._close_log)
         self.log_frame = ttk.Frame(self.log_dialog, padding=12)
         self.log_frame.pack(fill="both", expand=True)
-        self.log_widget = tk.Text(self.log_frame, height=3, bg="#10151c", fg=MUTED, relief="flat",
-                                  font=("Consolas", 9), wrap="word", state="disabled")
+        self.log_widget = tk.Text(self.log_frame, height=3, bg=FIELD, fg=MUTED, relief="flat",
+                                  font=(MONO, _F["small"]), wrap="word", state="disabled")
         self.log_widget.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(self.log_frame, command=self.log_widget.yview)
         scroll.pack(side="right", fill="y")
@@ -1758,7 +1777,7 @@ class DollyApp:
         ttk.Label(title, textvariable=self.selected_text, style="CardTitle.TLabel").pack(side="left")
         more = ttk.Menubutton(title, text="More")
         more.pack(side="right")
-        actions_menu = tk.Menu(more, tearoff=False, bg=PANEL, fg=TEXT, activebackground="#274e4b", activeforeground=TEXT)
+        actions_menu = tk.Menu(more, tearoff=False, bg=PANEL, fg=TEXT, activebackground=SELECTED, activeforeground=TEXT)
         actions_menu.add_command(label="Coordinates / timing…", command=self._open_coordinates)
         actions_menu.add_separator()
         actions_menu.add_command(label="Delete selected camera", command=self._delete_key)
@@ -2322,7 +2341,7 @@ class DollyApp:
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=1)
-        ttk.Label(body, text="Camera coordinates", style="Section.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        ttk.Label(body, text="CAMERA COORDINATES", style="Section.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 12))
         self.key_entries = {}
         for index, (field, label) in enumerate(zip(FIELDS, FIELD_LABELS)):
             cell = ttk.Frame(body)
@@ -2336,7 +2355,7 @@ class DollyApp:
         actions.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 14))
         ttk.Button(actions, text="Update selected", command=self._update_key).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Add entered camera", command=self._add_key).pack(side="left")
-        ttk.Label(body, text="Shot timing & movement", style="Section.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 10))
+        ttk.Label(body, text="SHOT TIMING & MOVEMENT", style="Section.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 10))
         for index, (label, variable, values) in enumerate((("Start replay tick", self.start_tick, None), ("Ticks / second", self.tick_rate, None),
                                                          ("Position curve", self.interpolation, ("smooth", "linear")),
                                                          ("Rotation", self.rotation, ("shortest", "unwrapped")))):
@@ -3349,7 +3368,7 @@ class DollyApp:
         body = ttk.Frame(dialog, padding=20)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
-        ttk.Label(body, text="Capture from the game", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(body, text="CAPTURE FROM THE GAME", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(body, text="Choose a keyboard key or mouse button, then add any required modifiers.",
                   style="Muted.TLabel", wraplength=430).grid(row=1, column=0, sticky="w", pady=(8, 16))
         key = tk.StringVar(value=self.capture_binding.key)
@@ -4053,12 +4072,12 @@ class DollyApp:
             return
         if height < 80:
             canvas.create_text(width / 2, height / 2, text="Enlarge the window for a path overview",
-                               fill=MUTED, font=("Segoe UI", 9), width=max(100, width - 20), justify="center")
+                               fill=MUTED, font=(FAMILY, _F["small"]), width=max(100, width - 20), justify="center")
             return
         keys = self.project.keyframes
         if not keys:
             canvas.create_text(width / 2, height / 2, text="Capture a view\nto begin a path", fill=MUTED,
-                               font=("Segoe UI", 10), justify="center")
+                               font=(FAMILY, _F["body"]), justify="center")
             return
         points = [(key.x, key.y) for key in keys]
         sample = []
@@ -4078,17 +4097,17 @@ class DollyApp:
         def xy(point):
             return (width / 2 + (point[0] - cx) * scale, height / 2 - (point[1] - cy) * scale)
         if len(sample) > 1:
-            canvas.create_line(*[coordinate for point in sample for coordinate in xy(point)], fill="#578e87", width=2)
+            canvas.create_line(*[coordinate for point in sample for coordinate in xy(point)], fill=ACCENT, width=2)
         for i, point in enumerate(points):
             x, y = xy(point)
             canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=ACCENT, outline="")
-            canvas.create_text(x + 8, y - 8, text=str(i + 1), fill=TEXT, anchor="w", font=("Segoe UI", 9))
+            canvas.create_text(x + 8, y - 8, text=str(i + 1), fill=TEXT, anchor="w", font=(FAMILY, _F["small"]))
         try:
             state = self.project.evaluate(self.shot_time.get())
             x, y = xy((state["x"], state["y"]))
-            canvas.create_oval(x - 6, y - 6, x + 6, y + 6, outline="#f1cb89", width=2)
+            canvas.create_oval(x - 6, y - 6, x + 6, y + 6, outline=WARN, width=2)
             yaw = math.radians(state["yaw"])
-            canvas.create_line(x, y, x + math.cos(yaw) * 18, y - math.sin(yaw) * 18, fill="#f1cb89", width=2, arrow="last")
+            canvas.create_line(x, y, x + math.cos(yaw) * 18, y - math.sin(yaw) * 18, fill=WARN, width=2, arrow="last")
         except (ValueError, KeyError, TypeError):
             pass
 
