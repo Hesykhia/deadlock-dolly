@@ -229,8 +229,17 @@ class PreloadMonitor:
             raise PreloadError('Preload counters are outside their reviewed range.')
         resource = struct.unpack_from('<Q', raw, 0x30)[0]
         job = struct.unpack_from('<i', raw, 0x38)[0]
+        # The resource-system global is populated partway through the hideout
+        # load. Until then it reads as a null (or not-yet-mapped) pointer; that
+        # is "not started", not a build mismatch, so it must not abort automatic
+        # startup. A non-null value still has to match the reviewed vtable.
         system = memory.pointer(self.base+RESOURCE_GLOBAL)
-        vtable = memory.pointer(system)
+        if not system:
+            return {'coherent': False}
+        try:
+            vtable = memory.pointer(system)
+        except PreloadError:
+            return {'coherent': False}
         if (vtable != self.resource_base+RESOURCE_VTABLE
                 or memory.pointer(vtable+0xc0) != self.resource_base+RESOURCE_QUERY):
             raise PreloadError('Resource completion query differs from the reviewed build.')
@@ -241,7 +250,10 @@ class PreloadMonitor:
         if not resource:
             intro = memory.pointer(self.base+INTRO_GLOBAL)
             if intro:
-                state = memory.read(intro, 0x84)
+                try:
+                    state = memory.read(intro, 0x84)
+                except PreloadError:
+                    return {'coherent': False}
                 if struct.unpack_from('<Q', state)[0] != self.base+INTRO_VTABLE:
                     raise PreloadError('Intro object type differs from the reviewed build.')
                 intro_phase = struct.unpack_from('<i', state, 0x80)[0]

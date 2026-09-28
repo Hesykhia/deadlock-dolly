@@ -50,6 +50,39 @@ class PreloadTests(unittest.TestCase):
         m.memory.read.side_effect = [raw, raw[:-1]+b'\x01']
         self.assertEqual(m.sample(), {'coherent': False})
 
+    def test_unset_resource_global_is_not_ready_and_does_not_abort(self):
+        m, _, pointers = self.monitor(resource=0)
+        pointers[m.base+preload.RESOURCE_GLOBAL] = 0
+        self.assertEqual(m.sample(), {'coherent': False})
+
+    def test_unreadable_resource_global_is_not_ready_and_does_not_abort(self):
+        m, _, pointers = self.monitor(resource=0)
+        unmapped = 0x999999
+        pointers[m.base+preload.RESOURCE_GLOBAL] = unmapped
+        lookup = pointers.__getitem__
+
+        def pointer(address):
+            if address == unmapped:
+                raise preload.PreloadError('Could not read complete preload status.')
+            return lookup(address)
+
+        m.memory.pointer.side_effect = pointer
+        self.assertEqual(m.sample(), {'coherent': False})
+
+    def test_unreadable_intro_object_is_not_ready_and_does_not_abort(self):
+        m, _, pointers = self.monitor(resource=0)
+        intro = 0x500000
+        pointers[m.base+preload.INTRO_GLOBAL] = intro
+        read = m.memory.read.side_effect
+
+        def guarded(address, size):
+            if address == intro:
+                raise preload.PreloadError('Could not read complete preload status.')
+            return read(address, size)
+
+        m.memory.read.side_effect = guarded
+        self.assertEqual(m.sample(), {'coherent': False})
+
     def test_changed_resource_query_fails_closed(self):
         m, _, pointers = self.monitor()
         pointers[m.resource_base+preload.RESOURCE_VTABLE+0xc0] += 1
