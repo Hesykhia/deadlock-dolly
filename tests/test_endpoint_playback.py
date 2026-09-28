@@ -23,12 +23,12 @@ class _EndpointConsole(_TimedConsole):
         self.fail_final_write = False
         self.status_queries = 0
 
-    def request(self, command, timeout=3, completion_patterns=None):
+    def request(self, command, timeout=3, completion_patterns=None, allow_truncated=False):
         if command.startswith("spec_goto "):
             self.camera_hud.append(self.values["citadel_hud_visible"])
             if self.fail_final_write and command.startswith("spec_goto 20 40 320 15 30;"):
                 raise RuntimeError("Simulated final camera write failure")
-        return super().request(command, timeout, completion_patterns)
+        return super().request(command, timeout, completion_patterns, allow_truncated)
 
     def _request_item(self, command):
         if command == "demo_goto":

@@ -25,11 +25,11 @@ class _SmoothedConsole(_EndpointConsole):
         self.frames = []
         self.external_seek_at = None
 
-    def request(self, command, timeout=3, completion_patterns=None):
+    def request(self, command, timeout=3, completion_patterns=None, allow_truncated=False):
         camera = command.startswith("spec_goto ")
         sent_at = self.clock.now
         previous_tick = self.tick
-        output = super().request(command, timeout, completion_patterns)
+        output = super().request(command, timeout, completion_patterns, allow_truncated)
         if camera:
             force = next(item.strip().split()[1:] for item in command.split(";")
                          if item.strip().startswith("cl_citadel_forceangles "))

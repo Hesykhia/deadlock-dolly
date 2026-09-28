@@ -20,7 +20,7 @@ class LayerModeTests(unittest.TestCase):
         self.classes = CLASSES
         self.controller._request = self.request
 
-    def request(self, command):
+    def request(self, command, **kwargs):
         self.commands.append(command)
         if command == "sc_showclasses":
             return "\n".join(f"{name}    Hide DebugLevel: 0 1 2 3" for name in self.classes)

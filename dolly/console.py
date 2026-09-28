@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import deque
 import codecs
 import ipaddress
+import logging
 import math
 import re
 import secrets
@@ -21,6 +22,8 @@ import threading
 import time
 from typing import Literal
 
+
+LOG = logging.getLogger(__name__)
 
 VCONSOLE_VERSION = 0x00D40000
 MAX_PACKET_SIZE = 65535
@@ -358,7 +361,8 @@ class ConsoleClient:
             self._send_locked(command)
 
     def request(self, command: str, timeout: float = 2.0, *,
-                completion_patterns: tuple[str, ...] | None = None) -> str:
+                completion_patterns: tuple[str, ...] | None = None,
+                allow_truncated: bool = False) -> str:
         """Send a trusted command and collect its fresh, bounded response.
 
         Normally the end echo finishes collection. With ``completion_patterns``,
@@ -368,6 +372,14 @@ class ConsoleClient:
         timeout covers echo acknowledgement and semantic completion together;
         the serial request lock is held throughout. Historical output is never
         used to satisfy these patterns.
+
+        When ``allow_truncated`` is set and the collected text exceeds
+        ``max_response_bytes`` (a developer build can flood the console with its
+        own data-validation dump), collection stops and the bounded tail is
+        returned instead of raising. The tail starts after the last known
+        response marker so a normal response printed at the end of the flood is
+        still present for parsing. Use this for startup probes whose caller can
+        treat an unusable response as "not ready yet".
         """
         _validate_timeout(timeout)
         encode_command(command, self.version)
@@ -414,9 +426,30 @@ class ConsoleClient:
                                          if not (end in line and "echo" in line))
                         ended = True
                 if len(output.encode("utf-8")) > self.max_response_bytes:
-                    raise ConsoleError("Console response exceeds the configured size limit.")
+                    if not allow_truncated:
+                        raise ConsoleError(
+                            "Console response exceeds the configured size limit "
+                            f"({self.max_response_bytes} bytes) for {command.split()[0]!r}; "
+                            "the game console is flooding. Repair or verify the game files, "
+                            "or restart the session.")
+                    # A flooded console may still end with the real response. Keep
+                    # only a bounded rolling tail while waiting for the end echo or
+                    # deadline, so a normal response printed after the flood is
+                    # preserved without unbounded growth.
+                    if len(output) > 2 * self.max_response_bytes:
+                        output = output[-self.max_response_bytes:]
                 if ended and (not patterns or error_text(output)
                               or all(pattern.search(output) for pattern in patterns)):
+                    if allow_truncated:
+                        # Prefer the tail after the last known response marker so a
+                        # normal response printed after the flood still parses.
+                        marker = max(output.rfind("Demo contents for"),
+                                     output.rfind("Playing back demo:"))
+                        if marker > 0:
+                            output = output[marker:]
+                        if len(output.encode("utf-8")) > self.max_response_bytes:
+                            output = output.encode("utf-8")[-self.max_response_bytes:].decode(
+                                "utf-8", errors="ignore")
                     return output.strip("\r\n")
                 if failure:
                     raise ConsoleError(failure)
@@ -436,7 +469,12 @@ class ConsoleClient:
         """Conservative name availability check. Does not prove runtime effect."""
         if not _NAME.fullmatch(name):
             raise ValueError("Expected one plain console variable/command name.")
-        output = self.request("help " + name, timeout)
+        try:
+            output = self.request("help " + name, timeout, allow_truncated=True)
+        except ConsoleError:
+            # A flooded console (developer data-validation dump) is not proof the
+            # name is unusable; report not-confirmed so the caller keeps waiting.
+            return False
         if error_text(output):
             return False
         lines = [line for line in output.splitlines() if not re.search(r"\bhelp\s+" + re.escape(name) + r"\b", line)]

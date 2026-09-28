@@ -41,11 +41,11 @@ class _TimedConsole(FakeConsole):
         self.start_tick = self.tick = self.goto_output = 1000
         self.paused = not replay_speed
 
-    def request(self, command, timeout=3, completion_patterns=None):
+    def request(self, command, timeout=3, completion_patterns=None, allow_truncated=False):
         if command.startswith("spec_goto "):
             # A sub-clock-quantum round trip, as in the uploaded trace.
             self.clock.now += 0.002
-        return super().request(command, timeout, completion_patterns)
+        return super().request(command, timeout, completion_patterns, allow_truncated)
 
     def _request_item(self, command):
         if command in ("demo_info", "demo_goto") and not self.paused:

@@ -135,7 +135,7 @@ class FakeConsole:
             elif parts[0] in self.values and len(parts) == 2:
                 self.values[parts[0]] = float(parts[1])
 
-    def request(self, command, timeout=3, completion_patterns=None):
+    def request(self, command, timeout=3, completion_patterns=None, allow_truncated=False):
         self.requests.append(command)
         self.events.append(command)
         if command in self.fail_commands:

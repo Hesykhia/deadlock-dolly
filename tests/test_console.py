@@ -267,6 +267,42 @@ class ConsoleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 client.recent_output(limit)
 
+    def test_oversize_response_raises_by_default(self):
+        peer = Peer("netcon", responses={"flood": "x" * 4096})
+        client = ConsoleClient("netcon", max_response_bytes=1024)
+        try:
+            client.connect(port=peer.port)
+            with self.assertRaisesRegex(Exception, "exceeds the configured size limit"):
+                client.request("flood", timeout=3)
+        finally:
+            client.close()
+            peer.close()
+
+    def test_allow_truncated_returns_a_bounded_tail_without_raising(self):
+        # A developer build can flood the console with its own data dump; the
+        # startup probes keep only a bounded tail rather than aborting.
+        marker = "Playing back demo: 'x.dem' at tick 5\n"
+        peer = Peer("netcon", responses={"flood": ("j" * 3000) + "\n" + marker})
+        client = ConsoleClient("netcon", max_response_bytes=1024)
+        try:
+            client.connect(port=peer.port)
+            output = client.request("flood", timeout=5, allow_truncated=True)
+            self.assertLessEqual(len(output.encode("utf-8")), 1024)
+            self.assertIn("Playing back demo: 'x.dem' at tick 5", output)
+        finally:
+            client.close()
+            peer.close()
+
+    def test_supports_returns_false_on_a_flooded_console(self):
+        peer = Peer("netcon", responses={"help cvar_unhide": "y" * 4096})
+        client = ConsoleClient("netcon", max_response_bytes=1024)
+        try:
+            client.connect(port=peer.port)
+            self.assertFalse(client.supports("cvar_unhide", timeout=3))
+        finally:
+            client.close()
+            peer.close()
+
     def test_new_connection_clears_old_diagnostic_history(self):
         peer = Peer("netcon")
         client = ConsoleClient("netcon")

@@ -353,13 +353,17 @@ class Controller:
         cleaned = str(command).strip().splitlines()[0][:80] if str(command).strip() else "a console command"
         return self._game_death_message(f"Dolly was running '{cleaned}'") + f" Console reported: {detail}"
 
-    def _request(self, command, timeout=3.0, allow_error=False, completion_patterns=None):
+    def _request(self, command, timeout=3.0, allow_error=False, completion_patterns=None,
+                 allow_truncated=False):
         self._require_connection()
+        extra = {"allow_truncated": True} if allow_truncated else {}
         try:
             if completion_patterns is None:
-                output = self._console.request(command, timeout=timeout)
+                output = self._console.request(command, timeout=timeout, **extra)
             else:
-                output = self._console.request(command, timeout=timeout, completion_patterns=completion_patterns)
+                output = self._console.request(command, timeout=timeout,
+                                               completion_patterns=completion_patterns,
+                                               **extra)
         except ConsoleError as exc:
             if not self._alive():
                 raise RuntimeError(self._game_exit_message(command, exc)) from exc
@@ -585,7 +589,7 @@ class Controller:
         loading. Require settled engine status as well as rendered frames;
         neither an open socket nor an early view callback proves readiness.
         """
-        output = self._request("demo_info", allow_error=True)
+        output = self._request("demo_info", allow_error=True, allow_truncated=True)
         try:
             demo = parse_demo_info(output)
         except ValueError:
@@ -607,7 +611,7 @@ class Controller:
                 return None
             evidence = {"method": "rendered_pre_replay_scene", "initial_frame": initial_frame,
                         "rendered_frame": rendered, "demo": demo}
-        status = self._request("status", allow_error=True)
+        status = self._request("status", allow_error=True, allow_truncated=True)
         self._startup_evidence["console_status"] = str(status or "")[:4000]
         settled = self._console_hideout_evidence(status, demo)
         if settled is None:

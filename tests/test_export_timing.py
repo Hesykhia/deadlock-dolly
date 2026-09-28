@@ -13,7 +13,7 @@ class ExportTimingTests(unittest.TestCase):
         self.clamp = False
         self.controller._request = self.request
 
-    def request(self, command):
+    def request(self, command, **kwargs):
         output = []
         for part in command.split(";"):
             words = part.split()
