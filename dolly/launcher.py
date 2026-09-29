@@ -185,21 +185,21 @@ def _quote(value: str) -> str:
 
 
 def _editing_gameinfo(paths: GamePaths) -> str:
-    """Load the editing baseline only for its reviewed game-module versions.
+    """Load the editing baseline only for its three reviewed camera modules.
 
     Competitive gameinfo files can alter much more than ConVars. Never guess
     which entries are stock, or mount an old full gameinfo after a game update.
     This check is separate from, and does not authorize, native injection.
     """
-    from .compatibility import MODULE_RELATIVES, hash_file
+    from .compatibility import CAMERA_MODULE_RELATIVES, hash_file
     try:
         profile = json.loads((EDITING_ROOT / "profile.json").read_text(encoding="utf-8"))
         data = (EDITING_ROOT / "gameinfo.gi").read_bytes()
         if (profile.get("format") != 1
-                or set(profile.get("modules", {})) != set(MODULE_RELATIVES)
+                or set(profile.get("modules", {})) != set(CAMERA_MODULE_RELATIVES)
                 or hashlib.sha256(data).hexdigest() != profile.get("gameinfo_sha256")):
             raise ValueError("Editing configuration failed its integrity check")
-        for relative in MODULE_RELATIVES:
+        for relative in CAMERA_MODULE_RELATIVES:
             if hash_file(paths.game_dir / relative) != profile["modules"][relative]:
                 raise LaunchError("Dolly's editing configuration has not been reviewed for this game build. "
                                   "Update Dolly before launching. Your gameinfo.gi was not changed.")

@@ -45,12 +45,12 @@ def fake_game(root: Path, executable_name: str = "citadel.exe") -> launcher.Game
 
 
 def editing_fixture(paths, folder):
-    from dolly.compatibility import MODULE_RELATIVES
+    from dolly.compatibility import CAMERA_MODULE_RELATIVES
     root = folder / "editing-resources"
     root.mkdir(exist_ok=True)
     (root / "gameinfo.gi").write_bytes(GAMEINFO.encode("utf-8"))
     modules = {}
-    for relative in MODULE_RELATIVES:
+    for relative in CAMERA_MODULE_RELATIVES:
         path = paths.game_dir / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
@@ -64,11 +64,16 @@ def editing_fixture(paths, folder):
 
 class GameInfoTests(unittest.TestCase):
     def test_bundled_editing_configuration_integrity_and_mount_shape(self):
+        from dolly.compatibility import CAMERA_MODULE_RELATIVES, load_manifest
         root = Path(__file__).resolve().parents[1]
         profile = json.loads((root / 'assets/editing/profile.json').read_text(encoding='utf-8'))
         data = (root / 'assets/editing/gameinfo.gi').read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(), profile['gameinfo_sha256'])
         self.assertEqual(profile['format'], 1)
+        self.assertEqual(set(profile['modules']), set(CAMERA_MODULE_RELATIVES))
+        reviewed = load_manifest(root / 'native/profiles/manifest.json')['modules']
+        for relative, digest in profile['modules'].items():
+            self.assertIn(digest, reviewed[relative]['accepted'])
         result = launcher.make_gameinfo(data.decode('utf-8'), 'citadel_dolly_test')
         self.assertIn('citadel_dolly_test/cvar_unlocker', result)
         self.assertNotIn('Game                citadel/cvar_unlocker', result)
@@ -148,6 +153,11 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((session.session_dir / 'original.gameinfo.gi').read_bytes(), original)
         session.restore_gameinfo()
         self.assertEqual(self.paths.gameinfo.read_bytes(), original)
+
+    def test_editing_profile_verifies_camera_modules_only(self):
+        from dolly.compatibility import CAMERA_MODULE_RELATIVES, MODULE_RELATIVES
+        self.assertGreater(len(MODULE_RELATIVES), len(CAMERA_MODULE_RELATIVES))
+        self.assertEqual(launcher._editing_gameinfo(self.paths), GAMEINFO)
 
     def test_editing_profile_mismatch_refuses_before_mount(self):
         before = self.paths.gameinfo.read_bytes()
