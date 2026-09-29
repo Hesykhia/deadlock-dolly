@@ -1408,9 +1408,8 @@ static DWORD WINAPI worker(void*) {
         // or the view callback. The main camera remains usable if overlay fails.
         editor_install_input_hooks();
         install_overlay_hooks();
-        const auto sound = GetModuleHandleW(L"soundsystem.dll");
-        if (module_matches(sound, kSoundSystemHash, 0x678000))
-            sound_capture_install(sound);
+        auto sound = GetModuleHandleW(L"soundsystem.dll");
+        sound_capture_install(sound, module_matches(sound, kSoundSystemHash, 0x678000));
         // Hook and original trampoline remain resident until process exit. Losing
         // the editor only releases ownership, avoiding code-unload races in a view.
         std::shared_ptr<const NativeShot> shot;
@@ -1437,8 +1436,10 @@ static DWORD WINAPI worker(void*) {
             if (!sound_capture_available() && diagnostic_now >= next_sound_probe) {
                 next_sound_probe = diagnostic_now + 1000;
                 const auto module = GetModuleHandleW(L"soundsystem.dll");
-                if (module_matches(module, kSoundSystemHash, 0x678000))
-                    sound_capture_install(module);
+                if (module && module != sound) {
+                    sound = module;
+                    sound_capture_install(module, module_matches(module, kSoundSystemHash, 0x678000));
+                }
             }
             if (diagnostic_now >= next_renderer_probe) {
                 next_renderer_probe = diagnostic_now + 1000;

@@ -7,28 +7,15 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
+#include "dolly_sound_compat_generated.hpp"
 #include "MinHook.h"
 #include "dolly_sound_capture.hpp"
 
 namespace dolly {
 namespace {
-// soundsystem.dll SHA-256 5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0
-// 2026-09-09 PE image. The bridge checks that fingerprint and image size before
-// calling this module. Offsets and first instructions were checked in Ghidra.
-constexpr std::uintptr_t kVoiceStart = 0x99340;
-constexpr std::uintptr_t kVoiceStop = 0x9b7a0;
-constexpr std::uintptr_t kVoiceMapRemove = 0x9cb90;
-constexpr std::uintptr_t kVmixStart = 0x191dd0;
-constexpr std::uintptr_t kEventName = 0x1a9840;
-constexpr std::uintptr_t kVoiceTablePointer = 0x61fce0;
-constexpr unsigned char kVoiceStartBytes[] = {
-    0x4c, 0x89, 0x44, 0x24, 0x18, 0x48, 0x89, 0x4c, 0x24, 0x08, 0x53, 0x55, 0x56, 0x57};
-constexpr unsigned char kVmixStartBytes[] = {
-    0x40, 0x55, 0x57, 0x41, 0x54, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8d, 0x6c, 0x24, 0xc9};
-constexpr unsigned char kVoiceStopBytes[] = {
-    0x48, 0x89, 0x54, 0x24, 0x10, 0x48, 0x89, 0x4c, 0x24, 0x08, 0x56, 0x41, 0x55, 0x48, 0x83, 0xec, 0x48};
-constexpr unsigned char kVoiceMapRemoveBytes[] = {
-    0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x6c, 0x24, 0x18, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57};
+// Addresses are published only after exact-profile or unique AOB resolution.
+dolly_sound_compat::Resolution sound_symbols{};
 constexpr unsigned kCapacity = 8192;
 constexpr unsigned kMaxVoices = 4096;
 constexpr std::int32_t kNoVoice = -1;
@@ -138,7 +125,7 @@ void sample_voice_state() noexcept {
     next_state_qpc = stamp.QuadPart + frequency.QuadPart / 10;
     std::uintptr_t table = 0, slots = 0, meters = 0;
     std::int32_t count = 0;
-    if (!read(sound_base + kVoiceTablePointer, table) || !read(table, count) ||
+    if (!read(sound_base + sound_symbols.voice_table, table) || !read(table, count) ||
         count <= 0 || count > kMaxVoices || !read(table + 8, slots) ||
         !read(table + 0x20, meters) || !slots || !meters) return;
     std::string batch;
@@ -225,7 +212,7 @@ std::int64_t __fastcall voice_start_hook(std::uint64_t first, void* parameters,
         copy_text(entry.asset, asset);
         std::uintptr_t table = 0, slots = 0;
         std::int32_t count = 0;
-        if (read(sound_base + kVoiceTablePointer, table) && read(table, count) &&
+        if (read(sound_base + sound_symbols.voice_table, table) && read(table, count) &&
             count > 0 && slot < count && read(table + 8, slots))
             read(slots + std::uintptr_t(slot) * 0x40 + 8, entry.voice_id);
         if (entry.asset[0] && entry.voice_id != kNoVoice && entry.slot < kMaxVoices)
@@ -241,7 +228,7 @@ void __fastcall voice_stop_hook(std::uint64_t first, void* voice) noexcept {
         if (recording.load(std::memory_order_relaxed)) {
             std::uintptr_t table = 0, slots = 0;
             std::int32_t count = 0;
-            if (read(sound_base + kVoiceTablePointer, table) && read(table, count) &&
+            if (read(sound_base + sound_symbols.voice_table, table) && read(table, count) &&
                 count > 0 && count <= 4096 && read(table + 8, slots)) {
                 for (std::int32_t slot = 0; slot < count; ++slot) {
                     const auto address = slots + std::uintptr_t(slot) * 0x40;
@@ -275,7 +262,7 @@ std::uint64_t __fastcall voice_map_remove_hook(void* map, const std::int32_t* id
     if (recording.load(std::memory_order_relaxed) && id) {
         std::uintptr_t table = 0;
         std::int32_t voice_id = kNoVoice;
-        if (read(sound_base + kVoiceTablePointer, table) &&
+        if (read(sound_base + sound_symbols.voice_table, table) &&
             map == reinterpret_cast<void*>(table + 0x118) &&
             read(reinterpret_cast<std::uintptr_t>(id), voice_id)) {
             inflight.fetch_add(1, std::memory_order_acq_rel);
@@ -315,7 +302,7 @@ void poll_released_voices() noexcept {
     if (!recording.load(std::memory_order_acquire)) return;
     std::uintptr_t table = 0, slots = 0;
     std::int32_t count = 0;
-    if (!read(sound_base + kVoiceTablePointer, table) || !read(table, count) ||
+    if (!read(sound_base + sound_symbols.voice_table, table) || !read(table, count) ||
         count <= 0 || count > kMaxVoices || !read(table + 8, slots)) return;
     for (std::int32_t slot = 0; slot < count; ++slot) {
         auto id = active_ids[slot].load(std::memory_order_acquire);
@@ -341,28 +328,68 @@ void poll_released_voices() noexcept {
 }
 } // namespace
 
-bool sound_capture_install(void* module) noexcept {
+// Read a bounded PE section snapshot: scans never dereference arbitrary image
+// memory and allocation/read failure simply leaves this optional feature off.
+bool resolve_sound_image(void* module, bool exact, dolly_sound_compat::Resolution& symbols) {
+    const auto base = reinterpret_cast<std::uintptr_t>(module);
+    IMAGE_DOS_HEADER dos{};
+    IMAGE_NT_HEADERS64 nt{};
+    if (!read(base, dos) || dos.e_magic != IMAGE_DOS_SIGNATURE ||
+        dos.e_lfanew < sizeof(dos) || dos.e_lfanew > 0x100000 ||
+        !read(base + dos.e_lfanew, nt) || nt.Signature != IMAGE_NT_SIGNATURE ||
+        nt.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
+        nt.FileHeader.SizeOfOptionalHeader != sizeof(IMAGE_OPTIONAL_HEADER64) ||
+        !nt.FileHeader.NumberOfSections || nt.FileHeader.NumberOfSections > 96 ||
+        nt.OptionalHeader.SizeOfImage > 0x10000000 ||
+        (exact && nt.OptionalHeader.SizeOfImage != dolly_sound_compat::kImageSize)) return false;
+    const auto image_size = nt.OptionalHeader.SizeOfImage;
+    const auto headers_end = std::uint64_t(dos.e_lfanew) + sizeof(nt) +
+                            nt.FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
+    if (headers_end > image_size) return false;
+    IMAGE_SECTION_HEADER text{}, data{};
+    for (unsigned i = 0; i < nt.FileHeader.NumberOfSections; ++i) {
+        IMAGE_SECTION_HEADER section{};
+        if (!read(base + dos.e_lfanew + sizeof(nt) + i * sizeof(section), section) ||
+            section.VirtualAddress > image_size ||
+            section.Misc.VirtualSize > image_size - section.VirtualAddress) return false;
+        if (std::memcmp(section.Name, ".text\0\0\0", 8) == 0) {
+            if (text.Misc.VirtualSize || !(section.Characteristics & IMAGE_SCN_MEM_EXECUTE) ||
+                !(section.Characteristics & IMAGE_SCN_MEM_READ)) return false;
+            text = section;
+        }
+        if (std::memcmp(section.Name, ".data\0\0\0", 8) == 0) {
+            if (data.Misc.VirtualSize || !(section.Characteristics & IMAGE_SCN_MEM_WRITE) ||
+                !(section.Characteristics & IMAGE_SCN_MEM_READ) ||
+                (section.Characteristics & IMAGE_SCN_MEM_EXECUTE)) return false;
+            data = section;
+        }
+    }
+    if (!text.Misc.VirtualSize || data.Misc.VirtualSize < 8) return false;
+    std::vector<unsigned char> bytes(text.Misc.VirtualSize);
+    if (!read_bytes(base + text.VirtualAddress, bytes.data(), bytes.size())) return false;
+    using namespace dolly_sound_compat;
+    return resolve(bytes.data(), bytes.size(), text.VirtualAddress, data.VirtualAddress,
+                   data.Misc.VirtualSize, kSignatures, sizeof(kSignatures) / sizeof(kSignatures[0]),
+                   kTableReferences, sizeof(kTableReferences) / sizeof(kTableReferences[0]),
+                   exact, kVoiceTable, symbols);
+}
+
+bool sound_capture_install(void* module, bool exact) noexcept {
     if (installed.load()) return true;
     if (!module) return false;
     const auto base = reinterpret_cast<std::uintptr_t>(module);
-    unsigned char bytes[sizeof(kVoiceStartBytes)]{};
-    if (!read_bytes(base + kVoiceStart, bytes, sizeof(bytes)) ||
-        std::memcmp(bytes, kVoiceStartBytes, sizeof(bytes))) return false;
-    unsigned char vmix[sizeof(kVmixStartBytes)]{};
-    if (!read_bytes(base + kVmixStart, vmix, sizeof(vmix)) ||
-        std::memcmp(vmix, kVmixStartBytes, sizeof(vmix))) return false;
-    unsigned char stopped[sizeof(kVoiceStopBytes)]{};
-    if (!read_bytes(base + kVoiceStop, stopped, sizeof(stopped)) ||
-        std::memcmp(stopped, kVoiceStopBytes, sizeof(stopped))) return false;
-    unsigned char removed[sizeof(kVoiceMapRemoveBytes)]{};
-    if (!read_bytes(base + kVoiceMapRemove, removed, sizeof(removed)) ||
-        std::memcmp(removed, kVoiceMapRemoveBytes, sizeof(removed))) return false;
+    dolly_sound_compat::Resolution symbols{};
+    try {
+        if (!resolve_sound_image(module, exact, symbols)) return false;
+    } catch (...) { return false; }
+    sound_symbols = symbols;
     sound_base = base;
-    event_name = reinterpret_cast<EventNameFn>(base + kEventName);
-    auto voice = reinterpret_cast<void*>(base + kVoiceStart);
-    auto vmix_entry = reinterpret_cast<void*>(base + kVmixStart);
-    auto stop_entry = reinterpret_cast<void*>(base + kVoiceStop);
-    auto remove_entry = reinterpret_cast<void*>(base + kVoiceMapRemove);
+    event_name = reinterpret_cast<EventNameFn>(base + symbols.functions[4]);
+    auto voice = reinterpret_cast<void*>(base + symbols.functions[0]);
+    auto stop_entry = reinterpret_cast<void*>(base + symbols.functions[1]);
+    auto remove_entry = reinterpret_cast<void*>(base + symbols.functions[2]);
+    auto vmix_entry = reinterpret_cast<void*>(base + symbols.functions[3]);
     if (MH_CreateHook(voice, reinterpret_cast<void*>(voice_start_hook),
                       reinterpret_cast<void**>(&original_voice_start)) != MH_OK) return false;
     if (MH_CreateHook(vmix_entry, reinterpret_cast<void*>(vmix_start_hook),

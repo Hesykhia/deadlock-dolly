@@ -1,7 +1,7 @@
 {
   "manifest_format": 1,
   "native_abi": 4,
-  "generated_utc": "2026-09-25",
+  "generated_utc": "2026-09-28",
   "generator": "tools/generate_profile.py",
   "reviewed_client_utc": "2026-09-11",
   "modules": {
@@ -18,7 +18,12 @@
         "3c07cea8a2e3491bdb34062edb7f4d827402fd235fd3fe307e331e7fcb5a222c",
         "d1ee16fc5615c3569f25f76d9bcfb364f3f570c642671aaff35ce71356221e26",
         "cb831d124403ee2f3afa54981e69d8acf71251ba1129d0733757251f74a157c2"
-      ]
+      ],
+      "feature_pins": {
+        "automatic preload": [
+          "cb831d124403ee2f3afa54981e69d8acf71251ba1129d0733757251f74a157c2"
+        ]
+      }
     },
     "bin/win64/engine2.dll": {
       "role": "engine",
@@ -37,6 +42,38 @@
         "b4300eb0abfe73e1e877516ab6b8bdd1a1bdb4ffc47c7515a349d0623b852f69",
         "b3192eac3cb8c54ac3f9c7aaf7c725ddfcc2dc46d99ba13d16177b6ebf736ebc"
       ]
+    },
+    "bin/win64/scenesystem.dll": {
+      "role": "scenesystem",
+      "reviewed_utc": "2026-09-28",
+      "latest_timestamp": 1788971759,
+      "accepted": [
+        "e480a7f28ae073dd4a83833bfee8db44bfff22f097147f2f697a109b2ea2de4b"
+      ]
+    },
+    "bin/win64/soundsystem.dll": {
+      "role": "soundsystem",
+      "reviewed_utc": "2026-09-28",
+      "latest_timestamp": 1788971775,
+      "accepted": [
+        "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0"
+      ]
+    },
+    "bin/win64/resourcesystem.dll": {
+      "role": "resourcesystem",
+      "reviewed_utc": "2026-09-28",
+      "latest_timestamp": 1788971683,
+      "accepted": [
+        "55ca9912cd80a08ea233d31a215236a0bc601139877eacc0cbd296b6f5bb192b"
+      ]
+    },
+    "bin/win64/rendersystemdx11.dll": {
+      "role": "rendersystemdx11",
+      "reviewed_utc": "2026-09-28",
+      "latest_timestamp": 1788971688,
+      "accepted": [
+        "386bdc4adfc8b8a0db67520b98b391f872a214e07077cc17a02f10bf94e3b2d8"
+      ]
     }
   },
   "profiles": [
@@ -48,6 +85,7 @@
     "deadlock-2026-09-16-complete.json",
     "deadlock-2026-09-17-complete.json",
     "deadlock-2026-09-17b-complete.json",
-    "deadlock-2026-09-25-complete.json"
+    "deadlock-2026-09-25-complete.json",
+    "soundsystem-2026-09-09.json"
   ]
 }

@@ -58,7 +58,7 @@ class CompatibilityTests(unittest.TestCase):
         pins = {relative: ("0" * 64,) for relative in compatibility.MODULE_RELATIVES}
         report = compatibility.scan_game_modules(self.game, manifest=self.manifest_for(pins))
         self.assertEqual(report.state, compatibility.UNSUPPORTED)
-        self.assertEqual(len(report.unsupported_modules), 3)
+        self.assertEqual(len(report.unsupported_modules), len(compatibility.MODULE_RELATIVES))
         message = report.describe()
         self.assertIn("does not support", message)
         self.assertIn("appears to have been updated", message)
@@ -83,7 +83,9 @@ class CompatibilityTests(unittest.TestCase):
     def test_pins_override_uses_installed_hashes(self):
         pins = {relative: hashlib.sha256(path.read_bytes()).hexdigest()
                 for relative, path in self.files.items()}
-        report = compatibility.scan_game_modules(self.game, pins=pins)
+        report = compatibility.scan_game_modules(
+            self.game, pins=pins,
+            manifest=self.manifest_for({r: (digest,) for r, digest in pins.items()}))
         self.assertEqual(report.state, compatibility.SUPPORTED)
 
     def test_pe_timestamp_reads_coff_header(self):
@@ -120,6 +122,36 @@ class CompatibilityTests(unittest.TestCase):
         report = compatibility.scan_game_modules(self.game, manifest=self.manifest_for(pins))
         self.assertEqual(compatibility.report_identifier(report),
                          compatibility.report_identifier(report))
+
+    def test_optional_module_mismatches_are_visible_without_blocking_camera(self):
+        for relative in compatibility.MODULE_RELATIVES[3:]:
+            with self.subTest(relative=relative):
+                pins = {r: (digest,) for r, digest in self.hashes().items()}
+                pins[relative] = ("0" * 64,)
+                report = compatibility.scan_game_modules(self.game, manifest=self.manifest_for(pins))
+                self.assertEqual(report.state, compatibility.UNSUPPORTED)
+                self.assertEqual(report.camera_report().state, compatibility.SUPPORTED)
+                self.assertIn(Path(relative).name, report.describe())
+                self.assertIn("newer=True", report.details())
+
+    def test_optional_missing_module_does_not_block_camera(self):
+        pins = {r: (digest,) for r, digest in self.hashes().items()}
+        self.files["bin/win64/soundsystem.dll"].unlink()
+        report = compatibility.scan_game_modules(self.game, manifest=self.manifest_for(pins))
+        self.assertEqual(report.state, compatibility.INCOMPLETE)
+        self.assertEqual(report.camera_report().state, compatibility.SUPPORTED)
+        self.assertIn("soundsystem.dll", report.describe())
+
+    def test_client_preload_pin_is_distinct_from_camera_support(self):
+        pins = {r: (digest,) for r, digest in self.hashes().items()}
+        manifest = self.manifest_for(pins)
+        manifest["modules"][compatibility.MODULE_RELATIVES[0]]["feature_pins"] = {
+            "automatic preload": ["0" * 64]}
+        report = compatibility.scan_game_modules(self.game, manifest=manifest)
+        self.assertEqual(report.state, compatibility.UNSUPPORTED)
+        self.assertEqual(report.camera_report().state, compatibility.SUPPORTED)
+        self.assertIn("automatic preload", report.describe())
+        self.assertIn("unreviewed features=automatic preload", report.details())
 
 
 if __name__ == "__main__":

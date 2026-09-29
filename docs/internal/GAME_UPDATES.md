@@ -1,5 +1,53 @@
 # Deadlock updates and Dolly
 
+## Complete module scan and audio fallback (2026-09-28)
+
+**Check game build** and Native launch now hash seven game modules in one scan:
+`client`, `engine2`, `tier0`, `scenesystem`, `soundsystem`, `resourcesystem`, and
+`rendersystemdx11`. The manifest lists the existing reviewed pins for all seven.
+The details include observed hash, review date, newer-than-reviewed status and
+the affected feature. Unknown or missing optional modules make the overall
+report unsupported/incomplete but do not change the three-module camera launch
+gate. Players capture, audio, preload and renderer diagnostics keep their own
+runtime gates. The unlocker's `server.dll` is Dolly's bundled binary, checked
+separately, not an installed game-module dependency.
+
+Audio now has an exact-hash fast path and a fail-closed signature fallback.
+`tools/generate_sound_profile.py` creates five unique masked instruction-prefix
+signatures from the exact reviewed sound binary: four hooks plus the event-name
+helper. RIP displacements and direct call/jump operands are wildcarded using
+Capstone's operand offsets/sizes. Four decoded RIP-relative references, from
+three independent functions, must agree on one aligned slot in writable,
+non-executable `.data`. All five prologues are checked. Ambiguous/missing matches,
+changed fixed bytes or disagreeing/out-of-range pointers leave audio disabled.
+The native worker probes each loaded module base once, avoiding repeated scans
+of an unsupported build. The offline Python scan still reports an unknown sound
+hash as unreviewed; it does not claim that the native fallback has succeeded.
+
+The saved `native/profiles/soundsystem-2026-09-09.json` preserves the signatures
+after Steam replaces the binary. Regenerate its header with
+`python tools/generate_sound_profile.py`; add `--game-dir <Deadlock>` only to
+rebuild the profile from its exact reviewed binary. The normal client generator
+also emits the sound header from this saved profile. It preserves optional
+module pins instead of approving them during a client-only review. New sound
+code/layouts require a fresh review and updated profile; prefix matches do not
+prove every helper or data layout unchanged.
+
+`client.dll`'s hash is intentionally duplicated in the manifest, the generated
+client header, and `dolly/preload.py::CLIENT_SHA256`. Camera support accepts
+several older hashes; preload's code/layout review accepts one. The manifest's
+`feature_pins` records that narrower preload requirement, so an older accepted
+camera build no longer implies preload support. `tests/test_sound_profile.py`
+cross-checks these pins, the resource-system pin, and the native scene, sound
+and renderer pins. Update them together after reviewing the relevant subsystem;
+do not copy the camera's accepted hash list into preload.
+
+Validation is offline: generated signatures are unique in the installed PE,
+native resolution is checked against its full `.text` snapshot, and synthetic
+tests cover moved functions/data, signed displacements, ambiguity, changed
+prologues, truncation and invalid table targets. A bounded owned replay remains
+necessary before claiming in-game capture behavior on a newly updated build.
+
 ## Compatibility scanner and generator — 0.5.3
 
 `native/profiles/manifest.json` is the single source of truth for the reviewed

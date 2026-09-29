@@ -2,9 +2,9 @@
 #include <cstdint>
 
 namespace dolly {
-// Optional hook for the pinned Deadlock soundsystem.dll. The caller verifies
-// the complete module fingerprint before passing its loaded base address.
-bool sound_capture_install(void* module) noexcept;
+// Optional audio hooks. Caller supplies the result of the complete fingerprint
+// check; otherwise all addresses require unique reviewed AOB matches.
+bool sound_capture_install(void* module, bool exact) noexcept;
 bool sound_capture_available() noexcept;
 void sound_capture_clock(std::int32_t tick, double engine_seconds) noexcept;
 bool sound_capture_start(const wchar_t* csv_path) noexcept;

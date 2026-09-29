@@ -37,7 +37,7 @@ class NativePackagingTests(unittest.TestCase):
         ):
             with self.subTest(module=module):
                 pins = set(NATIVE_GAME_SHA256[relative])
-                self.assertEqual(pins, {p[module][key] for p in profiles})
+                self.assertEqual(pins, {p[module][key] for p in profiles if module in p})
                 source, expression = sources[module]
                 native_pins = set(re.findall(expression, source.read_text()))
                 self.assertEqual(pins, native_pins)

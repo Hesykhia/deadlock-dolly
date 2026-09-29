@@ -414,3 +414,9 @@ docs/RELEASE_NOTES_0.5.38-alpha.md
 docs/RELEASE_NOTES_0.5.39-alpha.md
 docs/RELEASE_NOTES_0.5.40-alpha.md
 docs/RELEASE_NOTES_0.5.41-alpha.md
+native/include/dolly_sound_compat.hpp
+native/src/dolly_sound_compat_generated.hpp
+native/profiles/soundsystem-2026-09-09.json
+native/tests/sound_compat_tests.cpp
+tools/generate_sound_profile.py
+tests/test_sound_profile.py

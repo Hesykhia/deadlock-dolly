@@ -544,7 +544,7 @@ def _verified_unlocker() -> Path:
 def _verified_native(paths: GamePaths) -> Path:
     """Fail closed on changed game binaries or a missing native release build."""
     try:
-        report = scan_game_modules(paths.game_dir, pins=NATIVE_GAME_SHA256)
+        report = scan_game_modules(paths.game_dir, pins=NATIVE_GAME_SHA256).camera_report()
     except CompatibilityError as exc:
         raise LaunchError(str(exc)) from exc
     if report.state == UNSUPPORTED:

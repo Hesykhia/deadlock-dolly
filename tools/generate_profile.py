@@ -264,13 +264,13 @@ def build_signature(image: Image, rva: int, length: int = 0x120) -> tuple[bytes,
         offset = insn.address - (image.base + rva)
         for operand in insn.operands:
             if operand.type == capstone.x86.X86_OP_MEM and operand.mem.base == capstone.x86.X86_REG_RIP:
-                start = offset + insn.size - 4
-                for i in range(start, start + 4):
+                start = offset + insn.disp_offset
+                for i in range(start, start + insn.disp_size):
                     if 0 <= i < len(mask):
                         mask[i] = 0
             if operand.type == capstone.x86.X86_OP_IMM and insn.mnemonic in ("call", "jmp"):
-                start = offset + insn.size - 4
-                for i in range(start, start + 4):
+                start = offset + insn.imm_offset
+                for i in range(start, start + insn.imm_size):
                     if 0 <= i < len(mask):
                         mask[i] = 0
     return bytes(image_bytes), bytes(mask)
@@ -556,12 +556,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label", default=None, help="Review label, for example 2026-09-11.")
     parser.add_argument("--out-profile", type=Path, default=None)
     parser.add_argument("--out-header", type=Path, default=ROOT / "native/src/dolly_compat_generated.hpp")
+    parser.add_argument("--out-sound-header", type=Path,
+                        default=ROOT / "native/src/dolly_sound_compat_generated.hpp")
     parser.add_argument("--profiles-dir", type=Path, default=ROOT / "native/profiles")
     parser.add_argument("--update-manifest", action="store_true")
     parser.add_argument("--header-only", action="store_true",
                         help="Regenerate the native header from profiles without touching the manifest.")
     args = parser.parse_args(argv)
     args.game_dir = resolve_game_dir(args.game_dir)
+    # Sound signatures are preserved with their reviewed binary identity. Never
+    # regenerate them from unreviewed installed RVAs during a client update.
+    from generate_sound_profile import emit_sound_header
+    sound_profile = json.loads((args.profiles_dir / "soundsystem-2026-09-09.json").read_text(encoding="utf-8"))
+    emit_sound_header(sound_profile, args.out_sound_header)
 
     if args.header_only:
         image = Image(args.game_dir / MODULE_RELATIVES["client"])
