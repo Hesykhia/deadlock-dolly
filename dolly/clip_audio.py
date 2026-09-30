@@ -16,6 +16,10 @@ def _ffmpeg() -> Path:
     configured = os.environ.get("DOLLY_FFMPEG")
     if configured and Path(configured).is_file():
         return Path(configured)
+    from .video_export import bundled_ffmpeg_path
+    bundled = bundled_ffmpeg_path()
+    if bundled is not None:
+        return bundled
     found = shutil.which("ffmpeg")
     if found:
         return Path(found)

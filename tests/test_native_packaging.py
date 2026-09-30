@@ -26,9 +26,9 @@ class NativePackagingTests(unittest.TestCase):
             "client": (root / "native/src/dolly_compat_generated.hpp",
                        r'\{\s*"([a-f0-9]{64})"'),
             "engine": (root / "native/src/bridge_win.cpp",
-                       r'k(?:Updated)?EngineHash\[\]\s*=\s*"([a-f0-9]{64})"'),
+                       r'k(?:Updated|September)?EngineHash\[\]\s*=\s*"([a-f0-9]{64})"'),
             "tier0": (root / "native/src/native_effects_win.hpp",
-                      r'k(?:Updated)?Tier0Hash\[\]\s*=\s*"([a-f0-9]{64})"'),
+                      r'k(?:Updated|September)?Tier0Hash\[\]\s*=\s*"([a-f0-9]{64})"'),
         }
         for module, relative, key in (
             ("client", "citadel/bin/win64/client.dll", "client_sha256"),

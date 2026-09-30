@@ -39,6 +39,8 @@ EXTRA_ACTIONS = ("console", "set_speed", "select_view", "set_playback_speed", "s
 EXTRA_ACTIONS += ("set_confetti_enabled", "set_confetti_spawn_height",
                   "set_confetti_despawn_on_ground")
 EXTRA_ACTIONS += ("open_bone_picker", "cancel_bone_picker", "finish_bone_picker")
+EXTRA_ACTIONS += ("start_game_follow", "stop_game_follow")
+EXTRA_ACTIONS += ("set_replay_hud",)
 
 DOF_OFFSET = 2 * 1024 * 1024 + 3712
 DOF_CONFIG = struct.Struct("<8s4I11d")
@@ -65,6 +67,20 @@ BONES_COUNT = 256
 BONES_BYTES = BONES_HEADER.size + BONES_COUNT * 64
 PICKER_OFFSET = 2 * 1024 * 1024 + 22528
 PICKER_RESULT = struct.Struct("<8s6IQiI64s7d")
+FOLLOW_OFFSET = 2 * 1024 * 1024 + 23040
+FOLLOW_CONFIG = struct.Struct("<8s4I3d")
+
+
+def pack_follow(sequence, settings, *, available=False, active=False, pending=False, show_hud=False):
+    from .follow_camera import FollowSettings
+    if not isinstance(settings, FollowSettings):
+        raise ValueError("Invalid Game Follow settings")
+    settings.values()
+    if any(type(value) is not bool for value in (available, active, pending, show_hud)):
+        raise ValueError("Game Follow switches must be booleans")
+    flags = int(available) | int(active) << 1 | int(pending) << 2 | int(show_hud) << 3
+    return FOLLOW_CONFIG.pack(b'DLYFOLL1', _uint(sequence, 'sequence'), 1, flags, 0,
+                              settings.distance, settings.shoulder, settings.height)
 
 
 def unpack_picker(data):

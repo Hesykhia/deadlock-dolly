@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cwchar>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include "dolly_video.hpp"
 
@@ -38,7 +39,8 @@ bool wait_terminal() {
     return false;
 }
 bool inspect_mp4(const wchar_t* path, std::uint64_t expected_frames,
-                 std::uint64_t expected_duration, std::uint32_t expected_fps = 30) {
+                 std::uint64_t expected_duration, std::uint32_t expected_fps = 30,
+                 LONGLONG minimum_last_pts = 0) {
     // Read the muxed H.264 samples back without requiring a video decoder.
     const auto platform = LoadLibraryExW(L"mfplat.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     const auto readwrite =
@@ -74,16 +76,18 @@ bool inspect_mp4(const wchar_t* path, std::uint64_t expected_frames,
         ok = SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &type)) &&
              SUCCEEDED(MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &width, &height)) &&
              width == 320 && height == 240 &&
-             SUCCEEDED(MFGetAttributeRatio(type, MF_MT_FRAME_RATE, &fps_n, &fps_d)) &&
-             fps_n > 0 && fps_d > 0 &&
+             SUCCEEDED(MFGetAttributeRatio(type, MF_MT_FRAME_RATE, &fps_n, &fps_d)) && fps_n > 0 &&
+             fps_d > 0 &&
              // Media Foundation derives the container rate from the samples'
              // real timing: a real-time capture reports the achieved rate, not
              // the requested one (30 fps can appear as 30000/1001; a 120 fps
              // request lands far lower on WARP). Zero disables the rate band;
              // the sample-timestamp checks below remain authoritative.
-             (expected_fps == 0 ||
-              std::abs(double(fps_n) / double(fps_d) - double(expected_fps)) <=
-                  double(expected_fps) * 0.05);
+             (expected_fps == 0 || std::abs(double(fps_n) / double(fps_d) - double(expected_fps)) <=
+                                       double(expected_fps) * 0.05);
+        if (!ok)
+            std::fprintf(stderr, "Container metadata: %ux%u fps=%u/%u expected=%u\n", width, height,
+                         fps_n, fps_d, expected_fps);
         release(type);
     }
     std::uint64_t frames = 0;
@@ -112,9 +116,16 @@ bool inspect_mp4(const wchar_t* path, std::uint64_t expected_frames,
         if (flags & MF_SOURCE_READERF_ENDOFSTREAM)
             break;
     }
-    ok = ok && frames == expected_frames && end > 0 &&
+    ok = ok && frames == expected_frames && last >= minimum_last_pts && end > 0 &&
          std::uint64_t(end) + 10000 >= expected_duration &&
          std::uint64_t(end) <= expected_duration + 10000;
+    if (!ok)
+        std::fprintf(
+            stderr,
+            "Container samples: count=%llu expected=%llu last=%lld end=%lld expected_end=%llu\n",
+            static_cast<unsigned long long>(frames),
+            static_cast<unsigned long long>(expected_frames), last, end,
+            static_cast<unsigned long long>(expected_duration));
     release(reader);
     if (started)
         shutdown();
@@ -127,7 +138,7 @@ bool inspect_mp4(const wchar_t* path, std::uint64_t expected_frames,
 }
 }
 
-int main() {
+int main(int argc, char** argv) {
     using namespace dolly::video;
     if (!check(!start(L"relative.mp4", 30, 10000000), "relative paths are refused") ||
         !check(!start(L"C:\\unused.mp4", 24, 10000000), "unsupported FPS is refused"))
@@ -165,6 +176,59 @@ int main() {
     hr = swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&buffer));
     if (SUCCEEDED(hr))
         hr = device->CreateRenderTargetView(buffer, nullptr, &view);
+    if (argc == 2 && std::strcmp(argv[1], "--cap-only") == 0) {
+        bool ok = check(SUCCEEDED(hr), "bounded backbuffer view");
+        for (unsigned variant = 0; variant < 4; ++variant) {
+            const bool fixed = (variant & 1) != 0;
+            const bool shot_only = (variant & 2) != 0;
+            if (!ok)
+                break;
+            const auto capped_path = path + std::to_wstring(variant) + L"-cap.mp4";
+            Options options;
+            options.path = capped_path.c_str();
+            options.fps = 60;
+            options.bitrate = 2000000;
+            options.fixed_step = fixed;
+            options.shot_only = shot_only;
+            options.max_frames = 2;
+            ok = check(start(options), "bounded recording starts") && ok;
+            const auto deadline = GetTickCount64() + 15000;
+            double phase = 0;
+            while (ok && !terminal(status().state) && GetTickCount64() < deadline) {
+                const float color[] = {0.2f, 0.4f, 0.7f, 1.0f};
+                context->ClearRenderTargetView(view, color);
+                capture(swapchain, device, context, nullptr, phase, true);
+                phase += 1.0 / 60;
+                swapchain->Present(0, 0);
+                Sleep(shot_only && !fixed ? 20 : 2);
+            }
+            const auto result = status();
+            ok = check(result.state == State::completed && result.frames_written == 2,
+                       "hard admission cap auto-finalizes exactly two frames") &&
+                 ok;
+            for (unsigned i = 0; i < 20; ++i) {
+                capture(swapchain, device, context);
+                swapchain->Present(0, 0);
+            }
+            ok = check(status().frames_written == 2, "extra Presents cannot overshoot cap") && ok;
+            shutdown();
+            reset_resources();
+            if (ok)
+                ok = inspect_mp4(capped_path.c_str(), result.frames_written, result.duration_100ns,
+                                 fixed ? 60 : 0, shot_only && !fixed ? 190000 : 0);
+            DeleteFileW(capped_path.c_str());
+        }
+        release(view);
+        release(buffer);
+        release(context);
+        release(device);
+        release(swapchain);
+        DestroyWindow(window);
+        if (ok)
+            std::puts(
+                "WARP real-time/fixed-step two-frame admission and auto-finalization passed.");
+        return ok ? 0 : 1;
+    }
     bool ok = check(SUCCEEDED(hr), "backbuffer view") &&
               check(start(path.c_str(), 30, 2000000), "recording starts");
     const auto until = GetTickCount64() + 15000;

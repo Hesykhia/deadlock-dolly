@@ -144,8 +144,12 @@ class VideoOptions:
     full_resolution: bool = False
     # Group the video and optional audio deliverables in one take folder.
     bundle_audio: bool = False
+    # Optional hard native admission cap for bounded checks; 0 is unlimited.
+    max_frames: int = 0
 
     def validated(self) -> VideoOptions:
+        if type(self.max_frames) is not int or not 0 <= self.max_frames <= 65535:
+            raise ValueError("Video frame limit must be an integer between 0 and 65535.")
         if type(self.fps) is not int or self.fps not in (30, 60, 120, 300, 600):
             raise ValueError("Choose a video frame rate of 30, 60, 120, 300 or 600 FPS.")
         if type(self.bitrate) is not int or self.bitrate not in BITRATE_PRESETS.values():
@@ -192,6 +196,9 @@ class VideoOptions:
             raise ValueError("Full-resolution export must be on or off.")
         if type(self.bundle_audio) is not bool:
             raise ValueError("Audio folder export must be on or off.")
+        if self.bundle_audio and self.fixed_step:
+            raise ValueError("Audio export needs real-time capture. Turn off Fixed-step and "
+                             "extra layers, or export silent layers separately.")
         if type(self.shot_only) is not bool:
             raise ValueError("Shot-only capture must be on or off.")
         if isinstance(self.speed, bool) or not isinstance(self.speed, (int, float)):
@@ -207,7 +214,7 @@ class VideoOptions:
         result = VideoOptions(path, self.fps, self.bitrate, self.codec, self.quality, self.preset,
                               ffmpeg, self.fixed_step, speed, self.depth, self.depth_exr,
                               self.layers, self.white_clear, self.shot_only,
-                              self.full_resolution or self.depth, self.bundle_audio)
+                              self.full_resolution or self.depth, self.bundle_audio, self.max_frames)
         if self.depth:
             encoder, _codec_id = resolve_backend(result)
             if encoder != 1:
@@ -443,6 +450,7 @@ class VideoExport:
         if callable(mark):
             mark(True)
         try:
+            limited = {"max_frames": options.max_frames} if options.max_frames else {}
             bridge.start_video(str(color_path), fps=options.fps, bitrate=options.bitrate,
                                encoder=encoder, codec=codec_id, quality=options.quality,
                                preset=options.preset,
@@ -450,7 +458,7 @@ class VideoExport:
                                fixed_step=options.fixed_step, depth=options.depth,
                                depth_exr=options.depth_exr,
                                shot_only=bool(options.depth or options.layers or options.shot_only),
-                               white_clear=options.white_clear)
+                               white_clear=options.white_clear, **limited)
         except Exception as exc:
             if folder is not None:
                 try:

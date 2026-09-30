@@ -203,8 +203,10 @@ std::int64_t __fastcall voice_start_hook(std::uint64_t first, void* parameters,
         entry.slot = std::int32_t(slot);
         entry.voice_id = -1;
         const auto parameter_address = reinterpret_cast<std::uintptr_t>(parameters);
-        read(parameter_address + 0x24, entry.source_volume);
-        read(parameter_address + 0x30, entry.source_rate_parameter);
+        // Initial gain and legacy ramp-time metadata are profile-specific floats.
+        // The nearby pitch percentage is an integer, not this rate column.
+        read(parameter_address + sound_symbols.parameter_volume_offset, entry.source_volume);
+        read(parameter_address + sound_symbols.parameter_rate_offset, entry.source_rate_parameter);
         read(parameter_address, entry.source_x);
         read(parameter_address + 4, entry.source_y);
         read(parameter_address + 8, entry.source_z);
@@ -263,7 +265,7 @@ std::uint64_t __fastcall voice_map_remove_hook(void* map, const std::int32_t* id
         std::uintptr_t table = 0;
         std::int32_t voice_id = kNoVoice;
         if (read(sound_base + sound_symbols.voice_table, table) &&
-            map == reinterpret_cast<void*>(table + 0x118) &&
+            map == reinterpret_cast<void*>(table + sound_symbols.voice_map_offset) &&
             read(reinterpret_cast<std::uintptr_t>(id), voice_id)) {
             inflight.fetch_add(1, std::memory_order_acq_rel);
             for (std::int32_t slot = 0; slot < kMaxVoices; ++slot) {
@@ -341,8 +343,7 @@ bool resolve_sound_image(void* module, bool exact, dolly_sound_compat::Resolutio
         nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
         nt.FileHeader.SizeOfOptionalHeader != sizeof(IMAGE_OPTIONAL_HEADER64) ||
         !nt.FileHeader.NumberOfSections || nt.FileHeader.NumberOfSections > 96 ||
-        nt.OptionalHeader.SizeOfImage > 0x10000000 ||
-        (exact && nt.OptionalHeader.SizeOfImage != dolly_sound_compat::kImageSize)) return false;
+        nt.OptionalHeader.SizeOfImage > 0x10000000) return false;
     const auto image_size = nt.OptionalHeader.SizeOfImage;
     const auto headers_end = std::uint64_t(dos.e_lfanew) + sizeof(nt) +
                             nt.FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
@@ -369,10 +370,9 @@ bool resolve_sound_image(void* module, bool exact, dolly_sound_compat::Resolutio
     std::vector<unsigned char> bytes(text.Misc.VirtualSize);
     if (!read_bytes(base + text.VirtualAddress, bytes.data(), bytes.size())) return false;
     using namespace dolly_sound_compat;
-    return resolve(bytes.data(), bytes.size(), text.VirtualAddress, data.VirtualAddress,
-                   data.Misc.VirtualSize, kSignatures, sizeof(kSignatures) / sizeof(kSignatures[0]),
-                   kTableReferences, sizeof(kTableReferences) / sizeof(kTableReferences[0]),
-                   exact, kVoiceTable, symbols);
+    return resolve_profiles(bytes.data(), bytes.size(), text.VirtualAddress, data.VirtualAddress,
+                            data.Misc.VirtualSize, image_size, kProfiles,
+                            sizeof(kProfiles) / sizeof(kProfiles[0]), exact, symbols);
 }
 
 bool sound_capture_install(void* module, bool exact) noexcept {
@@ -482,10 +482,10 @@ bool sound_capture_start(const wchar_t* csv_path) noexcept {
     next_state_qpc = 0;
     char metadata[512]{};
     std::snprintf(metadata, sizeof(metadata),
-                  "# qpc_frequency=%lld; capture_start_qpc=%lld; capture_start_tick=%d; capture_start_engine_seconds=%.9f; capture=source_voice_starts_and_stops; verified_soundsystem=5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0\r\n",
+                  "# qpc_frequency=%lld; capture_start_qpc=%lld; capture_start_tick=%d; capture_start_engine_seconds=%.9f; capture=source_voice_starts_and_stops; sound_voice_table_rva=%u; sound_voice_map_offset=%u\r\n",
                   static_cast<long long>(frequency.QuadPart),
                   static_cast<long long>(started.QuadPart), last_tick.load(),
-                  last_engine_time.load());
+                  last_engine_time.load(), sound_symbols.voice_table, sound_symbols.voice_map_offset);
     if (!write_text(std::string(metadata) +
                     "kind,qpc_ticks,demo_tick,engine_seconds,voice_slot,voice_id,source_volume,source_rate_parameter,source_x,source_y,source_z,soundevent,vsnd_path\r\n") ||
         !write_state_text("perf_counter,qpc_ticks,voice_slot,voice_id,slot_20,raw_14,state_b_0,state_b_1,raw_00,raw_04,raw_08\r\n")) {

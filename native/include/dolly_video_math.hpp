@@ -6,6 +6,9 @@
 #include <cstdint>
 
 namespace dolly::video {
+inline bool frame_admission_open(std::uint64_t submitted, std::uint32_t limit) noexcept {
+    return !limit || submitted < limit;
+}
 // Canonical normalization for the paired depth master and its preview: depths
 // at or beyond this positive camera-axis distance are the far plane (sky).
 constexpr double kDepthUnitMax = 8192.0;

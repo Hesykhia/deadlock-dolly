@@ -32,6 +32,21 @@ class Memory(bytearray):
 
 
 class NativeBridgeTests(unittest.TestCase):
+    def test_optional_follow_anchor_diagnostics_and_protocol_refusal(self):
+        self.publish_status()
+        self.assertIsNone(self.bridge.status()["follow_anchor_diagnostics"])
+        offset=nb.FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET
+        block=nb.FOLLOW_ANCHOR_DIAGNOSTICS
+        for magic,abi,flags in ((b"DLYFANC1",1,1),(b"BADMAGIC",1,1),
+                                (b"DLYFANC1",2,1),(b"DLYFANC1",1,2)):
+            self.memory[offset:offset+block.size]=block.pack(magic,2,abi,flags,123,50,4,3,1)
+            if magic==b"DLYFANC1" and abi==1 and flags==1:
+                result=self.bridge.status()["follow_anchor_diagnostics"]
+                self.assertEqual(result,{"installed":True,"target_handle":123,
+                                         "scopes":50,"blends":4,"corrections":3,"rejected":1})
+            else:
+                with self.assertRaises(nb.NativeBridgeError):self.bridge.status()
+
     def test_pov_uses_segment_clock_without_camera_or_aspect_flags(self):
         self.after_sleep = self.respond
         self.bridge.prepare(self.project, 0, 1, False, "example.dem", pov=True)

@@ -3,6 +3,8 @@
 constexpr char kTier0Hash[] = "b4300eb0abfe73e1e877516ab6b8bdd1a1bdb4ffc47c7515a349d0623b852f69";
 constexpr char kUpdatedTier0Hash[] =
     "b3192eac3cb8c54ac3f9c7aaf7c725ddfcc2dc46d99ba13d16177b6ebf736ebc";
+constexpr char kSeptemberTier0Hash[] =
+    "493bf3ca610bac0eec1369d19aa67f4c279c6ae1c8f1243b3bad0974c6a8db82";
 constexpr std::uintptr_t kCvarTable = 0x3106e8, kCvarSet = 0x20ec60;
 std::uintptr_t gTier0 = 0, gCvar = 0;
 bool gExtendedCvarSupported = false;
@@ -214,28 +216,34 @@ struct NativeEffectState {
 NativeEffectState gEffects;
 static bool init_cvar_interface() {
     auto tier0 = GetModuleHandleW(L"tier0.dll");
-    if (!module_matches(tier0, kTier0Hash, 0x400000) &&
+    const bool september = module_matches(tier0, kSeptemberTier0Hash, 0x401000);
+    if (!september && !module_matches(tier0, kTier0Hash, 0x400000) &&
         !module_matches(tier0, kUpdatedTier0Hash, 0x400000))
         return false;
-    gExtendedCvarSupported = module_matches(tier0, kUpdatedTier0Hash, 0x400000);
+    gExtendedCvarSupported = september || module_matches(tier0, kUpdatedTier0Hash, 0x400000);
     gTier0 = reinterpret_cast<std::uintptr_t>(tier0);
     auto factory = reinterpret_cast<Factory>(GetProcAddress(tier0, "CreateInterface"));
     if (!factory)
         return false;
     gCvar = reinterpret_cast<std::uintptr_t>(factory("VEngineCvar007", nullptr));
     std::uintptr_t table = 0, find = 0, data = 0;
-    if (!read_value(gCvar, table) || table != gTier0 + kCvarTable ||
-        !read_value(table + 11 * 8, find) || find != gTier0 + 0x6bef0 ||
-        !read_value(table + 43 * 8, data) || data != gTier0 + 0x6be30)
+    // The interface name did not change, but GetConVarData moved from slot 43
+    // to 41. Select only by exact reviewed module identity, then verify slots.
+    const auto table_rva = september ? 0x313208u : kCvarTable;
+    const auto setter_rva = september ? 0x20fd40u : kCvarSet;
+    if (!read_value(gCvar, table) || table != gTier0 + table_rva ||
+        !read_value(table + 11 * 8, find) || find != gTier0 + (september ? 0x6c6b0u : 0x6bef0u) ||
+        !read_value(table + (september ? 41 : 43) * 8, data) ||
+        data != gTier0 + (september ? 0x6c5f0u : 0x6be30u))
         return false;
     const unsigned char expected[] = {0x4c, 0x89, 0x44, 0x24, 0x18, 0x48, 0x89, 0x4c,
                                       0x24, 0x08, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41};
     unsigned char actual[sizeof(expected)]{};
-    if (!read_memory(gTier0 + kCvarSet, actual, sizeof(actual)) ||
+    if (!read_memory(gTier0 + setter_rva, actual, sizeof(actual)) ||
         std::memcmp(actual, expected, sizeof(actual)))
         return false;
     gFindCvar = reinterpret_cast<FindCvarFn>(find);
     gGetCvarData = reinterpret_cast<CvarDataFn>(data);
-    gSetCvar = reinterpret_cast<SetCvarFn>(gTier0 + kCvarSet);
+    gSetCvar = reinterpret_cast<SetCvarFn>(gTier0 + setter_rva);
     return true;
 }

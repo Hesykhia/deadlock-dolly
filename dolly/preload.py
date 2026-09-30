@@ -23,15 +23,24 @@ class _ReviewedBuildMismatch(PreloadError):
     """A successful read disagreed with the reviewed build; never retried away."""
 
 
-CLIENT_SHA256 = "cb831d124403ee2f3afa54981e69d8acf71251ba1129d0733757251f74a157c2"
-RESOURCE_SHA256 = "55ca9912cd80a08ea233d31a215236a0bc601139877eacc0cbd296b6f5bb192b"
-MANAGER = 0x2dd3ef0
-MANAGER_VTABLE = 0x2341738
-RESOURCE_GLOBAL = 0x3994fb0
-RESOURCE_VTABLE = 0x61058
-RESOURCE_QUERY = 0x18c00
-INTRO_GLOBAL = 0x38198c8
-INTRO_VTABLE = 0x27a6768
+CLIENT_SHA256 = "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc"
+RESOURCE_SHA256 = "1eb0193b3098f0941377abe1fce5579c4d61bcc29c4ab099da894a3edab80095"
+MANAGER = 0x31456e0
+MANAGER_VTABLE = 0x2623068
+RESOURCE_GLOBAL = 0x3d7fe30
+RESOURCE_VTABLE = 0x6bc58
+RESOURCE_QUERY = 0x1c860
+INTRO_GLOBAL = 0x3bdf908
+INTRO_VTABLE = 0x2aa93b0
+
+# Build 6722: status observes two lifecycle flags and consumes the finished
+# job handle itself. Check the producer/callback as well as the UI predicate.
+CLIENT_CODE_SPANS = (
+    (0x5ec930, 8), (0x5f5bd0, 0x7e), (0x1cb88e0, 0x10a),
+    (0x5ddb7e, 0x33), (0x5f8f70, 10), (0x5d2420, 0x4b),
+    (0x1a82ba5, 0x65), (0x1aa00f0, 0xe6),
+    (0x1ac61c0, 0x1cc), (0x1aaea60, 0x42), (0x1a8ba40, 0x22a),
+)
 
 
 def _post_intro_escape(session):
@@ -205,9 +214,7 @@ class PreloadMonitor:
                 bases.append(module[0])
             self.base, self.resource_base = bases
             for base, data, spans in (
-                    (self.base, images[0], ((0x571e20, 8), (0x57de80, 85), (0x1a88740, 128),
-                                           (0x18c34cf, 48), (0x18c352d, 7), (0x18d5250, 234),
-                                           (0x18f0d50, 0x210), (0x18dfec0, 32), (0x18ca970, 0x20c))),
+                    (self.base, images[0], CLIENT_CODE_SPANS),
                     (self.resource_base, images[1], ((RESOURCE_QUERY, 13),))):
                 for rva, length in spans:
                     if memory.read(base+rva, length) != _image_bytes(data, rva, length):
@@ -246,6 +253,9 @@ class PreloadMonitor:
             raise _ReviewedBuildMismatch('Preload counters are outside their reviewed range.')
         resource = struct.unpack_from('<Q', raw, 0x30)[0]
         job = struct.unpack_from('<i', raw, 0x38)[0]
+        scheduled, job_complete = raw[0x3c:0x3e]
+        if scheduled not in (0, 1) or job_complete not in (0, 1):
+            raise _ReviewedBuildMismatch('Preload lifecycle flags differ from the reviewed build.')
         # The resource-system global is populated partway through the hideout
         # load. Until then it reads as a null (or not-yet-mapped) pointer; that
         # is "not started", not a build mismatch, so it must not abort automatic
@@ -281,8 +291,13 @@ class PreloadMonitor:
                     return {'coherent': False}
         return {'coherent': True, 'started': bool(resource), 'completed': completed, 'total': total,
                 'intro_phase': intro_phase,
+                'scheduled': bool(scheduled), 'job_complete': bool(job_complete),
                 'resource_complete': bool(resource_done), 'job_active': job != 0,
-                'ready': bool(resource) and job == 0 and resource_done == 1 and completed >= total}
+                # Unlike the game's UI, never call an unscheduled preload ready.
+                # Its status function waits/releases the completed job and clears
+                # the handle; observe that final state without calling it ourselves.
+                'ready': bool(resource) and scheduled == 1 and job_complete == 1
+                         and job == 0 and resource_done == 1 and completed >= total}
 
     def advance_intro(self):
         """Only once, only at the reviewed interactive intro, with fresh state."""

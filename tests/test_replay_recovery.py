@@ -25,6 +25,8 @@ class ReplayRecoveryTests(unittest.TestCase):
         self.bridge.state = 'stopped'
         self.bridge.video_status = Mock(return_value={'state': 'idle'})
         self.controller._session.native = self.bridge
+        self.camera_handoff = Mock()
+        self.controller._wait_replay_camera = self.camera_handoff
         launch_patch = patch('dolly.controller.launcher.launch')
         self.launch = launch_patch.start()
         self.addCleanup(launch_patch.stop)
@@ -60,6 +62,25 @@ class ReplayRecoveryTests(unittest.TestCase):
     def recover(self):
         return self.controller._recover_replay_for_shot()
 
+    def test_camera_handoff_precedes_pause_on_fresh_replay(self):
+        def handoff(bridge, cancelled):
+            self.assertIs(bridge, self.bridge)
+            self.assertIs(cancelled, self.controller._stop_event)
+            self.assertGreaterEqual(self.console.tick, 2)
+            self.assertFalse(self.console.paused)
+            self.assertEqual(self.pause_ticks, [])
+        self.camera_handoff.side_effect = handoff
+        self.recover()
+        self.camera_handoff.assert_called_once()
+
+    def test_camera_handoff_failure_never_pauses_or_retries(self):
+        self.camera_handoff.side_effect = RuntimeError('camera handoff unavailable')
+        with self.assertRaisesRegex(RuntimeError, 'camera handoff unavailable'):
+            self.recover()
+        self.assertEqual(self.pause_ticks, [])
+        self.assertEqual(len(self.console.sent), 1)
+        self.assertEqual(self.controller._probe_result, {})
+
     def test_inactive_then_initial_update_before_pause_and_no_launch(self):
         result = self.recover()
         self.assertGreaterEqual(result['tick'], 2)
@@ -69,6 +90,40 @@ class ReplayRecoveryTests(unittest.TestCase):
         self.assertEqual(self.controller._replay_recovery['stage'], 'ready')
         self.assertFalse(self.controller._replay_recovery_active)
         self.assertTrue(self.controller._probe_result['capabilities']['spec_goto'])
+
+    def test_owned_hidden_health_original_spans_guarded_reload(self):
+        name = 'citadel_hud_hide_own_health'
+        self.controller._game_ui_restore = {name: 0}
+        self.console.values['citadel_hud_visible'] = 0
+        self.console.values['citadel_hide_replay_hud'] = 1
+        with patch.object(self.controller, '_own_health_hud_value', return_value=1):
+            self.recover()
+        self.assertEqual(self.controller._game_ui_restore, {name: 0})
+        self.assertEqual(self.console.requests.count('disconnect'), 1)
+        self.assertEqual(len(self.console.sent), 1)
+        self.assertFalse(any(name + ' 0' in command for command in self.console.requests))
+
+    def test_health_pending_reload_requires_typed_hide_and_no_other_originals(self):
+        name = 'citadel_hud_hide_own_health'
+        for value, extra in ((None, {}), (0, {}), (1, {'citadel_hud_visible': 0})):
+            with self.subTest(value=value, extra=extra):
+                self.controller._game_ui_restore = {name: 0, **extra}
+                with patch.object(self.controller, '_own_health_hud_value', return_value=value):
+                    with self.assertRaisesRegex(RuntimeError, 'pending settings'):
+                        self.recover()
+                self.assertNotIn('disconnect', self.console.requests)
+
+    def test_main_hud_hide_spans_reload_even_for_user_hidden_health(self):
+        name = 'citadel_hud_hide_own_health'
+        for originals in ({name: 0, 'citadel_hud_visible': 1}, {'citadel_hud_visible': 1}):
+            with self.subTest(originals=originals):
+                self.controller._game_ui_restore = dict(originals)
+                self.console.values['citadel_hud_visible'] = 0
+                self.console.values['citadel_hide_replay_hud'] = 1
+                with patch.object(self.controller, '_own_health_hud_value', return_value=1):
+                    self.assertTrue(self.controller._health_panel_held())
+                    self.console.values['citadel_hud_visible'] = 1
+                    self.assertFalse(self.controller._health_panel_held())
 
     def test_disabled_glow_is_reapplied_after_recovery(self):
         self.console.values["citadel_boss_glow_disabled"] = 0.0

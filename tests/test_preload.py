@@ -9,7 +9,8 @@ from dolly import preload
 
 
 class PreloadTests(unittest.TestCase):
-    def monitor(self, *, resource=0x300000, job=0, completed=14, total=14, done=1):
+    def monitor(self, *, resource=0x300000, job=0, completed=14, total=14, done=1,
+                scheduled=1, job_complete=1):
         monitor = preload.PreloadMonitor.__new__(preload.PreloadMonitor)
         monitor.session = SimpleNamespace(running=True)
         monitor.base, monitor.resource_base = 0x180000000, 0x190000000
@@ -18,6 +19,7 @@ class PreloadTests(unittest.TestCase):
         struct.pack_into('<ii', raw, 0x24, completed, total)
         struct.pack_into('<Q', raw, 0x30, resource)
         struct.pack_into('<i', raw, 0x38, job)
+        raw[0x3c:0x3e] = bytes((scheduled, job_complete))
         blocks = {monitor.base+preload.MANAGER: bytes(raw), resource+0x44: bytes([done])}
         pointers = {monitor.base+preload.RESOURCE_GLOBAL: 0x400000,
                     monitor.base+preload.INTRO_GLOBAL: 0,
@@ -42,6 +44,30 @@ class PreloadTests(unittest.TestCase):
 
     def test_completed_started_preload_is_ready(self):
         m, _, _ = self.monitor()
+        self.assertTrue(m.sample()['ready'])
+
+    def test_new_lifecycle_flags_block_false_completion(self):
+        for kwargs in ({'scheduled': 0}, {'job_complete': 0},
+                       {'scheduled': 0, 'job_complete': 0},
+                       {'job': 7, 'job_complete': 1},
+                       {'resource': 0, 'job_complete': 1}):
+            with self.subTest(kwargs=kwargs):
+                m, _, _ = self.monitor(**kwargs)
+                self.assertFalse(m.sample()['ready'])
+
+    def test_unrecognized_lifecycle_flags_fail_closed(self):
+        for kwargs in ({'scheduled': 2}, {'job_complete': 255}):
+            with self.subTest(kwargs=kwargs):
+                m, _, _ = self.monitor(**kwargs)
+                with self.assertRaisesRegex(preload.PreloadError, 'lifecycle flags'):
+                    m.sample()
+
+    def test_completed_callback_still_waits_for_ui_to_release_job(self):
+        m, blocks, _ = self.monitor(job=7)
+        self.assertFalse(m.sample()['ready'])
+        raw = bytearray(blocks[m.base+preload.MANAGER])
+        struct.pack_into('<i', raw, 0x38, 0)
+        blocks[m.base+preload.MANAGER] = bytes(raw)
         self.assertTrue(m.sample()['ready'])
 
     def test_status_transition_is_not_coherent(self):

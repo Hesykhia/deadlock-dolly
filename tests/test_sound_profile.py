@@ -8,7 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from generate_sound_profile import PROFILE, HEADER, emit_sound_header, build_sound_profile
+from generate_sound_profile import PROFILE, LEGACY_PROFILE, HEADER, emit_sound_header, build_sound_profile
 from generate_profile import build_signature, ProfileError
 
 
@@ -46,13 +46,17 @@ class SoundProfileTests(unittest.TestCase):
         for filename, constant, source in (
             ("scenesystem.dll", "kPlayerCaptureScenesystemHash", bridge),
             ("soundsystem.dll", "kSoundSystemHash", bridge),
+            ("soundsystem.dll", "kSeptemberSoundSystemHash", bridge),
+            ("scenesystem.dll", "kSeptemberScenesystemHash", bridge),
             ("rendersystemdx11.dll", "kRendererDiagnosticsHash",
              (ROOT / "native/include/dolly_renderer_diagnostics.hpp").read_text()),
         ):
             digest = re.search(constant + r'\[\]\s*=\s*"([a-f0-9]{64})"', source)[1]
-            self.assertEqual(modules[f"bin/win64/{filename}"]["accepted"], [digest])
+            self.assertIn(digest, modules[f"bin/win64/{filename}"]["accepted"])
         sound = json.loads(PROFILE.read_text())
-        self.assertEqual(modules["bin/win64/soundsystem.dll"]["accepted"], [sound["sha256"]])
+        legacy = json.loads(LEGACY_PROFILE.read_text())
+        self.assertCountEqual(modules["bin/win64/soundsystem.dll"]["accepted"],
+                              [legacy["sha256"], sound["sha256"]])
         self.assertEqual(modules["bin/win64/resourcesystem.dll"]["accepted"], [preload.RESOURCE_SHA256])
         client = modules["citadel/bin/win64/client.dll"]
         self.assertIn(preload.CLIENT_SHA256, client["accepted"])

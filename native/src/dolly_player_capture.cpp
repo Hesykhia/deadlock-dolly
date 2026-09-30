@@ -43,6 +43,17 @@ std::atomic<double> authoredReplayTime{-1.0};
 ULONGLONG drainStarted = 0;
 std::uintptr_t sceneBase = 0;
 Producer original = nullptr;
+ProducerSeptember originalSeptember = nullptr;
+bool septemberScene = false;
+struct SceneLayout {
+    std::uintptr_t object, table, producer, frame, stack, records, capacity, ids, transforms;
+    std::uintptr_t cpu_transforms, owner, gpu_buffer;
+};
+constexpr SceneLayout kLegacyScene{0x8cd2e0, 0x5d4fe8, 0x564b0, 0x8ce9b8, 0x8cfce8,
+    0x8cfde0, 0x8cfde8, 0x8cfc50, 0x8cfd40, 0x8cfce0, 0xc0, 0x60};
+constexpr SceneLayout kSeptemberScene{0x955cc0, 0x61e7d0, 0x5c8e0, 0x957458, 0x957be8,
+    0x957ce0, 0x957ce8, 0x957b48, 0x957c40, 0x957be0, 0xd8, 0x70};
+SceneLayout sceneLayout = kLegacyScene;
 std::atomic<PoseObserver> poseObserver{nullptr};
 bool configured = false, hashesOk = false, attempted = false, captured = false,
      producerInstalled = false;
@@ -545,13 +556,13 @@ std::uint64_t stamp() noexcept {
     return t.QuadPart;
 }
 std::uint32_t frame() noexcept {
-    return sceneBase ? value<std::uint32_t>(sceneBase + 0x8ce9b8) : 0;
+    return sceneBase ? value<std::uint32_t>(sceneBase + sceneLayout.frame) : 0;
 }
 std::uintptr_t cpu(std::uintptr_t global) noexcept {
     return sceneBase ? value<std::uintptr_t>(value<std::uintptr_t>(sceneBase + global) + 0x18) : 0;
 }
 std::uintptr_t buffer(std::uintptr_t global) noexcept {
-    return sceneBase ? value<std::uintptr_t>(value<std::uintptr_t>(sceneBase + global) + 0x60) : 0;
+    return sceneBase ? value<std::uintptr_t>(value<std::uintptr_t>(sceneBase + global) + sceneLayout.gpu_buffer) : 0;
 }
 // Diagnostics keep a chronological log. Shot exports recycle only unreferenced
 // slots; GPU evidence stays pinned until its frame has been verified and written.
@@ -609,38 +620,38 @@ struct Write {
             admission.fetch_sub(1, std::memory_order_acq_rel);
     }
 };
-int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
+int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
                     std::uint32_t mode, unsigned char* flag, std::uint32_t* outA,
-                    std::uint32_t* outB) {
+                    std::uint32_t* outB, std::uint32_t* outC) {
     const auto obj = reinterpret_cast<std::uintptr_t>(object);
     ++producerCalls;
     if (auto observer = poseObserver.load(std::memory_order_acquire))
-        observer(value<std::uint32_t>(obj + 0xc0), frame());
+        observer(value<std::uint32_t>(obj + sceneLayout.owner), frame());
     // Hiding runs without a capture: remember the owner for each produced
     // instance so the draw hook can skip exactly that handle. No events, no
     // allocation, no GPU work.
     if (hidingActive.load(std::memory_order_acquire) &&
         !captureActive.load(std::memory_order_acquire) && !sequenceV2) {
-        const int result = original(a, object, mesh, opaque, params, mode, flag, outA, outB);
+        const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
         if (result >= 0 && static_cast<unsigned>(result) < HideSlots)
             hideOwners[result].store((std::uint64_t(frame()) << 32) |
-                                         value<std::uint32_t>(obj + 0xc0),
+                                         value<std::uint32_t>(obj + sceneLayout.owner),
                                      std::memory_order_relaxed);
         return result;
     }
     // Bounded sequences record only reviewed-player producers; every other
     // producer is forwarded exactly once without consuming the event buffer.
     if (captureActive.load(std::memory_order_acquire)) {
-        const auto owner = value<std::uint32_t>(obj + 0xc0);
+        const auto owner = value<std::uint32_t>(obj + sceneLayout.owner);
         if (!owner_is_player(owner, obj)) {
-            const int result = original(a, object, mesh, opaque, params, mode, flag, outA, outB);
+            const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
             // Instance indices are recycled, including within one frame. A
             // non-selected owner must replace any old selected-owner entry.
             // Otherwise equal GPU record words can validate a stale identity.
             if (result >= 0 &&
-                static_cast<unsigned>(result) < value<std::uint32_t>(sceneBase + 0x8cfde8)) {
+                static_cast<unsigned>(result) < value<std::uint32_t>(sceneBase + sceneLayout.capacity)) {
                 const std::uint32_t empty[8]{};
-                producer_store(frame(), static_cast<unsigned>(result), buffer(0x8cfde0), 0, empty,
+                producer_store(frame(), static_cast<unsigned>(result), buffer(sceneLayout.records), 0, empty,
                                0);
             }
             return result;
@@ -651,7 +662,7 @@ int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, vo
         // preparation frames would otherwise fill the bounded event buffer
         // before the first frame can be sealed.
         if (sequenceV3 && authoredReplayTime.load(std::memory_order_acquire) < 0.0)
-            return original(a, object, mesh, opaque, params, mode, flag, outA, outB);
+            return forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
         ++producerKnownCalls;
     }
     if (sequenceV2) {
@@ -660,13 +671,13 @@ int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, vo
         // otherwise fill it long before the last frame is sealed.
         const auto engineFrame = frame();
         const int sequenceResult =
-            original(a, object, mesh, opaque, params, mode, flag, outA, outB);
-        const auto ownerHandle = value<std::uint32_t>(obj + 0xc0);
-        const auto stack = value<std::uintptr_t>(sceneBase + 0x8cfce8);
+            forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+        const auto ownerHandle = value<std::uint32_t>(obj + sceneLayout.owner);
+        const auto stack = value<std::uintptr_t>(sceneBase + sceneLayout.stack);
         const auto base = value<std::uintptr_t>(stack + 0x18);
         const auto end = value<std::uintptr_t>(stack + 8);
-        const auto capacity = value<std::uint32_t>(sceneBase + 0x8cfde8);
-        const auto recordsBuffer = buffer(0x8cfde0);
+        const auto capacity = value<std::uint32_t>(sceneBase + sceneLayout.capacity);
+        const auto recordsBuffer = buffer(sceneLayout.records);
         if (sequenceResult >= 0 && static_cast<unsigned>(sequenceResult) < capacity && base &&
             end >= base) {
             const auto address = base + static_cast<std::uint64_t>(sequenceResult) * 32;
@@ -686,21 +697,21 @@ int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, vo
     if (e) {
         e->w[6] = obj;
         e->w[7] = m;
-        e->w[8] = value<std::uint32_t>(obj + 0xc0);
+        e->w[8] = value<std::uint32_t>(obj + sceneLayout.owner);
         e->w[9] = value<std::uintptr_t>(obj);
-        e->w[34] = value<std::uint64_t>(value<std::uintptr_t>(m + 0x48) + 0x10);
+        e->w[34] = value<std::uint64_t>(septemberScene ? m + 0x40 : value<std::uintptr_t>(m + 0x48) + 0x10);
         e->w[35] = mode;
     }
     // Exactly one original invocation. The first register argument remains
     // opaque; caller-owned in/out pointers and all nine argument slots survive.
-    const int result = original(a, object, mesh, opaque, params, mode, flag, outA, outB);
+    const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
     const auto engineFrame = frame();
-    const auto ownerHandle = value<std::uint32_t>(obj + 0xc0);
-    const auto stack = value<std::uintptr_t>(sceneBase + 0x8cfce8);
+    const auto ownerHandle = value<std::uint32_t>(obj + sceneLayout.owner);
+    const auto stack = value<std::uintptr_t>(sceneBase + sceneLayout.stack);
     const auto base = value<std::uintptr_t>(stack + 0x18);
     const auto end = value<std::uintptr_t>(stack + 8);
-    const auto capacity = value<std::uint32_t>(sceneBase + 0x8cfde8);
-    const auto recordsBuffer = buffer(0x8cfde0); // CSceneSystem+0x2b00
+    const auto capacity = value<std::uint32_t>(sceneBase + sceneLayout.capacity);
+    const auto recordsBuffer = buffer(sceneLayout.records);
     std::uint32_t record[8]{};
     bool recordOk = false;
     if (result >= 0 && static_cast<unsigned>(result) < capacity && base && end >= base) {
@@ -711,14 +722,14 @@ int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, vo
     if (e) {
         e->w[10] = static_cast<std::uint32_t>(result);
         e->w[11] = base;
-        e->w[22] = cpu(0x8cfce0);
-        e->w[23] = buffer(0x8cfd40); // CSceneSystem+0x2a60
+        e->w[22] = cpu(sceneLayout.cpu_transforms);
+        e->w[23] = buffer(sceneLayout.transforms);
         e->w[24] = recordsBuffer;
-        e->w[25] = buffer(0x8cfc50); // sequential instance IDs
-        const auto cache = value<std::uintptr_t>(m + 0x48);
-        e->w[26] = value<std::uint32_t>(cache + 0x20);
-        e->w[27] = value<std::uint32_t>(cache + 0x28);
-        e->w[28] = value<std::uint32_t>(cache + 0x24);
+        e->w[25] = buffer(sceneLayout.ids); // sequential instance IDs
+        const auto cache = septemberScene ? 0 : value<std::uintptr_t>(m + 0x48);
+        e->w[26] = (cache ? value<std::uint32_t>(cache + 0x20) : 0);
+        e->w[27] = (cache ? value<std::uint32_t>(cache + 0x28) : 0);
+        e->w[28] = (cache ? value<std::uint32_t>(cache + 0x24) : 0);
         e->w[29] = ownerHandle;
         if (recordOk) {
             for (unsigned i = 0; i < 8; ++i)
@@ -726,10 +737,10 @@ int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, vo
             e->w[12] = record[1];
             e->w[13] = 1;
         }
-        e->w[30] = cpu(0x8cfce8);
-        e->w[31] = buffer(0x8cfd40);
+        e->w[30] = cpu(sceneLayout.stack);
+        e->w[31] = buffer(sceneLayout.transforms);
         e->w[32] = recordsBuffer;
-        e->w[33] = value<std::uint64_t>(cache + 0x10);
+        e->w[33] = value<std::uint64_t>(septemberScene ? m + 0x40 : cache + 0x10);
         e->w[36] = sceneBase;
     }
     if (recordOk)
@@ -738,16 +749,31 @@ int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, vo
                        e ? static_cast<std::uint64_t>(e - events.data()) + 1 : 0);
     return result;
 }
+int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
+                    std::uint32_t mode, unsigned char* flag, std::uint32_t* outA, std::uint32_t* outB) {
+    return hook_common(a, object, mesh, opaque, params, mode, flag, outA, outB, nullptr);
+}
+int __fastcall hook_september(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
+                    std::uint32_t mode, unsigned char* flag, std::uint32_t* outA, std::uint32_t* outB,
+                    std::uint32_t* outC) {
+    return hook_common(a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+}
 bool install(void* target) noexcept {
+    if (!hashesOk || !sceneBase ||
+        value<std::uintptr_t>(sceneBase + sceneLayout.object) != sceneBase + sceneLayout.table)
+        return false;
+    constexpr unsigned char septemberPrologue[] = {
+        0x48,0x8b,0xc4,0x4c,0x89,0x48,0x20,0x4c,0x89,0x40,0x18,0x48,0x89,0x50,0x10,0x48,
+        0x89,0x48,0x08,0x55,0x53,0x48,0x8d,0x68,0xe8,0x48,0x81,0xec,0x08,0x01,0x00,0x00};
     unsigned char bytes[sizeof(Prologue)]{};
     if (!read(reinterpret_cast<std::uintptr_t>(target), bytes) ||
-        std::memcmp(bytes, Prologue, sizeof(bytes)))
+        std::memcmp(bytes, septemberScene ? septemberPrologue : Prologue, sizeof(bytes)))
         return false;
     const auto init = MH_Initialize();
     if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED)
         return false;
-    if (MH_CreateHook(target, reinterpret_cast<void*>(&hook),
-                      reinterpret_cast<void**>(&original)) != MH_OK)
+    if (MH_CreateHook(target, septemberScene ? reinterpret_cast<void*>(&hook_september) : reinterpret_cast<void*>(&hook),
+                      septemberScene ? reinterpret_cast<void**>(&originalSeptember) : reinterpret_cast<void**>(&original)) != MH_OK)
         return false;
     if (MH_EnableHook(target) != MH_OK) {
         MH_RemoveHook(target);
@@ -893,15 +919,17 @@ void mapped_upload(ID3D11DeviceContext* context, ID3D11Resource* resource, unsig
         return;
     Microsoft::WRL::ComPtr<ID3D11Buffer> mappedBuffer;
     if (SUCCEEDED(resource->QueryInterface(IID_PPV_ARGS(&mappedBuffer))) &&
-        reinterpret_cast<std::uintptr_t>(mappedBuffer.Get()) == buffer(0x8cfde0))
+        reinterpret_cast<std::uintptr_t>(mappedBuffer.Get()) == buffer(sceneLayout.records))
         submittedOwners.invalidate(); // Unsupported writer: no stale ownership.
 }
-void configure(std::uintptr_t base, bool hashes_ok) noexcept {
+void configure(std::uintptr_t base, bool hashes_ok, bool september) noexcept {
     if (configured)
         return;
     configured = true;
-    sceneBase = base;
+    sceneBase = hashes_ok ? base : 0;
     hashesOk = hashes_ok;
+    septemberScene = september && hashes_ok;
+    sceneLayout = septemberScene ? kSeptemberScene : kLegacyScene;
     layoutRequested.store(hashes_ok, std::memory_order_release);
     HMODULE self = nullptr;
     wchar_t path[32768]{};
@@ -969,8 +997,8 @@ void stall_report() noexcept {
       << lastPresentDevice.load() << " changes " << presentDeviceChanges.load() << "\n";
     f << "calls draw " << drawHookCalls.load() << " producers " << producerCalls.load() << " known "
       << producerKnownCalls.load() << "\n";
-    f << "buffers records " << buffer(0x8cfde0) << " ids " << buffer(0x8cfc50) << " stack "
-      << buffer(0x8cfce8) << " capacity " << buffer(0x8cfde8) << " frame " << frame()
+    f << "buffers records " << buffer(sceneLayout.records) << " ids " << buffer(sceneLayout.ids) << " stack "
+      << buffer(sceneLayout.stack) << " capacity " << buffer(sceneLayout.capacity) << " frame " << frame()
       << " presentEpoch " << presentEpoch.load() << "\n";
     for (unsigned i = 0; i < SequenceRing; ++i) {
         const auto& s = colorFrames[i];
@@ -1084,7 +1112,7 @@ void tick() noexcept {
             return;
         attempted = true;
         if (!hashesOk || !sceneBase ||
-            value<std::uintptr_t>(sceneBase + 0x8cd2e0) != sceneBase + 0x5d4fe8) {
+            value<std::uintptr_t>(sceneBase + sceneLayout.object) != sceneBase + sceneLayout.table) {
             status("rejected exact module/layout gate");
             captured = true;
             return;
@@ -1191,7 +1219,7 @@ void tick() noexcept {
             captured = true;
             return;
         }
-        if (!install(reinterpret_cast<void*>(sceneBase + 0x564b0))) {
+        if (!install(reinterpret_cast<void*>(sceneBase + sceneLayout.producer))) {
             status("rejected producer signature or hook installation");
             captured = true;
             return;
@@ -1281,9 +1309,6 @@ void tick() noexcept {
                 status(buf);
             } else
                 status(dropped.load() ? "complete with overflow; reject proof" : "complete");
-        } else if (saved && sequenceV3 && (sequenceCadenceLost || framesWritten != sequenceCap)) {
-            status(
-                "failed player capture missed shot frames; keep capture data and retry at a lower FPS or slower recording speed");
         } else if (saved && dbg[6]) {
             char buf[192];
             std::snprintf(
@@ -1291,6 +1316,9 @@ void tick() noexcept {
                 "failed player layer exceeded %u draws per image; incomplete output rejected",
                 AggregateDrawLimit);
             status(buf);
+        } else if (saved && sequenceV3 && (sequenceCadenceLost || framesWritten != sequenceCap)) {
+            status(
+                "failed player capture missed shot frames; keep capture data and retry at a lower FPS or slower recording speed");
         } else if (saved) {
             char buf[192];
             std::snprintf(
@@ -1378,7 +1406,7 @@ bool install_producer_hook() noexcept {
     if (producerInstalled || !sceneBase)
         return producerInstalled;
     producerHideRequested.store(false, std::memory_order_release);
-    if (!install(reinterpret_cast<void*>(sceneBase + 0x564b0)))
+    if (!install(reinterpret_cast<void*>(sceneBase + sceneLayout.producer)))
         return false;
     producerInstalled = true;
     return true;
@@ -1491,7 +1519,7 @@ bool allow_draw(ID3D11DeviceContext* c, unsigned instances, unsigned first) noex
     ID3D11Buffer* vb = nullptr;
     UINT stride = 0, offset = 0;
     c->IAGetVertexBuffers(slot, 1, &vb, &stride, &offset);
-    const auto identity = buffer(0x8cfc50);
+    const auto identity = buffer(sceneLayout.ids);
     const bool isIdentity = vb && reinterpret_cast<std::uintptr_t>(vb) == identity;
     if (vb)
         vb->Release();
@@ -1976,7 +2004,7 @@ static void gather_draw(ID3D11DeviceContext* c, Event* e, unsigned method, unsig
     e->w[10] = instances;
     e->w[11] = first;
     e->w[12] = ~std::uint64_t(0);
-    const auto identity = buffer(0x8cfc50);
+    const auto identity = buffer(sceneLayout.ids);
     ID3D11Buffer* vb[32]{};
     UINT strides[32]{}, offsets[32]{};
     c->IAGetVertexBuffers(0, 32, vb, strides, offsets);
@@ -2039,8 +2067,8 @@ static void gather_draw(ID3D11DeviceContext* c, Event* e, unsigned method, unsig
                 e->w[112 + i] = info.w[i];
         layout->Release();
     }
-    e->w[43] = buffer(0x8cfd40);
-    e->w[44] = buffer(0x8cfde0);
+    e->w[43] = buffer(sceneLayout.transforms);
+    e->w[44] = buffer(sceneLayout.records);
     ID3D11VertexShader* shader = nullptr;
     c->VSGetShader(&shader, nullptr, nullptr);
     e->w[120] = reinterpret_cast<std::uintptr_t>(shader);
@@ -2424,7 +2452,7 @@ void update(ID3D11DeviceContext* c, ID3D11Resource* destination, unsigned sub, c
     }
     Microsoft::WRL::ComPtr<ID3D11Buffer> candidate;
     if (!c || !destination || FAILED(destination->QueryInterface(IID_PPV_ARGS(&candidate))) ||
-        reinterpret_cast<std::uintptr_t>(candidate.Get()) != buffer(0x8cfde0)) {
+        reinterpret_cast<std::uintptr_t>(candidate.Get()) != buffer(sceneLayout.records)) {
         originalUpdate(c, destination, sub, box, source, row, depth);
         return;
     }

@@ -34,6 +34,7 @@ from .runtime import application_root
 from . import launcher
 from .native_effects import compile_effects
 from .preload import PreloadMonitor
+from .replay_camera import ReplayCameraMonitor
 
 ROOT = application_root(Path(__file__).resolve().parents[1])
 LOG = logging.getLogger("dolly")
@@ -71,6 +72,7 @@ NATIVE_PAUSE_TIMEOUT = 8.0
 # restored exactly on re-enable; bar glow stays owned by toggle_citadel_glow.
 HEALTHBAR_SWITCH_CVARS = ("citadel_healthbars_enabled", "citadel_unit_status_use_new")
 HEALTHBAR_SWITCH_ON = {"citadel_healthbars_enabled": 1.0, "citadel_unit_status_use_new": 1.0}
+OWN_HEALTH_HUD = "citadel_hud_hide_own_health"
 
 
 class CameraPositionError(RuntimeError):
@@ -220,6 +222,18 @@ class Controller:
         self._seek_relief = True
         self._game_ui_visible = False
         self._game_ui_restore = {}
+        self._game_hero_restore = None
+        self._replay_hud_restore = {}
+        self._replay_hud_session = None
+        self._show_replay_hud = False
+        self._follow_transaction = None
+        self._follow_monitor = None
+        self._follow_session = None
+        self._follow_demo = None
+        self._follow_active = False
+        self._follow_mode_original = None
+        self._follow_mode_session = None
+        self._follow_settings = None
         self._console_open = None
         self._native_last_status = {}
         self._native_handoff_details = {}
@@ -287,6 +301,7 @@ class Controller:
         state["native_holding"] = self._native_active and not state.get("playing", False)
         state["native_editor_active"] = self._native_manual
         state["game_ui_visible"] = self._game_ui_visible
+        state["game_follow_active"] = self._follow_active
         state["game_running"] = self._alive()
         if self._session and not self._alive():
             exit_code = self._session.process.poll()
@@ -337,6 +352,9 @@ class Controller:
             reason = "Deadlock closed"
         else:
             reason = f"Deadlock crashed (exit code {exit_code}, 0x{exit_code & 0xFFFFFFFF:08X})"
+        if context == "waiting for the game console" and not self._replay_requested:
+            return (f"{reason} while {context}. The game exited before the selected replay "
+                    "was loaded. Inspect the startup error or game dump before retrying.")
         message = (f"{reason} while {context}. A replay that this game build cannot "
                    "reconstruct (for example an incompatible or incomplete .dem) can fatal Deadlock as soon as "
                    "it starts playing. Try the latest replay recorded on this build, then launch again through Dolly.")
@@ -508,6 +526,7 @@ class Controller:
             self._native_manual = False
             self._game_ui_visible = False
             self._game_ui_restore.clear()
+            self._game_hero_restore = None
             self._healthbar_restore.clear()
             self._console_open = None
             self._native_last_status = {}
@@ -743,6 +762,37 @@ class Controller:
         self._message("Map and shader preload complete. Opening your selected replay…",
                       startup_stage="preload_ready")
 
+    def _wait_replay_camera(self, bridge, cancel_event):
+        """Wait for the stock camera, after the first full replay packet."""
+        monitor = ReplayCameraMonitor(self._session)
+        previous_ready = None
+        try:
+            self._startup_evidence['replay_camera_identity'] = monitor.identity
+            self._message("Waiting for the replay intro camera to finish…",
+                          startup_stage="waiting_replay_camera")
+
+            def ready():
+                nonlocal previous_ready
+                info = self._require_demo()
+                native = bridge.status() if bridge is not None else None
+                if native is not None:
+                    self._require_native_demo(native, allow_idle=True)
+                sample = monitor.sample()
+                self._startup_evidence['replay_camera'] = dict(sample, tick=info.get('tick'))
+                progress = int(native['frame_count']) if native is not None else int(info['tick'])
+                if sample.get('coherent') and sample.get('ready') and int(info.get('tick') or 0) >= 2:
+                    if previous_ready is not None and progress > previous_ready:
+                        return sample
+                    previous_ready = progress
+                else:
+                    previous_ready = None
+                return None
+
+            self._startup_wait(ready, "waiting for the replay intro camera to finish",
+                               cancel_event, timeout=90)
+        finally:
+            monitor.close()
+
     def start_editing(self, game_path, demo_path, protocol="netcon", native=True,
                       launch_options="", cancel_event=None):
         """Launch, initialize once before the demo, and enter paused editing.
@@ -810,6 +860,7 @@ class Controller:
                               startup_stage="loading_replay")
                 self._startup_wait(self._replay_begun, "waiting for the replay to begin playing",
                                    cancel_event, timeout=45)
+                self._wait_replay_camera(bridge, cancel_event)
                 self._request("demo_pause")
                 self._message("Replay loaded and paused. Checking camera controls…", startup_stage="checking_camera")
                 self.probe()
@@ -995,9 +1046,12 @@ class Controller:
         if path is None:
             raise RuntimeError("No replay was selected for this launch.")
         self._remember_replay_header(path)
+        self._remember_spectator_hero()
         if self._recorder_active():
             raise RuntimeError("Finish recording before reloading the replay.")
-        if self._playback_restore or self._restore or self._game_ui_restore or self._demo_speed_changed:
+        if (self._playback_restore or self._restore or
+                (self._game_ui_restore and not self._health_panel_held()) or
+                self._replay_hud_restore or self._demo_speed_changed):
             raise RuntimeError("Use Stop / restore to restore pending settings before replay recovery.")
         if not self._console.supports("disconnect"):
             raise RuntimeError("This game does not expose replay disconnect; recovery was not attempted.")
@@ -1044,6 +1098,12 @@ class Controller:
             ready = self._startup_wait(begun, "waiting for the fresh replay's initial update",
                                        self._stop_event, timeout=45)
             self._check_position_cancelled()
+            # A fresh playdemo restarts the scripted opening even inside an
+            # existing process. Apply the same camera handoff guard as initial
+            # startup before pausing or seeking to the authored shot.
+            self._wait_replay_camera(self._native_bridge(), self._stop_event)
+            self._replay_recovery["camera_handoff"] = deepcopy(
+                self._startup_evidence.get("replay_camera", {}))
             before = self._native_bridge().status()
             self._require_native_demo(before, allow_idle=True)
             self._request("demo_pause")
@@ -1079,6 +1139,169 @@ class Controller:
             if self._console_open:
                 self.toggle_console(enabled=False)
             self._native_bridge().configure_editor(owner="panel")
+
+    def _follow_context(self):
+        """Keep restoration tied to the original replay, independent of camera type."""
+        if self._session is not self._follow_session:
+            raise RuntimeError("Game Follow restoration belongs to a different replay session.")
+        restoring = self._follow_transaction is not None and self._follow_transaction.restoring
+        if restoring:
+            self._require_connection()
+        else:
+            if self._demo != self._follow_demo:
+                raise RuntimeError("Game Follow preview belongs to a different replay.")
+            self._require_demo(require_tick=False)
+        return self._follow_monitor.sample()
+
+    def start_selected_game_follow(self, settings, player):
+        """Select a fresh roster pawn through the stock command, then verify it."""
+        from .follow_target import FollowTargetMonitor
+        from .replay_camera import ReplayCameraMonitor
+        from .follow_camera import FollowSettings
+        with self._op_lock:
+            if not isinstance(settings, FollowSettings):
+                raise ValueError('Choose valid Game Follow settings.')
+            settings.values()
+            self._require_quiet_session('selecting a Game Follow hero')
+            self._require_demo(require_tick=False)
+            bridge = self._native_bridge()
+            if self._recorder_active() or not bridge.status().get('paused'):
+                raise RuntimeError('Pause the replay before selecting a Follow hero.')
+            def current_player():
+                roster = bridge.editor_roster()
+                matches = [row for row in (roster or {}).get('players', [])
+                           if all(row.get(key) == player.get(key)
+                                  for key in ('handle', 'entity_index', 'model', 'model_path'))]
+                if (len(matches) != 1 or not player.get('model_path')
+                        or type(player.get('handle')) is not int
+                        or type(player.get('entity_index')) is not int
+                        or player['handle'] in (0xffffffff, 0xfffffffe)
+                        or not 0 < player['entity_index'] < 0x7fff
+                        or player['handle'] & 0x7fff != player['entity_index']):
+                    raise RuntimeError('The selected Follow hero is no longer in the current roster.')
+            current_player()
+            monitor = FollowTargetMonitor(self._session)
+            try:
+                monitor.sample()
+                monitor.sample_selection_context()
+                self.toggle_game_ui(True)  # Restores any old rig before releasing the pose writer.
+                current_player()
+                self._suppress_own_health_hud()
+                self._request('spec_target ' + str(player['entity_index']))
+                original_mode = read_cvar_value('citadel_spectator_mode', self._request('citadel_spectator_mode'))
+                if original_mode not in (0, 1, 2, 3):
+                    raise RuntimeError('The game spectator camera mode is unrecognized.')
+                self._follow_mode_original = original_mode
+                self._follow_mode_session = self._session
+                self._request('citadel_spectator_mode 2')
+                self._verify_game_ui_values({'citadel_spectator_mode': 2})
+                deadline = time.monotonic() + 5
+                while True:
+                    self._require_demo(require_tick=False)
+                    current_player()
+                    selected = monitor.sample_target(require_chase=False)
+                    mode = read_cvar_value('citadel_spectator_mode', self._request('citadel_spectator_mode'))
+                    camera = ReplayCameraMonitor.sample(monitor)
+                    self._follow_selection_evidence = dict(selected=selected, console_mode=mode,
+                                                          camera=camera, expected_handle=player['handle'])
+                    if (selected['handle'] == player['handle'] and mode in (2, 3) and mode == selected['mode']
+                            and camera.get('ready')):
+                        self._game_hero_restore = (self._session, self._demo, player['model_path'])
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('The game did not confirm the selected Follow hero camera.')
+                    time.sleep(.05)
+                self.start_game_follow(settings)
+                try:
+                    current_player()
+                    if monitor.sample_target()['handle'] != player['handle']:
+                        raise RuntimeError('The selected hero changed while applying Game Follow.')
+                except BaseException:
+                    self.stop_game_follow()
+                    raise
+            except BaseException:
+                self.stop_game_follow()
+                raise
+            finally:
+                monitor.close()
+
+    def start_game_follow(self, settings):
+        """Preview the stock rig after F9 selects a hero; no native pose writer."""
+        from .follow_camera import FollowSettings, FollowTransaction
+        from .follow_capabilities import FollowCapabilityMonitor
+        from .replay_camera import ReplayCameraMonitor
+        with self._op_lock:
+            if not isinstance(settings, FollowSettings):
+                raise ValueError("Choose valid Game Follow settings.")
+            settings.values()
+            self._require_quiet_session("previewing Game Follow")
+            bridge = self._native_bridge()
+            if self._recorder_active() or bridge is None or not bridge.status().get("paused"):
+                raise RuntimeError("Pause the selected replay and finish recording before Game Follow.")
+            if not self._game_ui_visible or self._native_active or self._native_manual:
+                raise RuntimeError("Press F9 and select a hero before starting Game Follow.")
+            mode = read_cvar_value("citadel_spectator_mode", self._request("citadel_spectator_mode"))
+            if mode not in (2, 3):
+                raise RuntimeError("Choose Hero Chase or PlayerView in F9 before Game Follow.")
+            if self._follow_transaction is not None and not self._follow_active:
+                raise RuntimeError("Restore the pending Game Follow settings before starting again.")
+            if self._follow_monitor is None:
+                monitor = FollowCapabilityMonitor(self._session)
+                try:
+                    if not ReplayCameraMonitor.sample(monitor).get("ready"):
+                        raise RuntimeError("Wait for the selected hero's normal camera before Game Follow.")
+                    monitor.sample()
+                except BaseException:
+                    monitor.close()
+                    raise
+                self._follow_monitor = monitor
+                self._follow_session, self._follow_demo = self._session, self._demo
+
+                def read(name):
+                    return self._follow_context()[name]["value"]
+
+                def write(name, value):
+                    self._follow_context()
+                    self._request(name + " " + numeric(value))
+
+                self._follow_transaction = FollowTransaction(read, write)
+            elif not ReplayCameraMonitor.sample(self._follow_monitor).get("ready"):
+                raise RuntimeError("Wait for the selected hero's normal camera before updating Game Follow.")
+            try:
+                self._follow_transaction.apply(settings)
+                self.open_pov_panel()
+                self._follow_active = True
+                self._follow_settings = settings
+                self._message("Game Follow preview: hero aim drives the camera; replay remains paused.")
+            except BaseException:
+                self.stop_game_follow()
+                raise
+
+    def stop_game_follow(self):
+        """Restore the complete rig before another camera can take ownership."""
+        with self._op_lock:
+            self._follow_active = False
+            transaction = self._follow_transaction
+            if transaction is not None:
+                transaction.restore()  # Failure retains the monitor and originals for retry.
+            if self._follow_mode_original is not None:
+                if self._session is not self._follow_mode_session:
+                    raise RuntimeError('Game Follow mode restoration belongs to a different session.')
+                self._require_connection()
+                from .follow_capabilities import FollowCapabilityMonitor
+                mode_monitor = FollowCapabilityMonitor(self._session)
+                try:
+                    mode_monitor.sample()
+                    self._suppress_own_health_hud()
+                    self._request('citadel_spectator_mode ' + numeric(self._follow_mode_original))
+                    self._verify_game_ui_values({'citadel_spectator_mode': self._follow_mode_original})
+                finally:
+                    mode_monitor.close()
+                self._follow_mode_original = self._follow_mode_session = None
+            if self._follow_monitor is not None:
+                self._follow_monitor.close()
+            self._follow_monitor = self._follow_transaction = None
+            self._follow_session = self._follow_demo = None
 
     def prepare_pov_recording(self, project):
         """Prepare a segment clock; never calibrate or write a spectator pose."""
@@ -1544,6 +1767,7 @@ class Controller:
             self._playback_restore["citadel_hud_visible"] = 1.0
             self._request("citadel_hud_visible 0")
             self._temporary_playback_value("citadel_hide_replay_hud", 1.0)
+            self._suppress_own_health_hud()
         # Prevent background-window throttling while operating the companion.
         # This optional optimization is skipped if the build cannot expose it.
         self._temporary_playback_value("engine_no_focus_sleep", 0.0)
@@ -1564,8 +1788,24 @@ class Controller:
             return None
         try:
             self._require_connection()
+            # Preserve originals from an interrupted older playback transaction.
+            # Never expose this container during automatic shot completion.
+            if OWN_HEALTH_HUD in self._playback_restore:
+                self._game_ui_restore.setdefault(OWN_HEALTH_HUD, self._playback_restore.pop(OWN_HEALTH_HUD))
+            if not self._playback_restore:
+                return None
+            values, pending = self._safe_health_hud_values(self._playback_restore)
+            if pending:
+                # Main HUD visibility also schedules the collapsed ability
+                # children. Keep its reveal in the outer camera transaction.
+                for name, value in self._playback_restore.items():
+                    if values.get(name) != value:
+                        self._game_ui_restore.setdefault(name, value)
+            self._require_own_health_hud(values)
             self._request("; ".join(name + " " + numeric(value)
-                                    for name, value in sorted(self._playback_restore.items())))
+                                    for name, value in sorted(values.items())))
+            if pending:
+                self._verify_game_ui_values(values)
             self._playback_restore.clear()
         except Exception as exc:
             LOG.warning("Playback setting restoration remains pending: %s", exc)
@@ -2215,10 +2455,17 @@ class Controller:
                 if restoration_error:
                     raise RuntimeError(restoration_error)
                 self._restore_spectator_view()
-                self._request("citadel_hud_visible 1; citadel_hide_replay_hud 0; hud_free_cursor 1")
-                self._verify_game_ui_values({"citadel_hud_visible": 1, "citadel_hide_replay_hud": 0, "hud_free_cursor": 1})
+                self._restore_spectator_hero()
+                values = {"citadel_hud_visible": 1, "citadel_hide_replay_hud": 0, "hud_free_cursor": 1}
+                if OWN_HEALTH_HUD in self._game_ui_restore:
+                    values[OWN_HEALTH_HUD] = self._game_ui_restore[OWN_HEALTH_HUD]
+                values, health_pending = self._safe_health_hud_values(values)
+                self._require_own_health_hud(values)
+                self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
+                self._verify_game_ui_values(values)
                 self._game_ui_visible = True
-                self._message("Deadlock owns the camera and replay UI. Select a hero, then return to Dolly editing.")
+                self._message("Deadlock owns the camera and replay UI. Select a hero, then return to Dolly editing."
+                              + (" Health panel restoration awaits a valid hero view." if health_pending else ""))
                 return self.status()
             camera_live = (bridge is not None and bridge.status().get("state") == "armed")
             if self._game_ui_visible or not (self._native_active and self._native_manual and camera_live):
@@ -2238,6 +2485,10 @@ class Controller:
         Switching first would lose the hero view used to seed a new camera.
         POV recording deliberately never calls this helper.
         """
+        self._remember_spectator_hero()
+        # Seeking or applying a pose can bypass playback HUD preparation.
+        # Suppress the ability container before invalidating its stock player.
+        self._suppress_own_health_hud()
         name = "citadel_spectator_mode"
         current = read_cvar_value(name, self._request(name))
         if current not in (0, 1, 2, 3):
@@ -2251,10 +2502,86 @@ class Controller:
         """Return F9 to the user's selected viewing mode, retaining its target."""
         name = "citadel_spectator_mode"
         if name in self._game_ui_restore:
+            self._suppress_own_health_hud()
             value = self._game_ui_restore[name]
             self._request(name + " " + numeric(value))
             self._verify_game_ui_values({name: value})
             del self._game_ui_restore[name]
+
+    def _remember_spectator_hero(self):
+        """Retain hero intent, never an entity handle from before reload."""
+        command = getattr(self._session, 'command', ())
+        bridge = self._native_bridge()
+        if (self._game_hero_restore is not None or not isinstance(command, (tuple, list)) or not command
+                or not callable(getattr(bridge, 'editor_roster', None))):
+            return
+        from .follow_target import FollowTargetMonitor
+        monitor = None
+        try:
+            monitor = FollowTargetMonitor(self._session)
+            selected = monitor.sample_target(require_chase=False)
+            roster = bridge.editor_roster()
+            matches = [p for p in (roster or {}).get('players', [])
+                       if p.get('handle') == selected['handle'] and p.get('model_path')]
+            if len(matches) == 1:
+                self._game_hero_restore = (self._session, self._demo, matches[0]['model_path'])
+        except (RuntimeError, ValueError, OSError) as exc:
+            LOG.info('No verified spectator hero to preserve: %s', exc)
+        finally:
+            if monitor is not None:
+                monitor.close()
+
+    def _restore_spectator_hero(self):
+        """Explicit F9/Stop return; automatic shot completion never calls it."""
+        if self._game_hero_restore is None:
+            return
+        session, demo, model_path = self._game_hero_restore
+        if self._session is not session or self._demo != demo:
+            raise RuntimeError('Saved spectator hero belongs to a different replay session.')
+        if self._native_active or self._native_manual:
+            raise RuntimeError('Release Dolly camera before restoring the game hero.')
+        self._require_demo(require_tick=False)
+        from .follow_target import FollowTargetMonitor
+        bridge = self._native_bridge()
+        def fresh_player():
+            roster = bridge.editor_roster()
+            matches = [p for p in (roster or {}).get('players', []) if p.get('model_path') == model_path]
+            if not (roster or {}).get('available') or len(matches) != 1:
+                raise RuntimeError('Saved spectator hero is absent or ambiguous in the current replay.')
+            row = matches[0]
+            handle, index = row.get('handle'), row.get('entity_index')
+            if (type(handle) is not int or type(index) is not int
+                    or handle in (0xffffffff, 0xfffffffe) or not 0 < index < 0x7fff
+                    or handle & 0x7fff != index or not row.get('model')):
+                raise RuntimeError('Saved spectator hero has no verified current identity.')
+            return row
+        monitor = FollowTargetMonitor(session)
+        try:
+            monitor.sample_selection_context()
+            expected = fresh_player()
+            # Keep all HUD children asleep while the stock target setter runs.
+            self._suppress_own_health_hud()
+            self._request('spec_target ' + str(expected['entity_index']))
+            deadline = time.monotonic() + 5
+            last_error = None
+            while True:
+                self._require_demo(require_tick=False)
+                current = fresh_player()
+                if any(current.get(key) != expected.get(key) for key in ('handle', 'entity_index', 'model', 'model_path')):
+                    raise RuntimeError('Saved spectator hero identity changed during handoff.')
+                try:
+                    selected = monitor.sample_health_hud_context()
+                    if selected['handle'] != expected['handle']:
+                        raise RuntimeError('The game did not select the saved spectator hero.')
+                    self._game_hero_restore = None
+                    return
+                except (RuntimeError, ValueError, OSError) as exc:
+                    last_error = exc
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Saved spectator hero handoff remains pending: ' + str(last_error))
+                time.sleep(.05)
+        finally:
+            monitor.close()
 
     def _remember_game_ui_settings(self):
         names = ("citadel_hud_visible", "citadel_hide_replay_hud", "hud_free_cursor")
@@ -2264,6 +2591,11 @@ class Controller:
         # replace the baseline with temporary editing/playback values.
         output = self._request("; ".join(names))
         current = {name: read_cvar_value(name, output) for name in names}
+        own_health = self._own_health_hud_value()
+        if own_health is not None:
+            current[OWN_HEALTH_HUD] = own_health
+            if OWN_HEALTH_HUD not in self._game_ui_restore:
+                missing.append(OWN_HEALTH_HUD)
         # Take one complete snapshot, before any UI write or camera release.
         # A playing shot's temporary hidden values are not the restore target.
         self._game_ui_restore.update({name: self._playback_restore.get(name, value)
@@ -2273,6 +2605,9 @@ class Controller:
         # Hiding only the replay controls leaves the spectated hero HUD on
         # screen. Hide the full game HUD as well; Dolly's DX11 panel is separate.
         values = {"citadel_hud_visible": 0, "citadel_hide_replay_hud": 1, "hud_free_cursor": 0}
+        if OWN_HEALTH_HUD in self._game_ui_restore:
+            values[OWN_HEALTH_HUD] = 1
+        self._require_own_health_hud(values)
         self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
         self._verify_game_ui_values(values)
 
@@ -2282,16 +2617,124 @@ class Controller:
             if read_cvar_value(name, output) != expected:
                 raise RuntimeError("The game did not apply " + name + ". Retry the replay UI control.")
 
+    def _own_health_hud_value(self):
+        """Optional exact-build panel control, independent of health renderers."""
+        command = getattr(self._session, 'command', ())
+        if not isinstance(command, (tuple, list)) or not command:
+            return None
+        from .follow_capabilities import FollowCapabilityMonitor
+        monitor = None
+        try:
+            monitor = FollowCapabilityMonitor(self._session)
+            return monitor.sample_own_health()['value']
+        except (RuntimeError, ValueError, OSError) as exc:
+            LOG.info("Optional health HUD panel control unavailable: %s", exc)
+            return None
+        finally:
+            if monitor is not None:
+                monitor.close()
+
+    def _suppress_own_health_hud(self):
+        # This collapses abilities as well as health. Its lifetime is camera
+        # ownership, not one shot; keep the first outer original for handoff.
+        value = self._own_health_hud_value()
+        if value is not None:
+            self._game_ui_restore.setdefault(OWN_HEALTH_HUD, value)
+            # Collapse alone does not stop stock ability child updates. Hide
+            # the main/replay HUD before changing its player/camera context.
+            for name, hidden in (('citadel_hud_visible', 0), ('citadel_hide_replay_hud', 1)):
+                current = read_cvar_value(name, self._request(name))
+                self._game_ui_restore.setdefault(name, self._playback_restore.get(name, current))
+                if current != hidden:
+                    self._request(name + ' ' + numeric(hidden))
+                    self._verify_game_ui_values({name: hidden})
+            if value != 1:
+                self._request(OWN_HEALTH_HUD + ' 1')
+                self._verify_game_ui_values({OWN_HEALTH_HUD: 1})
+
+    def _require_own_health_hud(self, values):
+        if OWN_HEALTH_HUD in values and self._own_health_hud_value() is None:
+            raise RuntimeError('Health HUD panel verification is unavailable; saved settings remain pending.')
+        if (values.get(OWN_HEALTH_HUD) == 0 or
+                ((values.get('citadel_hud_visible') == 1 or values.get('citadel_hide_replay_hud') == 0) and
+                 (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))):
+            self._verify_health_hud_handoff()
+
+    def _verify_health_hud_handoff(self):
+        """Expose ability UI only after a coherent stock player handoff."""
+        if self._native_active or self._native_manual:
+            raise RuntimeError('Dolly still owns the camera; health panel restoration remains pending.')
+        self._require_demo(require_tick=False)
+        from .follow_target import FollowTargetMonitor
+        monitor = None
+        try:
+            monitor = FollowTargetMonitor(self._session)
+            monitor.sample_health_hud_context()
+        finally:
+            if monitor is not None:
+                monitor.close()
+
+    def _safe_health_hud_values(self, values):
+        """Keep an unsafe reveal hidden, preserving the outer original."""
+        values = dict(values)
+        reveal_health = values.get(OWN_HEALTH_HUD) == 0
+        reveal_hud = (values.get('citadel_hud_visible') == 1 and
+                      (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))
+        reveal_replay = (values.get('citadel_hide_replay_hud') == 0 and
+                         (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))
+        if not reveal_health and not reveal_hud and not reveal_replay:
+            return values, False
+        try:
+            self._verify_health_hud_handoff()
+        except (RuntimeError, ValueError, OSError) as exc:
+            if reveal_health:
+                self._game_ui_restore.setdefault(OWN_HEALTH_HUD, 0)
+                values[OWN_HEALTH_HUD] = 1
+            if reveal_hud:
+                self._game_ui_restore.setdefault('citadel_hud_visible', 1)
+                values['citadel_hud_visible'] = 0
+            if values.get('citadel_hide_replay_hud') == 0:
+                self._game_ui_restore.setdefault('citadel_hide_replay_hud', 0)
+                values['citadel_hide_replay_hud'] = 1
+            LOG.info('Health panel reveal deferred: %s', exc)
+            return values, True
+        return values, False
+
+    def _health_panel_held(self):
+        """An intentional outer hide can span a guarded in-process reload."""
+        originals = self._game_ui_restore
+        if (self._native_active or self._native_manual or not originals
+                or set(originals) - {OWN_HEALTH_HUD, 'citadel_hud_visible', 'citadel_hide_replay_hud'}
+                or (OWN_HEALTH_HUD in originals and originals[OWN_HEALTH_HUD] != 0)
+                or self._own_health_hud_value() != 1):
+            return False
+        for name, original, hidden in (('citadel_hud_visible', 1, 0), ('citadel_hide_replay_hud', 0, 1)):
+            if ((name in originals and originals[name] != original)
+                    or read_cvar_value(name, self._request(name)) != hidden):
+                return False
+        return True
+
     def _restore_game_ui_settings(self):
         """Restore the original automatic cursor/HUD on Stop or disconnect."""
-        if not self._game_ui_restore:
+        if not self._game_ui_restore and self._game_hero_restore is None:
             return None
         try:
             self._require_connection()
-            self._request("; ".join(name + " " + numeric(value) for name, value in self._game_ui_restore.items()))
-            self._verify_game_ui_values(self._game_ui_restore)
-            self._game_ui_restore.clear()
+            # Mode restoration must settle before checking the player context;
+            # batching it with the reveal recreates the stock null-panel fault.
+            self._restore_spectator_view()
+            self._restore_spectator_hero()
+            requested = dict(self._game_ui_restore)
+            values, health_pending = self._safe_health_hud_values(requested)
+            self._require_own_health_hud(values)
+            self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
+            self._verify_game_ui_values(values)
+            for name in values:
+                if values[name] == requested.get(name):
+                    self._game_ui_restore.pop(name, None)
             self._game_ui_visible = False
+            if health_pending:
+                return 'Game HUD restoration is pending; select a hero in the game view, then use Stop / restore.'
         except (RuntimeError, ValueError, OSError) as exc:
             LOG.warning("Replay UI restoration remains pending: %s", exc)
             return "Replay UI settings could not be restored; reconnect and use Stop / restore. " + str(exc)
@@ -2429,6 +2872,71 @@ class Controller:
             self._message(f"Replay speed set to {numeric(speed)}x.")
             return self.status()
 
+    def _restore_replay_hud(self):
+        if not self._replay_hud_restore:
+            return
+        if self._session is not self._replay_hud_session:
+            raise RuntimeError('Replay HUD restoration belongs to a different session.')
+        self._require_connection()
+        values, _ = self._safe_health_hud_values(self._replay_hud_restore)
+        self._require_own_health_hud(values)
+        self._request('; '.join(name + ' ' + numeric(value) for name, value in values.items()))
+        self._verify_game_ui_values(values)
+        self._replay_hud_restore = {}
+        self._replay_hud_session = None
+
+    def _apply_replay_hud(self):
+        names = ('citadel_hud_visible', 'citadel_hide_replay_hud', 'hud_free_cursor')
+        own_health = self._own_health_hud_value()
+        if own_health is not None:
+            names += (OWN_HEALTH_HUD,)
+            self._game_ui_restore.setdefault(OWN_HEALTH_HUD, own_health)
+        if not self._replay_hud_restore:
+            output = self._request('; '.join(names))
+            self._replay_hud_restore = {name: read_cvar_value(name, output) for name in names}
+            self._replay_hud_session = self._session
+        elif self._session is not self._replay_hud_session:
+            raise RuntimeError('Replay HUD settings belong to a different session.')
+        try:
+            values = dict(zip(names[:3], (1, 0, 0) if self._show_replay_hud else (0, 1, 0)))
+            if OWN_HEALTH_HUD in self._replay_hud_restore:
+                values[OWN_HEALTH_HUD] = (self._game_ui_restore.get(
+                    OWN_HEALTH_HUD, self._replay_hud_restore[OWN_HEALTH_HUD])
+                    if self._show_replay_hud else 1)
+            values, _ = self._safe_health_hud_values(values)
+            self._require_own_health_hud(values)
+            self._request('; '.join(name + ' ' + numeric(value) for name, value in values.items()))
+            self._verify_game_ui_values(values)
+        except BaseException:
+            self._restore_replay_hud()
+            raise
+
+    def set_replay_hud(self, enabled):
+        """Session playback preference, shared by Follow and ordinary replay views."""
+        if type(enabled) is not bool:
+            raise ValueError('Replay HUD visibility must be a boolean.')
+        with self._op_lock:
+            self._require_demo(require_tick=False)
+            if self._recorder_active() or self.status().get('playing'):
+                raise RuntimeError('Finish shot playback or recording before changing the replay HUD.')
+            previous = self._show_replay_hud
+            self._show_replay_hud = enabled
+            try:
+                if not self._native_bridge().status().get('paused'):
+                    self._apply_replay_hud()
+            except BaseException:
+                self._show_replay_hud = previous
+                raise
+            self._message('Game HUD shown during replay.' if enabled else 'Game HUD hidden during replay.')
+
+    def _toggle_replay_time(self, paused):
+        try:
+            self._request('demo_resume' if paused else 'demo_pause')
+        except BaseException:
+            if paused:
+                self._restore_replay_hud()
+            raise
+
     def toggle_replay(self):
         """Pause/resume replay time without restarting an authored native path.
 
@@ -2446,13 +2954,17 @@ class Controller:
             paused = bool(current["paused"])
             if self._thread and self._thread.is_alive() and (self._playback_details or {}).get("frozen"):
                 raise RuntimeError("Stop the frozen preview before resuming replay time.")
+            if paused:
+                self._apply_replay_hud()
+            else:
+                self._restore_replay_hud()
             if self._native_manual:
                 if paused:
-                    self._request("demo_resume")
+                    self._toggle_replay_time(True)
                     self._message("Replay playing. Free camera movement stays active.",
                                   playing=False, paused_flight=True, replay_paused=False)
                 else:
-                    self._request("demo_pause")
+                    self._toggle_replay_time(False)
                     # A paused free camera must track the tick it paused on so
                     # desktop movement and captures stay valid after playback.
                     current = self._wait_paused_native_view(bridge, current["frame_count"])
@@ -2462,7 +2974,7 @@ class Controller:
                     self._message("Replay paused. Free camera movement stays active.",
                                   playing=False, paused_flight=True, replay_paused=True)
                 return self.status()
-            self._request("demo_resume" if paused else "demo_pause")
+            self._toggle_replay_time(paused)
             self._message("Replay playing." if paused else "Replay paused.", replay_paused=not paused)
             return self.status()
 
@@ -3031,6 +3543,17 @@ class Controller:
             else:
                 self._message("Replay paused at the requested path time.", time=shot_time)
 
+    def _stop_before_new_shot(self, *, preserve_layers=False):
+        # Play's internal Stop may consume the verified prior-hero intent while
+        # returning to stock view. Preserve that intent for the NEW camera owner:
+        # Directed can subsequently change actual observer mode before detach,
+        # so rediscovering it then is not reliable. No old handles are retained.
+        intent = self._game_hero_restore
+        self.stop(preserve_layers=preserve_layers)
+        if (intent is not None and self._game_hero_restore is None
+                and intent[0] is self._session and intent[1] == self._demo):
+            self._game_hero_restore = intent
+
     def play(self, project, time=0, speed=1, rate=60, frozen=False, hide_hud=True, smoothing="off"):
         # The main UI starts at zero; explicit API callers may choose a start.
         # Reject invalid experimental modes before stopping a working camera.
@@ -3039,10 +3562,14 @@ class Controller:
             compile_effects(project)  # Reject unsupported tracks before stopping a working shot.
         with self._op_lock:
             if self._recorder_active():
-                self.stop(preserve_layers=True)
+                self._stop_before_new_shot(preserve_layers=True)
             else:
-                self.stop()
-            if self._playback_restore or self._restore or self._game_ui_restore or self._demo_speed_changed:
+                self._stop_before_new_shot()
+            # A suppressed health container may intentionally span repeated
+            # shots when the original game view has no safe HUD player. Other
+            # failed restorations still block playback as before.
+            health_held = self._health_panel_held()
+            if self._playback_restore or self._restore or (self._game_ui_restore and not health_held) or self._demo_speed_changed:
                 raise RuntimeError("Previous settings still need restoration. Reconnect and use Stop / restore before playing again.")
             self._stop_event.clear()
             self._require_probe()
@@ -3489,11 +4016,13 @@ class Controller:
                 self._message(" ".join(part for part in (failure, restoration) if part), playing=False)
             elif finished:
                 self._message("Native shot finished. POV segment paused; finishing recording." if getattr(self, "_pov_active", False)
-                              else ("Native shot finished. Replay paused and final camera held. Play shot restarts; Stop / restore returns control to the game." if self._native_active else "Native shot finished. Replay paused, free-camera handoff verified and HUD restored."), playing=False)
+                              else ("Native shot finished. Replay paused and final camera held. Play shot restarts; Stop / restore returns the game view and HUD." if self._native_active
+                                    else "Native shot finished. Replay paused at the final camera. Stop / restore returns the game view and HUD."), playing=False)
 
     def _finish_playback(self):
         # Camera/cvar framing remains available for inspection until Stop.
-        # HUD and background throttling are restored on every exit path.
+        # Background throttling is restored on exit; unsafe HUD reveals stay
+        # suppressed until the outer stock-camera handoff.
         try:
             self._require_demo(require_tick=False)
             # Preserve the active speed, including console hotkey changes.
@@ -3683,6 +4212,8 @@ class Controller:
                 self._message("Shot finished. Replay paused and playback settings restored; Stop restores lens/cvar values.", playing=False)
 
     def _halt(self, *, native_action="handoff"):
+        self._restore_replay_hud()
+        self.stop_game_follow()
         self._stop_event.set()
         worker = self._thread
         if worker and worker is not threading.current_thread():
@@ -3730,7 +4261,7 @@ class Controller:
         if self._console and self._console.is_connected and self._alive():
             self._require_demo(require_tick=False)
             self._request("demo_pause")
-        self._message(restoration_error or "Paused. HUD restored; the current camera and lens values are held.", playing=False)
+        self._message(restoration_error or "Paused. The current camera and lens values are held.", playing=False)
 
     def stop(self, *, preserve_layers=False):
         self._halt(native_action="release")
@@ -3912,17 +4443,19 @@ class Controller:
     # registry is dynamic (a build can add or drop classes such as
     # ``projectedDecal``), so a hide-list would silently leak an unlisted class
     # into the layer. A keep-list excludes unknown classes by default and fails
-    # closed when a required class disappears (`apply_layer_mode`).
+    # closed when a required class disappears (`apply_layer_mode`). Reviewed
+    # legacy classes absent from current builds are optional; if registered,
+    # they are still kept. Unknown classes remain hidden.
     #
     # Owners (verified live 2026-09-27 by hiding each class and comparing the
     # rendered frame): characters -> SkinnedObject, effects -> ParticleSystem,
     # static world/lighting -> AggregateDesc/BarnLight/Default and the remaining
     # scene classes.
     LAYER_MODES = {
-        "world": {"keep": ("AggregateDesc", "BarnLight", "DirectionalLight", "OmniLight",
+        "world": {"keep": ("AggregateDesc", "BarnLight", "OmniLight",
                            "LightProbeVolume", "Default", "MeshBuilderObject",
-                           "ZipLineRopeSegment", "InstancedMesh", "projectedDecal",
-                           "EnvMap", "Skybox")},
+                           "ZipLineRopeSegment", "InstancedMesh", "EnvMap", "Skybox"),
+                  "optional_keep": ("DirectionalLight", "projectedDecal")},
         "players": {"keep": ("SkinnedObject",)},
         "effects": {"keep": ("ParticleSystem",)},
     }
@@ -3957,6 +4490,7 @@ class Controller:
         if missing:
             raise RuntimeError("The game no longer reports the scene classes needed for the "
                                + mode + " layer: " + ", ".join(missing))
+        keep.update(spec.get("optional_keep", ()))
         targets = [name for name in classes if name not in keep] if keep else [
             name for name in classes if name in hide]
         # Start from a clean slate: flags left by a previous layer must never

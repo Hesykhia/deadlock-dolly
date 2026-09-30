@@ -13,6 +13,35 @@
 
 namespace attach_runtime {
 
+// Build 6712 moved the entity-system global outside the legacy search window.
+// Select this reviewed location once, after the bridge's module checks. Runtime
+// resolution still validates the live object's primary RTTI vtable every time.
+inline HMODULE configured_client = nullptr;
+inline bool september_client = false;
+inline bool september_entity_code = false;
+inline bool september_hotfix = false;
+inline void configure_client(HMODULE client) {
+    configured_client = client;
+    september_hotfix = module_matches(client,
+        "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc", 0x40f5000);
+    september_client = module_matches(client,
+        "bc0dae383a2cd65dc1616515cdffa6c947fd057e5590edf0f5a01bd953ec19c9", 0x40f4000) ||
+        september_hotfix;
+    september_entity_code = false;
+    if (!september_client)
+        return;
+    unsigned char initializer[] = {
+        0x0f,0xb6,0x44,0x24,0x28,0x88,0x44,0x24,0x28,0x48,0x89,
+        0x0d,0xc0,0x7d,0xcf,0x01,0xe9,0x9b,0xbf,0xff,0xff};
+    unsigned char actual[sizeof(initializer)]{};
+    if (september_hotfix)
+        initializer[12] = 0xc0, initializer[13] = 0x7c;
+    september_entity_code = read_memory(reinterpret_cast<std::uintptr_t>(client) +
+                                          (september_hotfix ? 0x2004af0 : 0x20049f0),
+                                        actual, sizeof(actual)) &&
+                            std::memcmp(actual, initializer, sizeof(actual)) == 0;
+}
+
 struct Offsets {
     std::uint32_t scene_node = 0, owner = 0, origin = 0, angles = 0, view_offset = 0,
                   eye_angles = 0, child = 0, sibling = 0;
@@ -116,6 +145,15 @@ inline bool locate_entity_system(HMODULE client, std::uintptr_t& out) noexcept {
     const std::uintptr_t vtable = compat_detail::locate_vtable(client, "CGameEntitySystem");
     if (!vtable)
         return false;
+    if (client == configured_client && september_client) {
+        std::uintptr_t candidate = 0, actual_vtable = 0;
+        if (!september_entity_code || vtable != base + (september_hotfix ? 0x2a07c10 : 0x2a07c30) ||
+            !read_value(base + 0x3cfc7c0, candidate) || !candidate ||
+            !read_value(candidate, actual_vtable) || actual_vtable != vtable)
+            return false;
+        out = candidate;
+        return true;
+    }
     constexpr std::uintptr_t previous_rva = 0x391EDA8, window = 0x40000;
     auto valid = [&](std::uintptr_t candidate) {
         std::uintptr_t first = 0;

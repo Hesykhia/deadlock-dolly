@@ -175,6 +175,14 @@ class QueryFieldOffsetTests(unittest.TestCase):
         self.assertEqual(offsets["eye_offset"], 2184)
         self.assertEqual(offsets["eye_angles"], 4536)
         self.assertEqual(len(controller.calls), len(attach_camera.RUNTIME_LAYOUT_CLASSES))
+        self.assertIn("schema_dump_binding C_CitadelPlayerPawn", controller.calls)
+        self.assertNotIn("schema_detailed_class_layout C_CitadelPlayerPawn", controller.calls)
+
+    def test_nonrecursive_pawn_query_still_rejects_retyped_field(self):
+        broken = live_layouts()
+        broken["C_CitadelPlayerPawn"] = PLAYER_PAWN.replace("QAngle", "Vector")
+        with self.assertRaisesRegex(RuntimeError, "m_angEyeAngles"):
+            attach_camera.query_field_offsets(self.Controller(broken))
 
     def test_query_refuses_a_missing_live_field(self):
         broken = live_layouts()

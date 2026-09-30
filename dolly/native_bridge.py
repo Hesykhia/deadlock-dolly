@@ -56,6 +56,8 @@ CONFETTI_DIAGNOSTICS_OFFSET = CONTROL_BYTES + 22440
 CONFETTI_DIAGNOSTICS = struct.Struct("<8s2I15Id")
 CONFETTI_DIAGNOSTICS_MAGIC = b"DLYCFT01"
 CONFETTI_DIAGNOSTICS_ABI = 1
+FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET = CONTROL_BYTES + 23088
+FOLLOW_ANCHOR_DIAGNOSTICS = struct.Struct("<8s4I4Q")
 CONFETTI_STATES = ("unavailable", "ready", "configured", "running", "waiting", "seeking",
                    "manager_unavailable", "create_failed")
 CONFETTI_DIAGNOSTIC_FIELDS = ("state", "handles", "starts", "start_failures", "frames",
@@ -332,6 +334,25 @@ class NativeBridge(MediaTransport):
             return result
         return None
 
+    def _follow_anchor_diagnostics(self):
+        for _ in range(4):
+            first = self._load_sequence(FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET + 8)
+            if first & 1:
+                continue
+            data = bytes(self._mapping[FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET:
+                                      FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET + FOLLOW_ANCHOR_DIAGNOSTICS.size])
+            if first != self._load_sequence(FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET + 8):
+                continue
+            if not any(data):
+                return None
+            magic, sequence, abi, flags, target, scopes, blends, corrections, rejected = FOLLOW_ANCHOR_DIAGNOSTICS.unpack(data)
+            if magic != b"DLYFANC1" or sequence != first or abi != 1 or flags & ~1:
+                raise NativeBridgeError("Native Follow camera diagnostics do not match this editor build")
+            return {"installed": bool(flags & 1), "target_handle": target,
+                    "scopes": scopes, "blends": blends,
+                    "corrections": corrections, "rejected": rejected}
+        return None
+
     def status(self):
         """Return one coherent, validated native status snapshot."""
         with self._lock:
@@ -387,7 +408,8 @@ class NativeBridge(MediaTransport):
                     "message": message.split(b"\0", 1)[0].decode("utf-8", errors="replace"),
                     "demo_name": demo.split(b"\0", 1)[0].decode("utf-8", errors="replace"),
                     "max_frame_interval_ms": maximum_ms, "frame_interval_ms": interval_ms,
-                    "confetti_diagnostics": self._confetti_diagnostics()}
+                    "confetti_diagnostics": self._confetti_diagnostics(),
+                    "follow_anchor_diagnostics": self._follow_anchor_diagnostics()}
             now = self._clock()
             if now - self._view_sample_at >= 1:
                 # Reuse this validated read, including outside path playback.
@@ -691,6 +713,21 @@ class NativeBridge(MediaTransport):
             self._mapping[offset + 12:offset + len(data)] = data[12:]
             self._store(offset + 8, even)
             self._editor_citadel_dof_sequence = even
+
+    def configure_editor_follow(self, settings, *, available=False, active=False, pending=False, show_hud=False):
+        """Publish Follow controls only; camera settings are applied by Controller."""
+        from . import editor_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, '_editor_follow_sequence', 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack_follow(odd, settings, available=available, active=active, pending=pending, show_hud=show_hud)
+            offset = wire.FOLLOW_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_follow_sequence = even
 
     def configure_editor_attach(self, offsets, attach=None, preview=False, snap_request=0, picker=False):
         """Optional attach block: schema offsets plus the selected key's state."""

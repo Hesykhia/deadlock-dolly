@@ -63,6 +63,16 @@ class VideoExportTests(unittest.TestCase):
         self.controller._request.assert_not_called()
         self.controller.set_export_resolution.assert_not_called()
 
+    def test_bounded_export_preserves_limit_through_validation_and_native_start(self):
+        options = VideoOptions(self.path, max_frames=2, fixed_step=True, shot_only=True)
+        self.assertEqual(options.validated().max_frames, 2)
+        self.export.start(options)
+        self.assertEqual(self.bridge.start_video.call_args.kwargs['max_frames'], 2)
+        self.assertTrue(self.bridge.start_video.call_args.kwargs['shot_only'])
+        for value in (-1, True, 1.5, 65536):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                VideoOptions(self.path, max_frames=value).validated()
+
     def test_audio_take_places_video_inside_its_export_folder(self):
         self.export.start(VideoOptions(self.path, bundle_audio=True))
         folder = self.path.with_suffix("")
@@ -70,6 +80,14 @@ class VideoExportTests(unittest.TestCase):
         self.assertEqual(self.export.output_path, folder / self.path.name)
         self.assertEqual(self.export.output_directory, self.path.parent)
         self.assertEqual(Path(self.bridge.start_video.call_args.args[0]), folder / self.path.name)
+
+    def test_fixed_step_audio_refuses_before_game_changes_or_folder_creation(self):
+        with self.assertRaisesRegex(ValueError, "Audio export needs real-time"):
+            self.export.start(VideoOptions(self.path, fixed_step=True, bundle_audio=True))
+        self.bridge.start_video.assert_not_called()
+        self.controller.set_export_timing.assert_not_called()
+        self.controller.prepare_replay_for_recording.assert_not_called()
+        self.assertFalse(self.path.with_suffix("").exists())
 
     def test_players_low_space_rejected_before_any_take_or_replay_preparation(self):
         ffmpeg = self.path.parent / "ffmpeg.exe"
@@ -556,6 +574,17 @@ class VideoGuiTests(unittest.TestCase):
             self.app._start_video_recording()
         focus.assert_called_once_with(4321)
         self.app._submit.assert_called_once()
+
+    def test_fixed_step_audio_refuses_before_focus_or_audio_worker(self):
+        self.app.video_fixed_step.set(True)
+        for name in ('video_game_audio', 'video_reconstructed_audio'):
+            with self.subTest(track=name), patch('dolly.gui.focus_window') as focus:
+                self.app.video_game_audio.set(name == 'video_game_audio')
+                self.app.video_reconstructed_audio.set(name == 'video_reconstructed_audio')
+                self.app._start_video_recording()
+                self.app._submit.assert_not_called()
+                focus.assert_not_called()
+                self.assertIn('real-time', str(self.app._error.call_args.args[1]))
 
     def test_recording_with_a_shot_auto_plays_after_arming(self):
         self.app.project = self.two_camera_project()

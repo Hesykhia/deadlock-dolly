@@ -1250,6 +1250,104 @@ void draw_panel(const EditorSnapshot& state) {
                     ImGui::EndDisabled();
                 }
                 end_panel_card();
+                bool replay_hud = state.replay_show_hud;
+                if (compact_checkbox("Show game HUD during replay", &replay_hud, panel_scale))
+                    editor_enqueue(EditorAction::SetReplayHud, replay_hud ? 1 : 0);
+                ImGui::EndDisabled();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("FOLLOW")) {
+                ImGui::BeginDisabled(!state.ready || state.busy);
+                if (begin_panel_card("##follow-card")) {
+                    section_title("FOLLOW", state.follow_active ? "Active" : "Hero aim");
+                    ImGui::TextWrapped("Follow a hero's aim and movement with the game's camera.");
+                    EditorRoster roster{};
+                    const bool roster_ok = editor_roster_snapshot(roster);
+                    static std::uint32_t follow_handle = 0;
+                    int follow_index = -1;
+                    if (roster_ok)
+                        for (std::uint32_t i = 0; i < roster.count && i < kEditorRosterPlayers; ++i)
+                            if (roster.players[i].handle == follow_handle) follow_index = int(i);
+                    char hero_label[112]{};
+                    if (follow_index >= 0)
+                        roster_label(roster.players[follow_index], hero_label, sizeof(hero_label));
+                    else
+                        std::snprintf(hero_label, sizeof(hero_label), "Select a hero...");
+                    ImGui::BeginDisabled(!state.follow_available || state.playing || !state.paused || state.attach_preview);
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::BeginCombo("##follow-hero", hero_label)) {
+                        if (!roster_ok || !roster.count)
+                            ImGui::TextDisabled("Waiting for replay players...");
+                        else
+                            for (std::uint32_t i = 0; i < roster.count && i < kEditorRosterPlayers; ++i) {
+                                char label[112]{};
+                                roster_label(roster.players[i], label, sizeof(label));
+                                ImGui::PushID(int(i));
+                                if (ImGui::Selectable(label, int(i) == follow_index))
+                                    follow_handle = roster.players[i].handle;
+                                ImGui::PopID();
+                            }
+                        ImGui::EndCombo();
+                    }
+                    static float follow_draft[3] = {135, 34, 0};
+                    static bool follow_dirty = false;
+                    static double follow_applied[3] = {-1, 0, 0};
+                    const double published[3] = {state.follow_distance, state.follow_shoulder, state.follow_height};
+                    if (published[0] != follow_applied[0] || published[1] != follow_applied[1] || published[2] != follow_applied[2]) {
+                        for (int i = 0; i < 3; ++i) {
+                            follow_applied[i] = published[i];
+                            follow_draft[i] = float(published[i]);
+                        }
+                        follow_dirty = false;
+                    }
+                    const char* names[] = {"Distance", "Shoulder", "Height"};
+                    for (int i = 0; i < 3; ++i) {
+                        ImGui::TextUnformatted(names[i]);
+                        ImGui::SetNextItemWidth(-1);
+                        ImGui::PushID(i);
+                        if (ImGui::SliderFloat("##follow-offset", &follow_draft[i], i == 0 ? 0.f : -150.f,
+                                               i == 0 ? 400.f : 150.f, "%.0f", ImGuiSliderFlags_AlwaysClamp))
+                            follow_dirty = true;
+                        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                            const float defaults[] = {135, 34, 0};
+                            follow_draft[i] = defaults[i];
+                            follow_dirty = true;
+                        }
+                        ImGui::PopID();
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip(i == 0 ? "Distance behind the hero. Ctrl+click to type. Right-click resets to 135." :
+                                i == 1 ? "Negative: left. Positive: right. Right-click resets to 34." :
+                                         "Height above or below the pivot. Right-click resets to 0.");
+                    }
+                    ImGui::BeginDisabled(follow_index < 0);
+                    if (ImGui::Button(state.follow_active ? "Apply Follow" : "Preview Follow", ImVec2(-1, 0)) && follow_index >= 0) {
+                        CameraPose request{};
+                        request[0] = follow_draft[1]; request[1] = follow_draft[2];
+                        request[2] = follow_index;
+                        request[3] = roster.players[follow_index].handle;
+                        request[4] = roster.players[follow_index].entity_index;
+                        request[5] = std::uint32_t(roster.players[follow_index].model);
+                        request[6] = std::uint32_t(roster.players[follow_index].model >> 32);
+                        editor_enqueue(EditorAction::StartGameFollow, follow_draft[0], &request);
+                    }
+                    ImGui::EndDisabled();
+                    ImGui::EndDisabled();
+                    ImGui::BeginDisabled(!state.follow_pending);
+                    action_button("Restore rig", EditorAction::StopGameFollow, -1);
+                    ImGui::EndDisabled();
+                    if (!state.follow_available)
+                        ImGui::TextWrapped("Follow unavailable for this game build.");
+                    else if (state.attach_preview)
+                        ImGui::TextWrapped("Detach the bone preview to use Follow.");
+                    else if (follow_dirty)
+                        ImGui::TextDisabled("Changes ready to apply");
+                    ImGui::TextWrapped("Restore rig resets camera settings and keeps the selected hero.");
+                    bool show_hud = state.replay_show_hud;
+                    if (compact_checkbox("Show game HUD during replay", &show_hud, panel_scale))
+                        editor_enqueue(EditorAction::SetReplayHud, show_hud ? 1 : 0);
+                    ImGui::TextWrapped("Applies to Follow and ordinary replay playback. Pause restores the previous HUD.");
+                }
+                end_panel_card();
                 ImGui::EndDisabled();
                 ImGui::EndTabItem();
             }

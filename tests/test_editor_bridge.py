@@ -8,6 +8,23 @@ from dolly.editor_actions import default_action_bindings, EditorBinding
 
 
 class EditorBridgeTests(unittest.TestCase):
+    def test_follow_settings_publish_without_touching_other_blocks(self):
+        from dolly.follow_camera import FollowSettings
+        before = bytes(self.memory)
+        self.bridge.configure_editor_follow(FollowSettings(200, 40, 20), available=True, active=True, pending=True)
+        fields = w.FOLLOW_CONFIG.unpack_from(self.memory, w.FOLLOW_OFFSET)
+        self.assertEqual(fields, (b'DLYFOLL1', 2, 1, 7, 0, 200, 40, 20))
+        self.assertEqual(bytes(self.memory[:w.FOLLOW_OFFSET]), before[:w.FOLLOW_OFFSET])
+        end = w.FOLLOW_OFFSET + w.FOLLOW_CONFIG.size
+        self.assertEqual(bytes(self.memory[end:]), before[end:])
+        published = bytes(self.memory)
+        with self.assertRaises(ValueError):
+            self.bridge.configure_editor_follow(FollowSettings(401), available=True)
+        self.assertEqual(bytes(self.memory), published)
+        self.assertGreaterEqual(w.FOLLOW_OFFSET, w.PICKER_OFFSET + w.PICKER_RESULT.size)
+        self.bridge.configure_editor_follow(FollowSettings(), show_hud=True)
+        self.assertEqual(w.FOLLOW_CONFIG.unpack_from(self.memory, w.FOLLOW_OFFSET)[3], 8)
+
     def test_free_arrival_blend_does_not_enable_attachment_or_preview(self):
         offsets = dict(zip(w.ATTACH_FIELDS, (816, 48, 200, 212, 2184, 4536, 64, 72)))
         self.bridge.configure_editor_attach(offsets,

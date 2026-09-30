@@ -241,8 +241,14 @@ def query_field_offsets(controller) -> dict[str, int]:
     from . import player_layer
     texts = {}
     for layout_class in RUNTIME_LAYOUT_CLASSES:
+        # The detailed pawn layout recursively expands inline structures. Build
+        # 6712 contains an inline entry that crashes the game's schema printer.
+        # Binding output uses the same typed top-level rows without expansion;
+        # m_angEyeAngles needs only that top-level contract.
+        command = ("schema_dump_binding" if layout_class == "C_CitadelPlayerPawn"
+                   else "schema_detailed_class_layout")
         texts[layout_class] = str(controller._request(
-            "schema_detailed_class_layout " + layout_class, timeout=5))
+            command + " " + layout_class, timeout=5))
     offsets = parse_fields(texts)
     offsets["scene_node"] = player_layer.parse_scene_node_offset(texts["C_BaseEntity"])
     offsets["owner"] = player_layer.parse_owner_offset(texts["CGameSceneNode"])

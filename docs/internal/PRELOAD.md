@@ -29,10 +29,10 @@ changes focus, clicks coordinates, alters archived intro preferences, or dispatc
 guessed Panorama events. Input queue success is not preload readiness: the same
 full preload gate must still pass. A failed or ignored action is not blindly retried.
 
-The reviewed intro constructor at client+0x18c34b0 stores the object at global
-0x38198c8 with vtable 0x27a6768. The update at 0x18f0d50 uses phase getter
-0x18d5250, maps phase 1 to InPreIntro and 2 to InIntro, and caches it at +0x80.
-The normal key handler at 0x18dfec0 calls dismissal at 0x18ca970. Relevant live
+The build 6712 intro constructor at client+0x1a82910 stores the object at
+0x3bdf908 with vtable 0x2aa9390. The update at 0x1ac6050 uses phase getter
+0x1a9fa30, maps phase 1 to InPreIntro and 2 to InIntro, and caches it at +0x80.
+The normal key handler at 0x1aae800 calls dismissal at 0x1a8b7d0. Relevant live
 code spans and object type/phase are verified under the same exact client hash.
 
 The reviewed client and resourcesystem SHA-256 pins are separate from Native
@@ -41,19 +41,25 @@ vtable/query identities must agree. Unknown builds fail closed for automatic
 startup. Existing manual startup is still available, but does not claim automatic
 preload verification. Do not update pins just to get past a game update.
 
-Reviewed 2026-09-25 build (client cb831d12…): the game update preserved every
-reviewed code span byte-for-byte, re-verified offline against the 2026-09-23
-disassembly before the client pin was refreshed. Client getter RVA 0x571e20
-yields the manager at 0x2dd3ef0. Status at 0x57de80 is consumed by the Panorama
-preload panel at 0x1a88740. Manager vtable 0x2341738, counts +0x24/+0x28,
-resource handle +0x30, job handle +0x38. The resource singleton at
-client+0x3994fb0 has vtable resourcesystem+0x61058; its +0xc0 slot is
-resourcesystem+0x18c00. The reviewed 13-byte query returns true for null and
-otherwise reads manifest+0x44.
+Reviewed offline for 2026-09-29 build 6712 (client bc0dae38...): getter
+0x5ec8a0 yields manager 0x31456e0, vtable 0x2623068. Status 0x5f5b40 is
+consumed by the Panorama preload panel at 0x1cb8800. Counts +0x24/+0x28,
+resource handle +0x30 and job handle +0x38 retain their offsets. The resource
+singleton at client+0x3d7fe30 has vtable resourcesystem+0x6bc58; its +0xc0 slot
+is resourcesystem+0x1c860. The reviewed 13-byte query returns true for null and
+otherwise reads manifest+0x44. The resource system hash is 1eb0193b....
 
-Readiness requires a **non-null manifest**, inactive job, completed resource and
-completed >= total. The manifest condition distinguishes not-started from idle:
-the game's own UI completion predicate is already true before preload begins.
+The new status predicate also checks lifecycle flags: +0x3c is set after work
+is scheduled and +0x3d by the job completion callback at 0x5f8ee0. An unset
++0x3c makes the game's UI report completion even before preloading starts.
+With work scheduled, status requires +0x3d, a non-null completed resource and
+completed >= total, then waits/releases the job and clears +0x38. Dolly does
+not invoke that function. It requires **both flags**, a **non-null manifest**,
+completed resource/counters and the subsequently cleared job handle. Relevant
+producer, completion callback and invalidation spans are also checked. Invalid
+flag values fail closed. This avoids treating idle or partially scheduled work
+as ready while preserving the observer's read-only behavior.
+
 Counts reset across batches and may be equal while a job/resource is unfinished.
 The observer rejects changing manager snapshots and implausible fields. Startup
 requires three consecutive complete observations, a fresh hideout check, and one
@@ -66,7 +72,7 @@ coherent started/ready state was ever observed. Repeated identical polls are
 collapsed; the final sample after hideout revalidation is also recorded. These
 historical observations never authorize replay loading in place of current
 readiness. A null manifest is ambiguous: the reviewed add-on-list notification
-callback (client+0x54e5d0, `IAddonListChangeNotify` subobject at manager+0x10)
+callback (client+0x5d2420, `IAddonListChangeNotify` subobject at manager+0x10)
 releases/clears the manifest and job without resetting progress counters.
 Do not treat equal counters following that invalidation as completed map preload.
 
@@ -76,3 +82,39 @@ bounded Dolly-owned local replay sessions. Test not-started/equal counts,
 incomplete resources, changed identities, cancellation and timeout. Never replace
 the gate with a sleep or a guessed console event. No FPS or crash-rate improvement
 is claimed by this startup change, nor coverage of every future replay shader.
+
+Build 6712 support is statically reviewed and covered by offline regression tests.
+Native preload has since passed bounded local replay startup tests. Console
+startup and export compatibility require their own verification.
+
+## Replay camera handoff after preload
+
+Build6712 can begin replay simulation while a scripted opening camera still
+owns the view. `GameInProgress` and dashboard intro phase0 were observed during
+that opening and must not be used alone to enter the paused editor.
+
+`dolly/replay_camera.py` verifies the same exact client hash, owned development
+session and loaded module path, then compares the reviewed main-view/manager
+consumer code. `CCitadelCameraManager` at client+0x35f5780 (vtable0x261d0a0)
+supplies current camera+0x28, previous+0x30, blend byte+0x38 and weight+0x44.
+Startup accepts only coherent game state7 plus the reviewed normal
+`CCitadel_ThirdPersonCamera` vtable0x2624b08 with blending finished. Unknown
+cameras remain waiting; unknown builds/types/invalid states fail closed.
+
+The controller retains selected-replay and initial-full-packet checks first,
+then requires two ready observations with advancing rendered frames (native)
+or replay ticks (console) before pausing. A90-second deadline is failure, never
+readiness. Cancellation and failure close the read-only process handle and
+leave manual startup available. No seek, scripted-camera skip, fake game
+state, spectator-mode change or game-memory write is used by this gate.
+
+The direct view consumer has a later CViewEffects call; reviewed code only
+adds position and roll offsets and does not select a replacement camera.
+The private state-gated prototype was visually accepted on replay108605183;
+production-path validation is recorded separately in the live update handoff.
+
+The same guard also runs after an in-process replay reload for shot/recording
+preparation. A fresh playdemo restarts the opening camera; reaching the initial
+packet is insufficient even if the editor's original startup already passed.
+Recovery retains its inactive-replay boundary and single-load policy, then waits
+for camera handoff before pausing or seeking to the authored start.

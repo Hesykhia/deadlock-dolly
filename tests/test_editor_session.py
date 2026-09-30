@@ -21,6 +21,31 @@ class Value:
 
 
 class EditorSessionTests(unittest.TestCase):
+    def test_follow_event_preserves_full_model_identity(self):
+        player = {'handle': 0x10002, 'entity_index': 2, 'model': 0xfedcba9876543210,
+                  'model_path': 'models/heroes/frank/frank.vmdl'}
+        self.bridge.editor_roster.return_value = {'players': [player]}
+        self.app.preview_attach = False
+        event = {'action': 'start_game_follow', 'value': 200,
+                 'pose': (40, 20, 0, 0x10002, 2, 0x76543210, 0xfedcba98)}
+        session.dispatch(self.app, event, self.bridge)
+        label, operation = self.app._submit.call_args.args[:2]
+        operation()
+        self.controller.start_selected_game_follow.assert_called_once()
+        settings, selected = self.controller.start_selected_game_follow.call_args.args
+        self.assertEqual((settings.distance, settings.shoulder, settings.height), (200, 40, 20))
+        self.assertEqual(selected, player)
+        self.assertIn('Game Follow', label)
+
+    def test_follow_event_rejects_changed_model_before_worker(self):
+        self.app.preview_attach = False
+        self.bridge.editor_roster.return_value = {'players': [
+            {'handle': 0x10002, 'entity_index': 2, 'model': 0x87654321}]}
+        with self.assertRaisesRegex(ValueError, 'player list changed'):
+            session.dispatch(self.app, {'action': 'start_game_follow', 'value': 200,
+                                       'pose': (40, 20, 0, 0x10002, 2, 0x76543210, 0)}, self.bridge)
+        self.app._submit.assert_not_called()
+
     def test_return_after_attach_failure_disables_only_live_preview(self):
         from copy import deepcopy
         from dolly.path import AttachKey

@@ -72,8 +72,16 @@ unfinished output. Keep Deadlock open while an MP4 is finalizing. Windows N
 editions need Microsoft's Media Feature Pack to record; camera editing remains
 available without it.
 
-Audio and arbitrary output resizing are not included. Fixed-step video export,
-paired depth masters and isolated layer takes are available; see
+Enable **Game audio** to record Deadlock's sound into a real-time Color export.
+The take folder contains the video with audio and a separate game-audio WAV.
+Other desktop audio is excluded. **Reconstructed audio** is experimental and
+also requires Source2Viewer for sound-asset extraction.
+
+Audio exports require real-time capture. Dolly refuses audio with **Fixed-step**
+or extra layer takes because their simulation timing can differ from recorded
+audio. Export silent layers separately when using those options. Arbitrary
+output resizing is not included. Paired depth masters and isolated layer takes
+are available; see
 [LAYER_EXPORT.md](internal/LAYER_EXPORT.md).
 
 ## High frame rates and fixed-step

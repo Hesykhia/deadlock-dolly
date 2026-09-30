@@ -214,6 +214,26 @@ def configure(app):
                 or getattr(app, "_native_citadel_dof_cache", None) != citadel):
             publish_citadel(sensor, focus, available=active, enabled=active and enabled)
             app._native_citadel_dof_bridge, app._native_citadel_dof_cache = bridge, citadel
+    publish_follow = getattr(bridge, "configure_editor_follow", None)
+    if callable(publish_follow):
+        from .follow_camera import FollowSettings
+        from .replay_camera import CLIENT_SHA256
+        settings = getattr(app.controller, '_follow_settings', None)
+        if not isinstance(settings, FollowSettings):
+            settings = FollowSettings()
+        evidence = getattr(app.controller, '_startup_evidence', {})
+        identity = evidence.get('replay_camera_identity', {})
+        follow_available = active and identity.get('client_sha256') == CLIENT_SHA256
+        transaction = getattr(app.controller, '_follow_transaction', None)
+        pending = bool((transaction is not None and transaction.originals)
+                       or getattr(app.controller, '_follow_mode_original', None) is not None)
+        following = getattr(app.controller, '_follow_active', False) is True
+        show_hud = getattr(app.controller, '_show_replay_hud', False) is True
+        follow = (settings, bool(follow_available), following, pending, show_hud)
+        if (getattr(app, '_native_follow_bridge', None) is not bridge
+                or getattr(app, '_native_follow_cache', None) != follow):
+            publish_follow(settings, available=bool(follow_available), active=following, pending=pending, show_hud=show_hud)
+            app._native_follow_bridge, app._native_follow_cache = bridge, follow
     publish_attach = getattr(bridge, "configure_editor_attach", None)
     fields = getattr(app, "attach_fields", None)
     if callable(publish_attach) and fields and active:
@@ -444,6 +464,11 @@ def dispatch(app, event, bridge):
                 else "remains on the ground."))
             if app.project.confetti_enabled else "Confetti rain disabled for this shot.")
         configure(app)
+    elif action == "set_replay_hud":
+        if event['value'] not in (0, 1):
+            raise ValueError('Choose whether to show the replay HUD.')
+        _native_operation(app, 'Changing replay HUD',
+                          lambda: app.controller.set_replay_hud(bool(event['value'])), bridge)
     elif action == "play_pause":
         _native_operation(app, "Toggling replay playback", app.controller.toggle_replay, bridge)
     elif action == "play_path":
@@ -515,12 +540,35 @@ def dispatch(app, event, bridge):
                 # the console back to the underlying game UI when it was open.
                 if getattr(app.controller, "_console_open", False) is True:
                     app.controller.toggle_console(enabled=False)
-                if _value(app, "video_source", "Camera path") == "Player POV":
+                if (_value(app, "video_source", "Camera path") == "Player POV"
+                        or getattr(app.controller, "_follow_active", False) is True):
                     app.controller.open_pov_panel()
                 else:
                     app.controller.toggle_game_ui(enabled=False)
                 bridge.configure_editor(owner="panel")
             _native_operation(app, "Opening in-game editor", return_to_editor, bridge)
+    elif action == "start_game_follow":
+        from .follow_camera import FollowSettings
+        settings = FollowSettings(distance=event['value'], shoulder=event['pose'][0],
+                                  height=event['pose'][1])
+        settings.values()
+        if getattr(app, 'preview_attach', False):
+            raise ValueError('Detach the bone preview before Game Follow.')
+        roster = bridge.editor_roster()
+        pose = event['pose']
+        index = int(pose[2])
+        players = roster.get('players', []) if isinstance(roster, dict) else []
+        if (pose[2] != index or not 0 <= index < len(players)
+                or players[index].get('handle') != pose[3]
+                or players[index].get('entity_index') != pose[4]
+                or pose[5] != (players[index].get('model', 0) & 0xffffffff)
+                or pose[6] != (players[index].get('model', 0) >> 32)):
+            raise ValueError('The player list changed. Select the hero again.')
+        player = dict(players[index])
+        _native_operation(app, 'Starting Game Follow',
+                          lambda: app.controller.start_selected_game_follow(settings, player), bridge)
+    elif action == "stop_game_follow":
+        _native_operation(app, 'Restoring Game Follow settings', app.controller.stop_game_follow, bridge)
     elif action == "set_video_source":
         if event["value"] not in (0, 1):
             raise ValueError("Unknown video camera source")

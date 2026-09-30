@@ -43,7 +43,7 @@ NATIVE_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "native"
 EDITING_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "assets" / "editing"
 CONFETTI_PACK = NATIVE_ROOT / "assets" / "confetti" / "pak01_dir.vpk"
 CONFETTI_PACK_SHA256 = "99c0325fe333bfa12c3f23a2808767c2fd27b49fe0e5abe4531fa472519f8ae6"
-UNLOCKER_SHA256 = "74047120e79245d479e61142a878f3311c8384a1f5f33e3f1cb8f3e87749e42a"
+UNLOCKER_SHA256 = "d4d45e95d8caa7c3622118816877482b432d178c1631573f835c58e2fde28c5d"
 # Accepted game-module SHA-256 pins come from native/profiles/manifest.json, the
 # single source of truth shared with the native bridge and its build tests.
 try:
@@ -185,7 +185,7 @@ def _quote(value: str) -> str:
 
 
 def _editing_gameinfo(paths: GamePaths) -> str:
-    """Load the editing baseline only for its three reviewed camera modules.
+    """Verify the camera baseline and its separately reviewed unlocker server.
 
     Competitive gameinfo files can alter much more than ConVars. Never guess
     which entries are stock, or mount an old full gameinfo after a game update.
@@ -202,6 +202,13 @@ def _editing_gameinfo(paths: GamePaths) -> str:
         for relative in CAMERA_MODULE_RELATIVES:
             if hash_file(paths.game_dir / relative) != profile["modules"][relative]:
                 raise LaunchError("Dolly's editing configuration has not been reviewed for this game build. "
+                                  "Update Dolly before launching. Your gameinfo.gi was not changed.")
+        server_hash = profile.get("unlocker_server_sha256")
+        if server_hash is not None:
+            if not isinstance(server_hash, str) or re.fullmatch(r"[0-9a-f]{64}", server_hash) is None:
+                raise ValueError("Invalid editing unlocker server fingerprint")
+            if hash_file(paths.game_dir / "citadel/bin/win64/server.dll") != server_hash:
+                raise LaunchError("Dolly's cvar unlocker has not been reviewed for this server build. "
                                   "Update Dolly before launching. Your gameinfo.gi was not changed.")
         text = data.decode("utf-8")
         roots = _named(_parse(text), "GameInfo")
@@ -884,7 +891,7 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
                 f"DOLLY_NATIVE_1\n{bridge.token}\n{bridge.editor_pid}\n",
                 encoding="ascii", newline="\n")
         command = build_command(paths, overlay, port, demo, protocol, launch_options, native=native)
-        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-shutdown-fix", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
+        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6722", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
         metadata["editing_gameinfo_sha256"] = hashlib.sha256(editing.encode("utf-8")).hexdigest()
         if native:
             metadata["native_camera"] = {"abi": NATIVE_ABI, "game_sha256": NATIVE_GAME_SHA256,

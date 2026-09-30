@@ -9,6 +9,307 @@ from tests.test_native_flight_controller import configured_controller
 
 
 class GameUiHandoffTests(unittest.TestCase):
+    def saved_hero(self):
+        player = {'handle': 0x18007, 'entity_index': 7, 'model': 0x123456,
+                  'model_path': 'models/heroes_wip/frank/frank.vmdl'}
+        self.controller._game_hero_restore = (self.controller._session, self.controller._demo, player['model_path'])
+        self.bridge.editor_roster = Mock(return_value={'available': True, 'players': [player]})
+        return player
+
+    def test_regular_shot_holds_endpoint_until_explicit_f9_restores_fresh_hero(self):
+        name = self.health_panel()
+        player = self.saved_hero()
+        self.controller._prepare_playback_settings(True)
+        self.console.requests.clear()
+        self.controller._finish_playback()
+        self.assertFalse(any('spec_target' in command for command in self.console.requests))
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        monitor = Mock()
+        monitor.sample_health_hud_context.return_value = {'handle': player['handle'], 'mode': 2}
+        with patch('dolly.follow_target.FollowTargetMonitor', return_value=monitor):
+            self.controller.toggle_game_ui(True)
+        self.assertIn('spec_target 7', self.console.requests)
+        self.assertIsNone(self.controller._game_hero_restore)
+        self.assertEqual(self.console.values[name], 0)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 1)
+
+    def test_new_shot_preserves_verified_hero_when_internal_stop_consumes_it(self):
+        self.saved_hero()
+        intent = self.controller._game_hero_restore
+        def returned_to_game(**kwargs):
+            self.controller._game_hero_restore = None
+        with patch.object(self.controller, 'stop', side_effect=returned_to_game) as stop:
+            self.controller._stop_before_new_shot(preserve_layers=True)
+        stop.assert_called_once_with(preserve_layers=True)
+        self.assertIs(self.controller._game_hero_restore, intent)
+
+    def test_new_shot_does_not_carry_hero_into_another_replay_or_session(self):
+        self.saved_hero()
+        def changed_replay(**kwargs):
+            self.controller._game_hero_restore = None
+            self.controller._demo = 'another.dem'
+        with patch.object(self.controller, 'stop', side_effect=changed_replay):
+            self.controller._stop_before_new_shot()
+        self.assertIsNone(self.controller._game_hero_restore)
+
+    def test_ambiguous_saved_hero_retains_originals_and_never_selects_fallback(self):
+        self.health_panel()
+        player = self.saved_hero()
+        self.bridge.editor_roster.return_value['players'].append(dict(player, handle=0x18008, entity_index=8))
+        self.controller._halt(native_action='release')
+        self.console.requests.clear()
+        with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
+            self.controller._restore_spectator_hero()
+        self.assertIsNotNone(self.controller._game_hero_restore)
+        self.assertFalse(any('spec_target' in command for command in self.console.requests))
+
+    def test_failed_hero_readback_keeps_hud_hidden_and_retries_no_command(self):
+        self.health_panel()
+        self.saved_hero()
+        self.controller._halt(native_action='release')
+        monitor = Mock()
+        monitor.sample_health_hud_context.side_effect = RuntimeError('target unavailable')
+        self.console.requests.clear()
+        with patch('dolly.follow_target.FollowTargetMonitor', return_value=monitor), \
+                patch('dolly.controller.time.monotonic', side_effect=[0, 6]):
+            with self.assertRaisesRegex(RuntimeError, 'handoff remains pending'):
+                self.controller._restore_spectator_hero()
+        self.assertEqual(self.console.requests.count('spec_target 7'), 1)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.assertIsNotNone(self.controller._game_hero_restore)
+
+    def test_saved_hero_refuses_other_demo_or_native_owner_before_command(self):
+        self.health_panel()
+        self.saved_hero()
+        self.console.requests.clear()
+        with self.assertRaisesRegex(RuntimeError, 'Release Dolly'):
+            self.controller._restore_spectator_hero()
+        self.controller._game_hero_restore = (self.controller._session, 'different.dem', 'frank')
+        with self.assertRaisesRegex(RuntimeError, 'different replay'):
+            self.controller._restore_spectator_hero()
+        self.assertFalse(any('spec_target' in command for command in self.console.requests))
+
+    def health_panel(self, original=0):
+        name = 'citadel_hud_hide_own_health'
+        self.console.values[name] = original
+        capability = patch.object(self.controller, '_own_health_hud_value',
+                                  side_effect=lambda: self.console.values[name])
+        capability.start()
+        self.addCleanup(capability.stop)
+        context = patch('dolly.follow_target.FollowTargetMonitor')
+        context.start()
+        self.addCleanup(context.stop)
+        return name
+
+    def test_free_camera_hides_health_panel_and_f9_stop_restore_exactly(self):
+        name = self.health_panel()
+        self.controller.toggle_game_ui(True)
+        self.controller.toggle_game_ui(False)
+        self.assertEqual(self.console.values[name], 1)
+        self.controller.toggle_game_ui(True)
+        self.assertEqual(self.console.values[name], 0)
+        self.controller.stop()
+        self.assertEqual(self.console.values[name], 0)
+        self.assertFalse(any('citadel_unit_status_enabled' in command or
+                             'citadel_hud_objective_health_enabled' in command
+                             for command in self.console.requests))
+
+    def test_health_panel_preserves_user_hidden_preference(self):
+        name = self.health_panel(1)
+        self.controller.toggle_game_ui(True)
+        self.controller.set_replay_hud(True)
+        self.controller.toggle_replay()
+        self.assertEqual(self.console.values[name], 1)
+        self.controller.toggle_replay()
+        self.controller.stop()
+        self.assertEqual(self.console.values[name], 1)
+
+    def test_replay_hud_option_uses_pre_edit_health_preference(self):
+        name = self.health_panel()
+        self.controller.toggle_game_ui(True)
+        self.controller.toggle_game_ui(False)
+        self.controller.toggle_replay()
+        self.assertEqual(self.console.values[name], 1)
+        self.controller.set_replay_hud(True)
+        self.assertEqual(self.console.values[name], 1)
+        self.controller.toggle_replay()
+        self.assertEqual(self.console.values[name], 1)
+        self.controller.stop()
+        self.assertEqual(self.console.values[name], 0)
+
+    def test_shot_completion_keeps_health_hidden_until_explicit_handoff(self):
+        name = self.health_panel()
+        self.controller._prepare_playback_settings(True)
+        self.controller._prepare_playback_settings(True)
+        self.assertEqual(self.console.values[name], 1)
+        self.assertNotIn(name, self.controller._playback_restore)
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+        self.console.requests.clear()
+        self.assertIsNone(self.controller._finish_playback())
+        self.assertEqual(self.console.values[name], 1)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+        self.assertFalse(any(name + ' 0' in command for command in self.console.requests))
+        self.assertFalse(any('citadel_hud_visible 1' in command for command in self.console.requests))
+        self.controller._prepare_playback_settings(True)
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+        self.controller.stop()
+        self.assertEqual(self.console.values[name], 0)
+
+    def test_failed_health_restore_preserves_outer_original(self):
+        name = self.health_panel()
+        self.controller._prepare_playback_settings(True)
+        self.controller._halt(native_action='release')
+        request = self.controller._request
+        def ignore_restore(command, **kwargs):
+            result = request(command, **kwargs)
+            if name + ' 0' in command:
+                self.console.values[name] = 1
+            return result
+        with patch.object(self.controller, '_request', side_effect=ignore_restore), self.assertLogs('dolly', level='WARNING'):
+            self.assertIsNotNone(self.controller._restore_game_ui_settings())
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+        self.assertIsNone(self.controller._restore_game_ui_settings())
+        self.assertEqual(self.console.values[name], 0)
+
+    def test_lost_health_capability_preserves_pending_original_without_writes(self):
+        name = self.health_panel()
+        self.controller._prepare_playback_settings(True)
+        self.controller._halt(native_action='release')
+        self.console.requests.clear()
+        with patch.object(self.controller, '_own_health_hud_value', return_value=None), self.assertLogs('dolly', level='WARNING'):
+            self.assertIsNotNone(self.controller._restore_game_ui_settings())
+        self.assertFalse(any(name in command for command in self.console.requests))
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+        self.assertIsNone(self.controller._restore_game_ui_settings())
+
+    def test_missing_hud_player_keeps_panel_hidden_but_opens_selection_ui(self):
+        name = self.health_panel()
+        self.controller.toggle_game_ui(False)
+        with patch('dolly.follow_target.FollowTargetMonitor') as monitor:
+            monitor.return_value.sample_health_hud_context.side_effect = RuntimeError('no controller')
+            self.controller.toggle_game_ui(True)
+            self.assertTrue(self.controller._game_ui_visible)
+            self.assertEqual(self.console.values[name], 1)
+            self.controller.stop()
+            self.assertEqual(self.console.values[name], 1)
+            self.assertEqual(self.controller._game_ui_restore, {name: 0, 'citadel_hud_visible': 1,
+                                                               'citadel_hide_replay_hud': 0})
+        self.controller.stop()
+        self.assertEqual(self.console.values[name], 0)
+        self.assertFalse(self.controller._game_ui_restore)
+
+    def test_native_owner_cannot_expose_panel_even_with_show_hud_enabled(self):
+        name = self.health_panel()
+        self.controller.toggle_game_ui(False)
+        self.controller.toggle_replay()
+        self.console.requests.clear()
+        self.controller.set_replay_hud(True)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.assertEqual(self.console.values[name], 1)
+        self.assertFalse(any(name + ' 0' in command for command in self.console.requests))
+        self.controller.stop()
+        self.assertEqual(self.console.values[name], 0)
+
+    def test_health_reveal_follows_native_release_and_mode_readback(self):
+        name = self.health_panel()
+        self.controller.toggle_game_ui(False)
+        self.console.requests.clear()
+        self.console.events.clear()
+        def verify():
+            self.assertFalse(self.controller._native_active)
+            self.assertFalse(self.controller._native_manual)
+            self.assertIn('native.release', self.console.events)
+            self.assertNotIn('citadel_spectator_mode', self.controller._game_ui_restore)
+            self.assertEqual(self.console.values[name], 1)
+        with patch.object(self.controller, '_verify_health_hud_handoff', side_effect=verify):
+            self.controller.toggle_game_ui(True)
+        self.assertEqual(self.console.values[name], 0)
+
+    def test_stock_mode_transition_suppresses_visible_abilities_first(self):
+        name = self.health_panel()
+        self.controller.toggle_game_ui(True)
+        self.controller._game_ui_restore['citadel_spectator_mode'] = 1
+        request = self.controller._request
+        def mode_request(command, **kwargs):
+            if command.startswith('citadel_spectator_mode 1'):
+                self.assertEqual(self.console.values[name], 1)
+                self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+                self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+            return request(command, **kwargs)
+        with patch.object(self.controller, '_request', side_effect=mode_request):
+            self.controller._restore_spectator_view()
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+
+    def test_old_per_shot_original_migrates_without_reveal(self):
+        name = self.health_panel()
+        self.console.values[name] = 1
+        self.controller._playback_restore[name] = 0
+        self.console.requests.clear()
+        self.assertIsNone(self.controller._restore_playback_settings())
+        self.assertNotIn(name, self.controller._playback_restore)
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+        self.assertEqual(self.console.values[name], 1)
+        self.assertFalse(any(name + ' 0' in command for command in self.console.requests))
+
+    def game_owned_view(self):
+        self.controller.toggle_game_ui(True)
+        return {name: self.console.values[name] for name in
+                ('citadel_hud_visible', 'citadel_hide_replay_hud', 'hud_free_cursor')}
+
+    def test_replay_hides_hud_and_pause_restores_original_values(self):
+        before = self.game_owned_view()
+        self.controller.toggle_replay()
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+        self.assertEqual(self.console.values['hud_free_cursor'], 0)
+        self.controller.toggle_replay()
+        self.assertEqual({name: self.console.values[name] for name in before}, before)
+        self.assertFalse(self.controller._replay_hud_restore)
+
+    def test_hud_preference_changes_running_view_without_replacing_snapshot(self):
+        before = self.game_owned_view()
+        self.controller.toggle_replay()
+        self.controller.set_replay_hud(True)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 1)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 0)
+        self.assertEqual(self.controller._replay_hud_restore, before)
+        self.controller.set_replay_hud(False)
+        self.controller.toggle_replay()
+        self.assertEqual({name: self.console.values[name] for name in before}, before)
+
+    def test_failed_resume_restores_hud(self):
+        before = self.game_owned_view()
+        original = self.controller._request
+        def request(command, **kwargs):
+            if command == 'demo_resume':
+                raise RuntimeError('resume rejected')
+            return original(command, **kwargs)
+        with patch.object(self.controller, '_request', side_effect=request):
+            with self.assertRaisesRegex(RuntimeError, 'resume rejected'):
+                self.controller.toggle_replay()
+        self.assertEqual({name: self.console.values[name] for name in before}, before)
+        self.assertFalse(self.controller._replay_hud_restore)
+
+    def test_stop_restores_hud_and_pre_edit_settings(self):
+        self.game_owned_view()
+        self.controller.toggle_replay()
+        self.controller.stop()
+        self.assertEqual(self.console.values, self.original_values)
+
+    def test_pending_hud_restore_rejects_another_session(self):
+        self.game_owned_view()
+        self.controller.toggle_replay()
+        originals = dict(self.controller._replay_hud_restore)
+        self.controller._session = object()
+        with self.assertRaisesRegex(RuntimeError, 'different session'):
+            self.controller._restore_replay_hud()
+        self.assertEqual(self.controller._replay_hud_restore, originals)
+
+    def test_hud_preference_requires_boolean(self):
+        with self.assertRaises(ValueError):
+            self.controller.set_replay_hud(1)
+
     def setUp(self):
         self.controller, self.console, self.bridge = configured_controller()
         self.original_values = dict(self.console.values)

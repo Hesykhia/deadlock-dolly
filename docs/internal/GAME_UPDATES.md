@@ -1,5 +1,82 @@
 # Deadlock updates and Dolly
 
+## Version6722 hotfix and Follow slide correction
+
+Steam build25614556 uses client44a50bc2.../image40f5000. Exact original6712
+and6722 PE files were compared privately; startup, replay, observer, camera,
+entity resolver and effect wrapper RVAs/types are reviewed and updated. Other
+six reviewed game modules and original gameinfo are unchanged. The separate
+hotfix camera profile preserves older profiles and exact-build admission.
+
+The stock normal crouch camera composition still initializes one intermediate
+world anchor to zero; custom overrides leave it zero. Blending scales the hero's
+world anchor toward map origin. Dolly's guarded correction scopes the actual
+current ThirdPerson camera and full observer/tracked-pawn identity, then passes
+a private input descriptor with the valid anchor into the exact faulty blend.
+Angles, offsets, crouch weight, later ADS/sequence effects and collision remain
+stock. No persistent game memory or installed game files are patched. Exact
+module and live function bytes gate the resident detours. Missing ownership,
+changed config/command, nonfinite data or another callsite passes through.
+Optional diagnostics report scopes/blends/corrections/rejections for live proof.
+This correction still needs bounded runtime and visual acceptance.
+
+## Build 6712 replay startup and schema printing
+
+Production startup now waits for the reviewed normal replay camera handoff
+before pausing. The selected replay and first-packet gates remain intact;
+read-only, exact-build camera checks replace no existing safety checks.
+The state-based starting view and responsive controls were visually accepted.
+
+The stock detailed pawn-schema printer crashes while recursively expanding an
+inline structure in this build (schemasystem+0xa4e3, null record). Attachment
+queries now use `schema_dump_binding C_CitadelPlayerPawn`, whose reviewed
+nonrecursive mode retains typed top-level rows. Existing presence, type and
+offset validation remains; the other three schema queries are unchanged.
+Bounded live verification returned m_angEyeAngles at4352 as QAngle and exited
+normally. Roster/bone and export compatibility checks remain incomplete.
+
+The entity-system global also moved outside the legacy attach-roster scan
+window. The new exact-client path verifies initializer20049f0 and resolves
+global3cfc7c0, requiring the reviewed CGameEntitySystem primary RTTI vtable on
+each lookup. Existing player list, identity and handle validation is retained.
+Unrecognized legacy clients retain their existing resolver; a recognized new
+client with invalid initializer/type data refuses resolution.
+
+Source-audio event capture worked, but the start-parameter structure shifted:
+the initial amplitude/envelope float moved0x24->0x20 and the legacy rate/fade
+parameter float moved0x30->0x2c. These offsets now belong to the selected sound
+profile, including signature fallback; missing metadata refuses resolution.
+The field at new0x30 is integer pitch and must not be read as the old float.
+CSV columns retain their meanings; source_volume is not final mixed loudness,
+and source_rate_parameter is not asserted to be pitch. Runtime retest pending.
+
+## Build 6712 offline compatibility review (2026-09-29)
+
+The September 29 profiles cover the camera wrapper and changed view fields,
+engine replay accessors, ICvar interface, ten-argument scene producer, renderer
+buffer/retirement layouts, audio voice map, particle wrappers, screen effects,
+and preload completion. Exact module gates remain in place. The scene producer
+requires its matching reviewed renderer because the GPU buffer member moved
+from +0x60 to +0x70. CPU allocation pointers remain +0x18. Older camera, engine,
+scene, renderer and audio profiles are retained; automatic preload and the editing
+baseline target the new build.
+
+The camera's new wrapper is exact-build only; it must not seed the old camera
+signature fallback. Its profile generator verifies the reviewed camera functions,
+RTTI and engine/tier0 identities before emission. The new unlocker includes a
+DLL-local ICvar adapter for two removed virtual slots and tolerates the removed
+optional string-token debug export. Its patch and provenance are bundled under
+`third_party/cvar_unlocker/`; secure-mode and shutdown guards remain enforced.
+
+The audio generator now emits current `soundsystem-2026-09-29.json` and retained
+`soundsystem-2026-09-09.json` profiles. Resolution carries each profile's voice-map
+offset and rejects ambiguous cross-profile matches. No game binary is needed to
+regenerate the header from saved profiles.
+
+These are offline-reviewed compatibility changes, not an in-game certification.
+An owned replay startup, camera/F9 recovery, audio and layered export still need
+runtime verification before release. No running game was inspected or modified.
+
 ## Complete module scan and audio fallback (2026-09-28)
 
 **Check game build** and Native launch now hash seven game modules in one scan:

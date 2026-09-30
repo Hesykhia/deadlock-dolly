@@ -37,11 +37,15 @@ def _path(value: str, required: bool = False) -> bytes:
 
 def pack_command(sequence, command, *, path="", config_path="", fps=60, bitrate=20000000,
                  encoder=0, codec=0, quality=0, preset=0, ffmpeg_path="", fixed_step=False,
-                 depth=False, depth_exr=False, shot_only=False, white_clear=False):
+                 depth=False, depth_exr=False, shot_only=False, white_clear=False, max_frames=0):
     if type(sequence) is not int or not 0 < sequence <= 0xfffffffe or sequence & 1:
         raise ValueError("Invalid media command sequence")
     if command not in COMMANDS:
         raise ValueError("Unknown media command")
+    if type(max_frames) is not int or not 0 <= max_frames <= 65535:
+        raise ValueError("Video frame limit must be an integer between 0 and 65535")
+    if max_frames and command != "start_video":
+        raise ValueError("A frame limit applies only to starting a video")
     if type(fps) is not int or fps not in (30, 60, 120, 300, 600):
         raise ValueError("Choose 30, 60, 120, 300 or 600 video FPS")
     if type(bitrate) is not int or not 1000000 <= bitrate <= 80000000:
@@ -72,9 +76,10 @@ def pack_command(sequence, command, *, path="", config_path="", fps=60, bitrate=
     # Reserved bit 0: fixed-step export. Bit 1: paired depth master (.mov).
     # Bit 2: also write the float EXR sequence. Bit 3: capture only frames
     # with a replay time so layered takes stay aligned. Bit 4: force a white
-    # clear for the matte pass. The native mask accepts exactly these bits.
+    # clear for the matte pass. Bits 16..31: hard admission limit (0 unlimited).
+    # Bits 5..15 remain invalid. Older native builds reject a nonzero limit.
     reserved = ((1 if fixed_step else 0) | (2 if depth else 0) | (4 if depth_exr else 0)
-                | (8 if shot_only else 0) | (16 if white_clear else 0))
+                | (8 if shot_only else 0) | (16 if white_clear else 0) | (max_frames << 16))
     return COMMAND.pack(b"DLYMED01", sequence, ABI, COMMANDS[command], fps, bitrate,
                         reserved,
                         encoder, codec, quality, preset,

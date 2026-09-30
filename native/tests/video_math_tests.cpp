@@ -13,6 +13,9 @@ void require(bool value) {
 
 int main() {
     using namespace dolly::video;
+    require(frame_admission_open(0, 2) && frame_admission_open(1, 2));
+    require(!frame_admission_open(2, 2) && !frame_admission_open(1000, 2));
+    require(frame_admission_open(std::numeric_limits<std::uint64_t>::max(), 0));
     ShotClockTrace trace;
     trace.observe(0, -1, false);
     trace.observe(0, std::numeric_limits<double>::quiet_NaN(), true);

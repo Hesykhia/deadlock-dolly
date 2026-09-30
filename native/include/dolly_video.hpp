@@ -68,6 +68,9 @@ struct Options {
     // Matte pass: force every color clear to white so the recorded layer can
     // be combined with its black pass into an alpha channel.
     bool white_clear = false;
+    // Hard cap on admitted GPU copies, including paired depth (0 unlimited).
+    // Reaching it closes admission and finalizes through the normal drain.
+    std::uint32_t max_frames = 0;
 };
 struct Status {
     State state = State::idle;

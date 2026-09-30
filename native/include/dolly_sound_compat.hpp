@@ -18,6 +18,17 @@ struct TableReference {
 struct Resolution {
     std::uint32_t functions[5]{};
     std::uint32_t voice_table = 0;
+    std::uint32_t voice_map_offset = 0;
+    std::uint32_t parameter_volume_offset = 0, parameter_rate_offset = 0;
+};
+struct Profile {
+    std::uint32_t image_size;
+    const Signature* signatures;
+    std::size_t signature_count;
+    const TableReference* references;
+    std::size_t reference_count;
+    std::uint32_t voice_table, voice_map_offset;
+    std::uint32_t parameter_volume_offset, parameter_rate_offset;
 };
 
 inline bool resolve(const unsigned char* text, std::size_t text_size,
@@ -68,6 +79,33 @@ inline bool resolve(const unsigned char* text, std::size_t text_size,
     if (!table || (exact && table != reviewed_table)) return false;
     candidate.voice_table = table;
     result = candidate;
+    return true;
+}
+inline bool resolve_profiles(const unsigned char* text, std::size_t text_size,
+                             std::uint32_t text_rva, std::uint32_t data_rva,
+                             std::size_t data_size, std::uint32_t image_size,
+                             const Profile* profiles, std::size_t profile_count,
+                             bool exact, Resolution& result) {
+    result = {};
+    if (!profiles || !profile_count) return false;
+    Resolution selected{};
+    unsigned matches = 0;
+    for (std::size_t i = 0; i < profile_count; ++i) {
+        const auto& p = profiles[i];
+        if (exact && p.image_size != image_size) continue;
+        Resolution candidate{};
+        if (!p.voice_map_offset || !p.parameter_volume_offset || !p.parameter_rate_offset ||
+            !resolve(text, text_size, text_rva, data_rva, data_size, p.signatures,
+                     p.signature_count, p.references, p.reference_count,
+                     exact, p.voice_table, candidate)) continue;
+        if (++matches != 1) return false;
+        candidate.voice_map_offset = p.voice_map_offset;
+        candidate.parameter_volume_offset = p.parameter_volume_offset;
+        candidate.parameter_rate_offset = p.parameter_rate_offset;
+        selected = candidate;
+    }
+    if (matches != 1) return false;
+    result = selected;
     return true;
 }
 } // namespace dolly_sound_compat

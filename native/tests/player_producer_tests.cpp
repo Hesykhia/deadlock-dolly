@@ -4,13 +4,52 @@
 #include <cstdio>
 #include <thread>
 #include <vector>
+#if defined(_WIN32)
+#include "dolly_player_capture.hpp"
+#endif
 
 static void require(bool value) {
     if (!value)
         std::abort();
 }
+#if defined(_WIN32)
+static unsigned producerCalls = 0;
+static int __fastcall legacy_producer(std::uintptr_t a, void* object, void* mesh, void* opaque,
+                                      void* params, std::uint32_t mode, unsigned char* flag,
+                                      std::uint32_t* outA, std::uint32_t* outB) {
+    ++producerCalls;
+    require(a == 17 && object == reinterpret_cast<void*>(21) && mesh == reinterpret_cast<void*>(22));
+    require(opaque == reinterpret_cast<void*>(23) && params == reinterpret_cast<void*>(24) && mode == 31);
+    *flag = 1;
+    *outA = 41;
+    *outB = 42;
+    return 43;
+}
+static int __fastcall september_producer(std::uintptr_t a, void* object, void* mesh, void* opaque,
+                                         void* params, std::uint32_t mode, unsigned char* flag,
+                                         std::uint32_t* outA, std::uint32_t* outB, std::uint32_t* outC) {
+    const auto result = legacy_producer(a, object, mesh, opaque, params, mode, flag, outA, outB);
+    require(outC != nullptr);
+    *outC = 44;
+    return result;
+}
+#endif
 int main() {
     using namespace dolly::player_capture;
+#if defined(_WIN32)
+    // Both real producer ABIs preserve every caller-owned output and invoke
+    // the selected original exactly once; a tenth output must never be lost.
+    for (bool updated : {false, true}) {
+        unsigned char flag = 0;
+        std::uint32_t a = 0, b = 0, c = 99;
+        producerCalls = 0;
+        require(forward_producer(legacy_producer, updated ? september_producer : nullptr,
+                                 17, reinterpret_cast<void*>(21), reinterpret_cast<void*>(22),
+                                 reinterpret_cast<void*>(23), reinterpret_cast<void*>(24),
+                                 31, &flag, &a, &b, updated ? &c : nullptr) == 43);
+        require(producerCalls == 1 && flag == 1 && a == 41 && b == 42 && c == (updated ? 44u : 99u));
+    }
+#endif
     using dolly::CaptureImageAdmission;
     using dolly::capture_image_admission;
     // Real Depth05 correction: every advancing rendered image survives even

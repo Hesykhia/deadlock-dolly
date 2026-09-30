@@ -283,6 +283,29 @@ def _merge_module_block(previous: dict, role: str) -> dict:
 
 
 def build_profile(client: Image, engine: Image, tier0: Image, previous: dict, label: str) -> dict:
+    if reviewed_camera_layout(previous.get("client", {})):
+        reviewed = previous["client"]
+        if client.sha256 != reviewed["client_sha256"]:
+            raise ProfileError("Virtual camera wrapper requires a new exact-build review")
+        for role, image, size_key in (("engine", engine, "image_size"),
+                                      ("tier0", tier0, "size_of_image")):
+            block = previous.get(role, {})
+            expected_size = block.get(size_key, "0")
+            expected_size = int(expected_size, 16) if isinstance(expected_size, str) else expected_size
+            if (image is None or image.sha256 != block.get("sha256") or
+                    image.image_size != expected_size):
+                raise ProfileError(f"{role} requires a new exact-build review")
+        for function in reviewed["camera_layout_review"]["functions"].values():
+            start, stop = int(function["rva"], 16), int(function["end_rva"], 16)
+            if hashlib.sha256(client.read(start, stop - start)).hexdigest() != function["sha256"]:
+                raise ProfileError("Reviewed camera function bytes differ")
+        if locate_vtable(client) != int(reviewed["primary_vtable_rva"], 16):
+            raise ProfileError("Reviewed CViewRender RTTI differs")
+        return json.loads(json.dumps(previous)), {
+            "setup_rva": int(reviewed["main_view_setup_rva"], 16),
+            "caller_rva": int(reviewed["view_setup_abi"]["caller_return_rva"], 16),
+            "image": client,
+        }
     setup_rva = locate_setup(client)
     caller_rva = locate_caller(client, setup_rva)
     vtable_rva = locate_vtable(client)
@@ -325,6 +348,12 @@ def build_profile(client: Image, engine: Image, tier0: Image, previous: dict, la
         "aspect_scaling": dict(client_block.get("aspect_scaling", {}),
                                aspect_source_interface_pointer_rva=hex(engine_client_rva)),
     })
+    # Persist the reviewed instruction source while this exact binary exists;
+    # never carry another build's signature through the deep-copy above.
+    signature, signature_mask = build_signature(client, setup_begin)
+    client_block["camera_signature"] = {
+        "client_sha256": client.sha256, "bytes": signature.hex(), "mask": signature_mask.hex(),
+    }
 
     old_setup = int(previous["client"]["main_view_setup_rva"], 16)
     delta = setup_begin - old_setup
@@ -409,6 +438,25 @@ def reviewed_render_fraction(client: dict) -> int:
     return offset
 
 
+def reviewed_camera_layout(client: dict) -> int:
+    """A copied profile must never authorize a changed structure/call chain."""
+    revision = client.get("camera_layout_revision", 0)
+    if revision not in (0, 1):
+        raise ProfileError("Unknown reviewed camera layout revision")
+    if revision and client.get("camera_layout_review", {}).get("client_sha256") != client.get("client_sha256"):
+        raise ProfileError("Camera layout review does not match the client hash")
+    if revision == 1:
+        expected = {"view_setup_this_offset": 0x10, "origin_offset": 0x4a0,
+                    "angles_offset": 0x4b8, "fov_offset": 0x498, "aspect_offset": 0x4d4,
+                    "view_flag_byte_offset": 0x551, "auxiliary_origin_offset": 0x554,
+                    "auxiliary_angles_offset": 0x560, "extra_origin_offset": 0x56c}
+        if any(int(client.get(key, "0"), 16) != value for key, value in expected.items()):
+            raise ProfileError("Camera layout fields differ from the native revision")
+        if not int(client.get("view_setup_delegate_rva", "0"), 16):
+            raise ProfileError("Virtual camera wrapper has no reviewed producer")
+    return revision
+
+
 def emit_header(entries: list[tuple[dict, dict | None]], destination: Path) -> None:
     """Emit the native profile table.
 
@@ -438,14 +486,30 @@ def emit_header(entries: list[tuple[dict, dict | None]], destination: Path) -> N
         "    const unsigned char* signature;",
         "    const unsigned char* signature_mask;",
         "    std::size_t signature_size;",
+        "    unsigned camera_layout_revision;",
+        "    std::uintptr_t view_setup_delegate;",
+        "    unsigned char setup_prologue[32];",
         "};",
         "",
     ]
     signatures: dict[int, tuple[str, str, int]] = {}
     for index, (_profile, resolved) in enumerate(entries):
-        if not resolved:
+        client = _profile["client"]
+        if reviewed_camera_layout(client):
             continue
-        signature, mask = build_signature(resolved["image"], resolved["setup_rva"])
+        saved = client.get("camera_signature", {})
+        if resolved:
+            signature, mask = build_signature(resolved["image"], resolved["setup_rva"])
+        elif saved:
+            if saved.get("client_sha256") != client["client_sha256"]:
+                raise ProfileError("Saved camera signature belongs to a different client")
+            signature, mask = bytes.fromhex(saved["bytes"]), bytes.fromhex(saved["mask"])
+            if len(signature) != 0x120 or len(mask) != len(signature) or any(b not in (0, 1) for b in mask):
+                raise ProfileError("Invalid saved camera signature")
+            if signature[:len(SETUP_PROLOGUE)] != SETUP_PROLOGUE or not all(mask[:len(SETUP_PROLOGUE)]):
+                raise ProfileError("Saved camera signature has an unreviewed prologue")
+        else:
+            continue
         name = f"kSignature{index}"
         lines.append(f"inline const unsigned char {name}[] = {{")
         lines.append("    " + ",".join(f"0x{b:02x}" for b in signature))
@@ -457,16 +521,20 @@ def emit_header(entries: list[tuple[dict, dict | None]], destination: Path) -> N
     rows = []
     for index, (profile, resolved) in enumerate(entries):
         client = profile["client"]
+        if len(bytes.fromhex(client["main_view_setup_prologue_32"])) != 32:
+            raise ProfileError("Camera setup prologue must contain exactly 32 bytes")
         caller = (resolved["caller_rva"] if resolved
                   else int(client["view_setup_abi"]["caller_return_rva"], 16))
         setup = resolved["setup_rva"] if resolved else int(client["main_view_setup_rva"], 16)
         signature, mask, size = signatures.get(index, ("nullptr", "nullptr", 0))
         rows.append(
-            "    { \"%s\", %d, %s, %s, %s, %s, %s, %s, %s, %s, %d }," % (
+            "    { \"%s\", %d, %s, %s, %s, %s, %s, %s, %s, %s, %d, %d, %s, {%s} }," % (
                 client["client_sha256"], client["size_of_image"], hex(setup), hex(caller),
                 client["primary_vtable_rva"], client["globals"]["pointer_rva"],
                 client["aspect_scaling"]["aspect_source_interface_pointer_rva"],
                 hex(reviewed_render_fraction(client)), signature, mask, size,
+                reviewed_camera_layout(client), client.get("view_setup_delegate_rva", "0x0"),
+                ",".join("0x%02x" % b for b in bytes.fromhex(client["main_view_setup_prologue_32"])),
             )
         )
     lines.append("")
@@ -566,8 +634,8 @@ def main(argv: list[str] | None = None) -> int:
     args.game_dir = resolve_game_dir(args.game_dir)
     # Sound signatures are preserved with their reviewed binary identity. Never
     # regenerate them from unreviewed installed RVAs during a client update.
-    from generate_sound_profile import emit_sound_header
-    sound_profile = json.loads((args.profiles_dir / "soundsystem-2026-09-09.json").read_text(encoding="utf-8"))
+    from generate_sound_profile import PROFILE as SOUND_PROFILE, emit_sound_header
+    sound_profile = json.loads((args.profiles_dir / SOUND_PROFILE.name).read_text(encoding="utf-8"))
     emit_sound_header(sound_profile, args.out_sound_header)
 
     if args.header_only:

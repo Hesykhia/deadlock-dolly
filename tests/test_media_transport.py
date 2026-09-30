@@ -99,6 +99,21 @@ class MediaTransportTests(unittest.TestCase):
         self.assertEqual(flagged[6], 1)
         self.assertEqual(plain[6], 0)
 
+    def test_frame_limit_round_trips_without_changing_flags_or_layout(self):
+        self.bridge.start_video("C:\\Videos\\bounded.mp4", max_frames=2,
+                                fixed_step=True, depth=True, depth_exr=True,
+                                shot_only=True, white_clear=True)
+        command = wire.COMMAND.unpack_from(self.bridge._media_mapping)
+        self.assertEqual(command[6], (2 << 16) | 31)
+        self.assertEqual(wire.COMMAND.size, 6192)
+        self.assertEqual(wire.COMMAND.unpack(wire.pack_command(
+            2, 'start_video', path='C:\\ok.mp4'))[6] >> 16, 0)
+        for value in (-1, True, 2.0, '2', 65536):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                wire.pack_command(2, 'start_video', path='C:\\ok.mp4', max_frames=value)
+        with self.assertRaises(ValueError):
+            wire.pack_command(2, 'stop_video', max_frames=2)
+
     def test_depth_flag_uses_reserved_bit_one(self):
         depth = wire.COMMAND.unpack(wire.pack_command(2, "start_video", path="C:\\ok.mp4",
                                                       depth=True))

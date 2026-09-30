@@ -24,6 +24,9 @@ struct CompatResolution {
     std::uintptr_t globals = 0;
     std::uintptr_t engine_client = 0;
     std::uintptr_t render_fraction = 0; // Enabled only by an exact clock-field review.
+    unsigned camera_layout_revision = 0;
+    std::uintptr_t view_setup_delegate = 0;
+    const unsigned char* setup_prologue = kSetupPrologue;
     const char* note = "";
 };
 
@@ -229,6 +232,9 @@ inline CompatResolution resolve_client_profile(HMODULE client, bool allow_signat
         result.globals = profile.globals;
         result.engine_client = profile.engine_client;
         result.render_fraction = profile.render_fraction;
+        result.camera_layout_revision = profile.camera_layout_revision;
+        result.view_setup_delegate = profile.view_setup_delegate;
+        result.setup_prologue = profile.setup_prologue;
         result.note = "exact reviewed hash";
         return result;
     }
@@ -236,7 +242,9 @@ inline CompatResolution resolve_client_profile(HMODULE client, bool allow_signat
         return result;
     for (std::size_t i = 0; i < dolly_compat::kCompatClientProfileCount; ++i) {
         const auto& profile = dolly_compat::kCompatClientProfiles[i];
-        if (!profile.signature || !profile.signature_size)
+        // The September 29 virtual wrapper and moved view fields have only an
+        // exact-build review. Legacy AOB discovery cannot establish that chain.
+        if (profile.camera_layout_revision || !profile.signature || !profile.signature_size)
             continue;
         std::size_t offset = 0;
         const std::size_t matches = dolly::find_pattern(

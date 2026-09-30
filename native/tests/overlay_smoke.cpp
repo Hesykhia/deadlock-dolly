@@ -602,6 +602,18 @@ int main(int argc, char** argv) {
         // Optional graphics diagnostics must stay inside their unused block and
         // fail closed on an unrecognized renderer, without changing camera state.
         std::vector<unsigned char> diagnostic_memory(dolly::kMappingBytes, 0xa5);
+        for (const auto& profile : dolly::kRendererDiagnosticLayouts) {
+            require(dolly::renderer_diagnostic_layout(profile.hash, profile.image_size,
+                                                       profile.timestamp) == &profile,
+                    "Reviewed renderer diagnostic layout did not resolve");
+            require(!dolly::renderer_diagnostic_layout(profile.hash, profile.image_size + 1,
+                                                        profile.timestamp) &&
+                        !dolly::renderer_diagnostic_layout(profile.hash, profile.image_size,
+                                                           profile.timestamp + 1) &&
+                        !dolly::renderer_diagnostic_layout("unknown", profile.image_size,
+                                                           profile.timestamp),
+                    "Renderer diagnostic layout accepted changed identity metadata");
+        }
         dolly::renderer_diagnostics_probe(0, "");
         dolly::renderer_diagnostics_tick(diagnostic_memory.data());
         dolly::RendererDiagnostics diagnostic{};

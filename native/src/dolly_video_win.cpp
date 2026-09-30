@@ -112,6 +112,7 @@ struct Session {
     bool depth_exr = false;
     bool shot_only = false;
     bool white_clear = false;
+    std::uint32_t max_frames = 0;
     // Depth layer folder and its ProRes master, derived from the color path's
     // parent when depth is enabled: <color parent>\depth\depth.mov.
     std::wstring depth_directory, depth_video_path;
@@ -1100,7 +1101,11 @@ void encode(std::shared_ptr<Session> s) noexcept {
             const auto last = s->stop_qpc.load(std::memory_order_acquire);
             const auto elapsed =
                 last > first ? clock_units(last - first, s->frequency, 10000000) : 0;
-            const auto end = final_sample_end(previous_pts, s->fixed_step ? s->fps : 0, elapsed);
+            // A hard cap closes admission at the last copy, so wall-time stop
+            // can coincide with that sample's PTS. Give it a full nominal
+            // duration rather than a sub-tick duration the MP4 muxer rounds to0.
+            const auto end = final_sample_end(
+                previous_pts, (s->fixed_step || s->max_frames) ? s->fps : 0, elapsed);
             HRESULT hr =
                 write_sample(*s, writer.p, stream, previous.p, previous_pts, end, previous_stamp);
             if (SUCCEEDED(hr))
@@ -1229,7 +1234,7 @@ bool start(const Options& options) noexcept {
         if (!path || !*path || std::wcslen(path) > 1023 ||
             (options.fps != 30 && options.fps != 60 && options.fps != 120 && options.fps != 300 &&
              options.fps != 600) ||
-            options.bitrate < 1000000 || options.bitrate > 100000000)
+            options.bitrate < 1000000 || options.bitrate > 100000000 || options.max_frames > 65535)
             return false;
         // Refuse relative paths and URLs. The picker passes an absolute local
         // or UNC destination. FFmpeg lossless output uses Matroska (.mkv).
@@ -1270,6 +1275,7 @@ bool start(const Options& options) noexcept {
         next->depth_exr = options.depth_exr;
         next->shot_only = options.shot_only;
         next->white_clear = options.white_clear;
+        next->max_frames = options.max_frames;
         if (options.ffmpeg)
             next->ffmpeg = options.ffmpeg;
         if (next->depth_enabled) {
@@ -1578,6 +1584,12 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
     }
     if (s.stopping.load(std::memory_order_acquire))
         return;
+    // Count admissions, not asynchronously written frames. Drain previous
+    // copies above, but never enqueue color OR depth beyond the same hard cap.
+    if (!frame_admission_open(s.capture_submitted.load(std::memory_order_relaxed), s.max_frames)) {
+        request_stop(s, false);
+        return;
+    }
     // Admission applies only to new copies. Even a paused/clamped endpoint
     // must drain the copy submitted on the preceding Present before returning.
     if ((s.depth_enabled || s.shot_only) && (!std::isfinite(replay_time) || replay_time < 0)) {
@@ -1706,8 +1718,12 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
     slot.stamp = {replay_time, native_clock};
     slot.pts = pts;
     ++gpu.submitted;
-    s.capture_submitted.fetch_add(1, std::memory_order_relaxed);
+    const auto admitted = s.capture_submitted.fetch_add(1, std::memory_order_relaxed) + 1;
     s.gpu_pending.store(gpu.submitted - gpu.drained, std::memory_order_release);
+    // Publish the last pending copy BEFORE asking the encoder to finalize.
+    // Later Presents provide completion-only drain; no extra copy is admitted.
+    if (!frame_admission_open(admitted, s.max_frames))
+        request_stop(s, false);
 }
 void reset_resources() noexcept {
     if (gpu.owner && !gpu.owner->done.load(std::memory_order_acquire) &&

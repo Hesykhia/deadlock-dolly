@@ -1,10 +1,11 @@
 {
   "format": 1,
-  "description": "Editing configuration supplied and used by Andrew; reviewed September 25, 2026. Refresh with a matching editing gameinfo after a game update.",
-  "gameinfo_sha256": "610c0d1e6a132e841636ec76e13fec517a3a1bb351eb444bc960ea20bd586353",
+  "description": "Version6722 hotfix baseline: installed gameinfo is unchanged from the reviewed September 29 configuration; established editing mounts, addon enablement and sampleable depth are preserved. Client compatibility reviewed offline; hotfix live validation and export checks ongoing.",
+  "gameinfo_sha256": "07d709c11030bfd64bdc7c1e6f3cfdf8167cbf2c8266e544caaf76525f79000e",
   "modules": {
-    "citadel/bin/win64/client.dll": "cb831d124403ee2f3afa54981e69d8acf71251ba1129d0733757251f74a157c2",
-    "bin/win64/engine2.dll": "301d042c7443090241d7b83244747bf8a32916f61df60aea5d8a1799f432ef8d",
-    "bin/win64/tier0.dll": "b3192eac3cb8c54ac3f9c7aaf7c725ddfcc2dc46d99ba13d16177b6ebf736ebc"
-  }
+    "citadel/bin/win64/client.dll": "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc",
+    "bin/win64/engine2.dll": "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4",
+    "bin/win64/tier0.dll": "493bf3ca610bac0eec1369d19aa67f4c279c6ae1c8f1243b3bad0974c6a8db82"
+  },
+  "unlocker_server_sha256": "d8039b48395c79a5332939bfa25038732b14ab6fce541eefebb82f05c4a9abe0"
 }

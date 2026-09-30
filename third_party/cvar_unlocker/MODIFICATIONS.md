@@ -14,6 +14,13 @@ already invalidated, producing an access violation on normal game exit.
 
 ## Changes
 
+- `unlocker-build-6722.patch` (apply after the 6712 patch): retain the exact
+  ICvar adapter and add the reviewed hotfix server hash/config vtable tuple.
+  Version6722 preserves the Connect/Disconnect this-8 thunk ABI and float tick
+  interval method. Unknown server hashes still refuse before registration.
+  Dolly also checks the editing profile's server fingerprint before mounting,
+  so a future server-only update produces a launcher error before game startup.
+
 - `unlocker-shutdown.patch` (upstream commit
   `505547d58e4b66001406a8fa618548364f7cdb4d`): track a successful `Connect`,
   avoid registering after a failed one, hook the server-config `Disconnect` to
@@ -25,17 +32,55 @@ already invalidated, producing an access violation on normal game exit.
   the pointed-to interface storage instead of overwriting its own bookkeeping
   pointer.
 
-No cvar definitions, game offsets, camera behavior, rendering or assertion
-handling are changed. The plugin still performs the same cvar unhiding through
-the same official mechanism.
+- `unlocker-build-6712.patch` (apply after the source shutdown patch): adapt the
+  pinned SDK to Deadlock build 6712's changed ICvar layout. Only the unlocker
+  DLL's own interface pointers use the adapter; the engine's ICvar object and
+  vtable remain intact. Exact tier0 and server hashes, the server-config vtable,
+  and the used ICvar target addresses must match before registration. The
+  existing reviewed legacy tier0 builds retain their original SDK path.
+- The same patch removes a mandatory import of the deleted optional
+  `g_bUpdateStringTokenDatabase` export. Legacy builds resolve their original
+  flag by name; the reviewed new build disables that optional debug database
+  tracking. Token hashing and cvar definitions are unchanged.
+- Preserve the owned-command shutdown fix and secure-mode rejection; reject
+  unknown layouts, clean up after adapter failure, avoid hooking repeated
+  requests for the same server-config object, and protect the exact vtable
+  slot address when installing the existing config hooks.
+
+The plugin retains the same cvar unhiding operation. Camera and rendering
+behavior are unchanged. Static layout facts are deliberately tied to the
+reviewed module hashes; they are not a general compatibility fallback.
 
 ## Build
 
 Built from the patched sources with MSVC 19.38.33134.0, x64 Release, static
-CRT, C++20, against the pinned SDK commit above. The result is pinned by
+CRT, C++20, with MASM for the adapter tail transfers, against the pinned SDK
+commit above. The result is pinned by
 SHA-256 in `THIRD_PARTY.json` and verified by the launcher and native bridge
 before use. The unmodified upstream release binary hash is recorded there for
 provenance.
+
+Apply `unlocker-shutdown.patch` to the pinned upstream source and
+`sdk-disconnect.patch` to its pinned SDK first, then apply
+`unlocker-build-6712.patch` at the source root. The latter includes `CMakeLists.txt`
+and offline tests. With the SDK at `sdk/`:
+
+```text
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release --parallel 1
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The resulting `build/Release/unlocker_shutdown_candidate.dll` is bundled as
+`bin/win64/server.dll`. Compiler/linker output is validated before the manifest
+and launcher/native hash pins are updated; never change pins to accept an
+unreviewed binary.
+
+Offline build, actual assembled adapter ABI tests, synthetic shutdown/lifecycle
+tests and an installed-file PE import/export audit passed for this candidate.
+Build 6712 startup, command registration and game shutdown remain pending a
+bounded Dolly-owned replay test. No live compatibility claim follows from the
+offline results.
 
 ## License
 

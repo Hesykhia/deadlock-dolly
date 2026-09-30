@@ -9,11 +9,8 @@
 #include "dolly_render_class.hpp"
 namespace dolly {
 namespace {
-constexpr std::uintptr_t kSystemPointer = 0x430010, kSystemObject = 0x492410;
-constexpr std::uintptr_t kQueueOffset = 0x201c8, kRetirementContext = 0x40,
-                         kExecutionContext = 0x1edd8;
-constexpr std::uintptr_t kBufferTable = 0x3f79f0;
-constexpr std::uint32_t kTimestamp = 0x6aa18aa8;
+constexpr std::uintptr_t kRetirementContext = 0x40;
+const RendererDiagnosticLayout* layout = nullptr;
 std::uintptr_t renderer = 0;
 bool verified = false;
 char observed_hash[65]{};
@@ -55,8 +52,9 @@ bool headers(std::uintptr_t base, IMAGE_NT_HEADERS64& nt) noexcept {
 }
 bool frame_at(std::uintptr_t system, std::uintptr_t offset, std::uint32_t& frame) noexcept {
     std::uintptr_t context = 0, table = 0;
-    return read(system + offset, context) && read(context, table) && table >= renderer + 0x1e6000 &&
-           table < renderer + 0x426000 && read(context + 0x10, frame);
+    return layout && read(system + offset, context) && read(context, table) &&
+           table >= renderer + layout->table_begin && table < renderer + layout->table_end &&
+           read(context + 0x10, frame);
 }
 bool node_sample(const QueueHeader& header, std::uint16_t index, QueueNode& node,
                  std::uint32_t& stamp) noexcept {
@@ -64,7 +62,7 @@ bool node_sample(const QueueHeader& header, std::uint16_t index, QueueNode& node
         return false;
     std::uintptr_t table = 0;
     return read(std::uintptr_t(header.storage) + std::uintptr_t(index) * sizeof(QueueNode), node) &&
-           read(std::uintptr_t(node.buffer), table) && table == renderer + kBufferTable &&
+           read(std::uintptr_t(node.buffer), table) && layout && table == renderer + layout->buffer_table &&
            read(std::uintptr_t(node.buffer) + 8, stamp);
 }
 bool node_unchanged(const QueueHeader& header, std::uint16_t index,
@@ -94,7 +92,7 @@ void sample_queue(RendererDiagnostics& result) noexcept {
         finish(RendererProbeState::Waiting, "Waiting for the DirectX 11 renderer module.");
         return;
     }
-    if (!verified) {
+    if (!verified || !layout) {
         finish(
             RendererProbeState::Unsupported,
             "Renderer fingerprint is not covered by this optional read-only probe. Camera support is unchanged.");
@@ -102,16 +100,16 @@ void sample_queue(RendererDiagnostics& result) noexcept {
     }
     IMAGE_NT_HEADERS64 nt{};
     if (reinterpret_cast<std::uintptr_t>(GetModuleHandleW(L"rendersystemdx11.dll")) != renderer ||
-        !headers(renderer, nt) || nt.FileHeader.TimeDateStamp != kTimestamp ||
-        nt.OptionalHeader.SizeOfImage != kRendererDiagnosticsImageSize) {
+        !headers(renderer, nt) || nt.FileHeader.TimeDateStamp != layout->timestamp ||
+        nt.OptionalHeader.SizeOfImage != layout->image_size) {
         finish(RendererProbeState::Unreadable,
                "Renderer module changed or became unavailable; private diagnostic reads stopped.");
         return;
     }
     std::uintptr_t system = 0;
     QueueHeader before{}, after{};
-    if (!read(renderer + kSystemPointer, system) || system != renderer + kSystemObject ||
-        !read(system + kQueueOffset, before)) {
+    if (!read(renderer + layout->system_pointer, system) || system != renderer + layout->system_object ||
+        !read(system + layout->queue, before)) {
         finish(RendererProbeState::Unreadable, "Renderer queue header is unavailable.");
         return;
     }
@@ -140,7 +138,7 @@ void sample_queue(RendererDiagnostics& result) noexcept {
     overlay_set_renderer_pressure(pressure);
     if (frame_at(system, kRetirementContext, result.retirement_frame))
         result.flags |= 4;
-    if (frame_at(system, kExecutionContext, result.execution_frame))
+    if (frame_at(system, layout->execution_context, result.execution_frame))
         result.flags |= 8;
     QueueNode head{}, tail{};
     const bool head_ok =
@@ -154,7 +152,7 @@ void sample_queue(RendererDiagnostics& result) noexcept {
     // At most two nodes are observed; never traverse the engine's large queue
     // or acquire its lock. Equality is a best-effort consistency check, not a
     // guarantee of atomicity across separate renderer threads or reused slots.
-    const bool stable = read(system + kQueueOffset, after) &&
+    const bool stable = read(system + layout->queue, after) &&
                         std::memcmp(&before, &after, sizeof(before)) == 0 &&
                         (!head_ok || node_unchanged(before, before.head, head)) &&
                         (!tail_ok || node_unchanged(before, before.tail, tail));
@@ -175,14 +173,14 @@ void sample_queue(RendererDiagnostics& result) noexcept {
 void renderer_diagnostics_probe(std::uintptr_t module, const char* sha256) noexcept {
     renderer = module;
     verified = false;
+    layout = nullptr;
     image_size = 0;
     std::snprintf(observed_hash, sizeof(observed_hash), "%s", sha256 ? sha256 : "");
     IMAGE_NT_HEADERS64 nt{};
     if (module && headers(module, nt)) {
         image_size = nt.OptionalHeader.SizeOfImage;
-        verified = image_size == kRendererDiagnosticsImageSize &&
-                   nt.FileHeader.TimeDateStamp == kTimestamp &&
-                   std::strcmp(observed_hash, kRendererDiagnosticsHash) == 0;
+        layout = renderer_diagnostic_layout(observed_hash, image_size, nt.FileHeader.TimeDateStamp);
+        verified = layout != nullptr;
     }
 }
 void renderer_diagnostics_tick(unsigned char* memory) noexcept {

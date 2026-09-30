@@ -57,6 +57,7 @@ class LayerModeTests(unittest.TestCase):
     def test_world_mode_shows_world_classes_and_hides_characters_effects_and_ui(self):
         applied = self.controller.apply_layer_mode("world")
         world_keep = set(Controller.LAYER_MODES["world"]["keep"])
+        world_keep.update(Controller.LAYER_MODES["world"]["optional_keep"])
         # World keeps the world/light/geometry classes and hides everything else
         # (characters, effects and any class not in the keep-list).
         self.assertEqual(sorted(applied["hidden"]),
@@ -93,6 +94,21 @@ class LayerModeTests(unittest.TestCase):
         self.classes = tuple(name for name in CLASSES if name != "AggregateDesc")
         with self.assertRaisesRegex(RuntimeError, "AggregateDesc"):
             self.controller.apply_layer_mode("world")
+
+    def test_current_registry_without_legacy_world_classes_is_supported(self):
+        self.classes = tuple(name for name in CLASSES
+                             if name not in ('DirectionalLight', 'projectedDecal')) + ('ShadowDecal',)
+        applied = self.controller.apply_layer_mode('world')
+        self.assertIn('SkinnedObject', applied['hidden'])
+        self.assertIn('ShadowDecal', applied['hidden'])
+        self.assertNotIn('AggregateDesc', applied['hidden'])
+        self.controller.reset_layer_modes()
+        self.assertFalse(self.controller._layer_hidden)
+
+    def test_present_legacy_world_classes_remain_visible(self):
+        self.controller.apply_layer_mode('world')
+        self.assertNotIn('sc_setclassflags DirectionalLight 8', self.commands)
+        self.assertNotIn('sc_setclassflags projectedDecal 8', self.commands)
 
     def test_unknown_registry_class_is_hidden_by_default(self):
         # A dynamic registry can add classes; the keep-list hides them so they

@@ -64,5 +64,7 @@
       "displacement": 3,
       "size": 7
     }
-  ]
+  ],
+  "parameter_volume_offset": 36,
+  "parameter_rate_offset": 48
 }

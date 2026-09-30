@@ -630,7 +630,9 @@ class DollyApp:
                                    speed=float(self.video_export_speed.get()),
                                    depth=bool(self.video_depth.get()),
                                    depth_exr=bool(self.video_depth_exr.get()),
-                                   layers=layers, shot_only=pov or bone_project is not None).validated()
+                                   layers=layers, shot_only=pov or bone_project is not None,
+                                   bundle_audio=bool(self.video_game_audio.get() or
+                                                     self.video_reconstructed_audio.get())).validated()
             if "players" in options.layers:
                 self._player_layer_frames(options, project=bone_project)
         except (ValueError, KeyError, OSError, RuntimeError) as exc:
@@ -669,8 +671,6 @@ class DollyApp:
             focus_window(game_pid())
         game_audio = self.video_game_audio.get()
         reconstructed = self.video_reconstructed_audio.get()
-        if game_audio or reconstructed:
-            options = replace(options, bundle_audio=True)
         def start():
             audio = None
             if game_audio or reconstructed:
@@ -2740,6 +2740,7 @@ class DollyApp:
                 "not_launched": "Game not launched",
                 "waiting_hideout": "Waiting for hideout",
                 "waiting_preload_intro": "Preparing Deadlock intro",
+                "waiting_replay_camera": "Waiting for replay intro camera",
                 "preloading": "Preloading map and shaders",
                 "preload_ready": "Preload complete — opening replay",
                 "waiting_console": "Connecting to Deadlock",

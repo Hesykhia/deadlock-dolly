@@ -20,8 +20,12 @@ additional redistribution rights are asserted here.
 
 ## Editing game configuration
 
-`editing/gameinfo.gi` is Andrew's supplied editing baseline, byte-identical to
-the installed configuration used for the September 20, 2026 review. It is game
+`editing/gameinfo.gi` carries the September 29, 2026 game-specific configuration
+with the established editing mounts, addon enablement and sampleable-depth
+setting retained from Andrew's supplied editing baseline. Its settings paths,
+render modes and engine/resource defaults were refreshed together; competitive
+presets were not copied from older session backups. Updated-game replay startup
+and camera controls passed bounded live tests; export validation is ongoing. It is game
 configuration data, not Dolly source code; the Dolly license does not confer
 rights to Valve content. `editing/profile.json` pins its exact bytes and the
 three installed module hashes. Refresh the configuration and pins together

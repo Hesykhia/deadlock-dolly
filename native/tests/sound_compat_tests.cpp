@@ -11,14 +11,15 @@ static void check(bool value) {
 }
 
 struct Fixture {
+    const Profile& profile;
     std::vector<unsigned char> text;
     std::uint32_t text_rva = 0x20000, data_rva = 0x1000, data_size = 0x1000;
     std::size_t offsets[5]{};
-    Fixture(bool exact = false) {
+    Fixture(bool exact = false, const Profile& selected = kProfiles[0]) : profile(selected) {
         text.resize(exact ? 0x200000 : 0x2000, 0xcc);
-        if (exact) { text_rva = 0x1000; data_rva = kVoiceTable & ~0xfff; }
+        if (exact) { text_rva = 0x1000; data_rva = profile.voice_table & ~0xfff; }
         for (std::size_t i = 0; i < 5; ++i) {
-            const auto& s = kSignatures[i];
+            const auto& s = profile.signatures[i];
             offsets[i] = exact ? s.reviewed_rva - text_rva : 0x100 + i * 0x300;
             std::memcpy(text.data() + offsets[i], s.bytes, s.size);
             if (!exact) {
@@ -26,22 +27,50 @@ struct Fixture {
                     if (!s.mask[j]) text[offsets[i] + j] ^= 0xa5;
             }
         }
-        for (const auto& ref : kTableReferences) {
+        for (std::size_t i = 0; i < profile.reference_count; ++i) {
+            const auto& ref = profile.references[i];
             const auto at = offsets[ref.symbol] + ref.offset;
             const std::int32_t displacement = static_cast<std::int32_t>(
-                std::int64_t(exact ? kVoiceTable : data_rva + 0x80) - (text_rva + at + ref.size));
+                std::int64_t(exact ? profile.voice_table : data_rva + 0x80) - (text_rva + at + ref.size));
             std::memcpy(text.data() + at + ref.displacement, &displacement, 4);
         }
     }
     bool run(Resolution& out, bool exact = false) {
         return resolve(text.data(), text.size(), text_rva, data_rva, data_size,
-                       kSignatures, 5, kTableReferences, std::size(kTableReferences),
-                       exact, kVoiceTable, out);
+                       profile.signatures, profile.signature_count, profile.references,
+                       profile.reference_count, exact, profile.voice_table, out);
     }
 };
 
 int main(int argc, char** argv) {
     Resolution out{};
+    check(kProfiles[0].parameter_volume_offset == 0x20 && kProfiles[0].parameter_rate_offset == 0x2c);
+    check(kProfiles[1].parameter_volume_offset == 0x24 && kProfiles[1].parameter_rate_offset == 0x30);
+    for (const auto& p : kProfiles) {
+        for (bool mode : {false, true}) {
+            Fixture f(mode, p);
+            check(resolve_profiles(f.text.data(), f.text.size(), f.text_rva, f.data_rva,
+                                   f.data_size, p.image_size, kProfiles, std::size(kProfiles),
+                                   mode, out));
+            check(out.voice_map_offset == p.voice_map_offset);
+            check(out.parameter_volume_offset == p.parameter_volume_offset);
+            check(out.parameter_rate_offset == p.parameter_rate_offset);
+            check(out.voice_table == (mode ? p.voice_table : f.data_rva + 0x80));
+            const Profile ambiguous[] = {p, p};
+            check(!resolve_profiles(f.text.data(), f.text.size(), f.text_rva, f.data_rva,
+                                    f.data_size, p.image_size, ambiguous, 2, mode, out));
+            check(out.voice_table == 0 && out.voice_map_offset == 0);
+            check(out.parameter_volume_offset == 0 && out.parameter_rate_offset == 0);
+            Profile missing = p;
+            missing.parameter_volume_offset = 0;
+            check(!resolve_profiles(f.text.data(), f.text.size(), f.text_rva, f.data_rva,
+                                    f.data_size, p.image_size, &missing, 1, mode, out));
+            missing = p;
+            missing.parameter_rate_offset = 0;
+            check(!resolve_profiles(f.text.data(), f.text.size(), f.text_rva, f.data_rva,
+                                    f.data_size, p.image_size, &missing, 1, mode, out));
+        }
+    }
     Fixture exact(true);
     check(exact.run(out, true) && out.voice_table == kVoiceTable);
     check(exact.run(out));
@@ -79,7 +108,10 @@ int main(int argc, char** argv) {
 
     // Optional offline .text snapshot (four uint32 fields then section bytes).
     // No DLL is loaded or executed. Generated locally from the reviewed PE.
-    if (argc == 2) {
+    if (argc >= 2) {
+        const auto index = argc == 3 ? std::strtoul(argv[2], nullptr, 10) : 0;
+        check(index < std::size(kProfiles));
+        const auto& profile = kProfiles[index];
         std::ifstream stream(argv[1], std::ios::binary);
         check(bool(stream));
         std::uint32_t header[4]{};
@@ -87,12 +119,14 @@ int main(int argc, char** argv) {
         std::vector<unsigned char> text((std::istreambuf_iterator<char>(stream)), {});
         check(text.size() == header[1]);
         for (bool mode : {false, true}) {
-            check(resolve(text.data(), text.size(), header[0], header[2], header[3],
-                          kSignatures, 5, kTableReferences, std::size(kTableReferences),
-                          mode, kVoiceTable, out));
-            check(out.voice_table == kVoiceTable);
+            check(resolve_profiles(text.data(), text.size(), header[0], header[2], header[3],
+                                   profile.image_size, kProfiles, std::size(kProfiles), mode, out));
+            check(out.voice_table == profile.voice_table);
+            check(out.voice_map_offset == profile.voice_map_offset);
+            check(out.parameter_volume_offset == profile.parameter_volume_offset);
+            check(out.parameter_rate_offset == profile.parameter_rate_offset);
             for (std::size_t i = 0; i < 5; ++i)
-                check(out.functions[i] == kSignatures[i].reviewed_rva);
+                check(out.functions[i] == profile.signatures[i].reviewed_rva);
         }
     }
     std::puts("sound compatibility tests passed");

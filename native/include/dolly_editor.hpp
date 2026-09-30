@@ -109,7 +109,10 @@ enum class EditorAction : std::uint32_t {
     SetConfettiDespawnOnGround,
     OpenBonePicker,
     CancelBonePicker,
-    FinishBonePicker
+    FinishBonePicker,
+    StartGameFollow,
+    StopGameFollow,
+    SetReplayHud
 };
 static_assert(static_cast<std::uint32_t>(EditorAction::ResetCameraPath) == 77,
               "Stable camera reset action ID");
@@ -266,7 +269,16 @@ struct EditorBones {
     std::uint32_t count, total;
     char names[kEditorBoneCount][64];
 };
+constexpr std::size_t kEditorFollowOffset = 2 * 1024 * 1024 + 23040;
+struct EditorFollowConfig {
+    char magic[8];
+    std::uint32_t sequence, abi, flags, reserved;
+    double distance, shoulder, height;
+};
 #pragma pack(pop)
+static_assert(sizeof(EditorFollowConfig) == 48, "Python Follow config layout");
+static_assert(kEditorFollowOffset + sizeof(EditorFollowConfig) <= 2 * 1024 * 1024 + 24576,
+              "Follow config fits the mapping");
 static_assert(sizeof(EditorDofConfig) == 112, "Python optional DOF config layout");
 static_assert(sizeof(EditorCitadelDofConfig) == 40, "Python optional Citadel DOF config layout");
 static_assert(sizeof(EditorAttachConfig) == 228, "Python optional attach config layout");
@@ -337,6 +349,8 @@ struct EditorSnapshot {
     double citadel_dof_sensor = 1.0, citadel_dof_focus = 200.0;
     bool confetti_enabled = false, confetti_despawn_on_ground = false;
     double confetti_spawn_height = 250.0;
+    bool follow_available = false, follow_active = false, follow_pending = false, replay_show_hud = false;
+    double follow_distance = 135, follow_shoulder = 34, follow_height = 0;
     bool attach_available = false, attach_selected = false, attach_hide = true;
     bool attach_auto_clearance = false;
     bool attach_preview = false, bone_picker = false;
@@ -352,6 +366,7 @@ EditorSnapshot editor_snapshot() noexcept;
 EditorBinding editor_binding_snapshot(EditorAction action) noexcept;
 // Published attach-camera schema offsets; false while no valid block arrived.
 bool editor_attach_config(EditorAttachConfig& out) noexcept;
+bool editor_follow_config(EditorFollowConfig& out) noexcept;
 bool editor_bones_snapshot(EditorBones& out) noexcept;
 // Latest native player roster; false while no valid block arrived.
 bool editor_roster_snapshot(EditorRoster& out) noexcept;

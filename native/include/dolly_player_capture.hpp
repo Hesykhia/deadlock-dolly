@@ -9,7 +9,18 @@ struct D3D11_BOX;
 namespace dolly::player_capture {
 using Producer = int(__fastcall*)(std::uintptr_t, void*, void*, void*, void*, std::uint32_t,
                                   unsigned char*, std::uint32_t*, std::uint32_t*);
-void configure(std::uintptr_t scene, bool hashes_ok) noexcept;
+using ProducerSeptember = int(__fastcall*)(std::uintptr_t, void*, void*, void*, void*, std::uint32_t,
+                                  unsigned char*, std::uint32_t*, std::uint32_t*, std::uint32_t*);
+// Preserve the tenth caller-owned output added in build 6712. Each ABI has its
+// own entry hook; forwarding never reads a nonexistent legacy stack argument.
+inline int forward_producer(Producer legacy, ProducerSeptember september, std::uintptr_t a,
+                           void* object, void* mesh, void* opaque, void* params, std::uint32_t mode,
+                           unsigned char* flag, std::uint32_t* outA, std::uint32_t* outB,
+                           std::uint32_t* outC) {
+    return september ? september(a, object, mesh, opaque, params, mode, flag, outA, outB, outC)
+                     : legacy(a, object, mesh, opaque, params, mode, flag, outA, outB);
+}
+void configure(std::uintptr_t scene, bool hashes_ok, bool september = false) noexcept;
 void tick() noexcept;
 // Optional read-only observer at the reviewed mesh producer. Installation is
 // requested through the existing overlay worker, never from the view callback.

@@ -37,6 +37,15 @@ class AutoStartupTests(unittest.TestCase):
         self.preload.identity = {"method": "test_preload"}
         self.preload.sample.return_value = {"coherent": True, "started": True,
                                             "completed": 14, "total": 14, "ready": True}
+        camera_patch = patch('dolly.controller.ReplayCameraMonitor')
+        self.camera_monitor = camera_patch.start().return_value
+        self.addCleanup(camera_patch.stop)
+        self.camera_monitor.identity = {'method': 'test_camera_handoff'}
+        def camera_sample():
+            self.assertGreaterEqual(self.console.tick, 2)
+            self.console.tick += 1  # Natural replay progress while startup waits.
+            return {'coherent': True, 'ready': True}
+        self.camera_monitor.sample.side_effect = camera_sample
 
     def start(self, **kwargs):
         with patch("dolly.controller.launcher.launch", return_value=self.session), \
@@ -264,6 +273,16 @@ class AutoStartupTests(unittest.TestCase):
         self.assertIn("9-21Routers2.dem", message)
         self.assertIn("game build 10725", message)
 
+    def test_exit_before_console_does_not_blame_replay_reconstruction(self):
+        self.controller._session=self.session
+        self.session.process=SimpleNamespace(poll=lambda:1)
+        self.controller._replay_requested=False
+        with self.assertRaises(RuntimeError) as caught:
+            self.controller._startup_wait(lambda:None,"waiting for the game console",None)
+        message=str(caught.exception)
+        self.assertIn("before the selected replay was loaded",message)
+        self.assertNotIn("incompatible",message)
+
     def test_clean_close_during_startup_keeps_the_short_message(self):
         self.controller._session = self.session
         self.session.process = SimpleNamespace(poll=lambda: 0)
@@ -283,7 +302,7 @@ class AutoStartupTests(unittest.TestCase):
         self.console.request = observe_pause
         result = self.start()
         self.assertEqual(result["startup_stage"], "editing_ready")
-        self.assertEqual(pause_ticks[0], 2)
+        self.assertGreaterEqual(pause_ticks[0], 2)
         self.assertTrue(all(tick >= 2 for tick in pause_ticks))
         self.assertGreater(self.bridge.frames, 0)
 
@@ -309,6 +328,39 @@ class AutoStartupTests(unittest.TestCase):
         self.assertNotIn("native.flight", self.console.events)
         self.assertFalse(any(command.startswith("demo_gototick ")
                              for command in self.console.events))
+
+    def test_intro_camera_waits_before_pausing_and_arming(self):
+        answers = iter([{'coherent': True, 'ready': False},
+                        {'coherent': False, 'ready': False},
+                        {'coherent': True, 'ready': True},
+                        {'coherent': True, 'ready': True}])
+        def sample():
+            self.assertNotIn('demo_pause', self.console.events)
+            self.assertNotIn('native.flight', self.console.events)
+            return next(answers)
+        self.camera_monitor.sample.side_effect = sample
+        self.start()
+        self.assertEqual(self.camera_monitor.sample.call_count, 4)
+        self.camera_monitor.close.assert_called_once()
+
+    def test_cancel_intro_wait_never_pauses_or_arms(self):
+        cancelled = threading.Event()
+        def sample():
+            cancelled.set()
+            return {'coherent': True, 'ready': False}
+        self.camera_monitor.sample.side_effect = sample
+        with self.assertRaisesRegex(RuntimeError, 'cancelled'):
+            self.start(cancel_event=cancelled)
+        self.assertNotIn('demo_pause', self.console.events)
+        self.assertNotIn('native.flight', self.console.events)
+        self.camera_monitor.close.assert_called_once()
+
+    def test_camera_read_failure_closes_monitor_without_pausing(self):
+        self.camera_monitor.sample.side_effect = RuntimeError('changed camera build')
+        with self.assertRaisesRegex(RuntimeError, 'changed camera build'):
+            self.start()
+        self.assertNotIn('demo_pause', self.console.events)
+        self.camera_monitor.close.assert_called_once()
 
     def test_one_click_accepts_dotted_recording_without_reported_dem_suffix(self):
         self.demo = self.demo.with_name("practice.session.01.dem")

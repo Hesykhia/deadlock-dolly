@@ -38,8 +38,12 @@ dolly/bootstrap.py
 dolly/branding.py
 dolly/compatibility.py
 dolly/preload.py
+dolly/replay_camera.py
 dolly/console.py
 dolly/controller.py
+dolly/follow_camera.py
+dolly/follow_capabilities.py
+dolly/follow_target.py
 dolly/curve.py
 dolly/desktop.py
 dolly/dialogs.py
@@ -168,6 +172,7 @@ tests/test_aspect_controller.py
 tests/test_aspect_path.py
 tests/test_auto_startup.py
 tests/test_preload.py
+tests/test_replay_camera.py
 tests/test_ui_theme.py
 tests/test_bindings.py
 tests/test_bootstrap.py
@@ -177,6 +182,10 @@ tests/test_compatibility.py
 tests/test_dialogs.py
 tests/test_console.py
 tests/test_controller.py
+tests/test_follow_camera.py
+tests/test_follow_capabilities.py
+tests/test_follow_target.py
+tests/test_follow_controller.py
 tests/test_pov_export.py
 tests/test_curve.py
 tests/test_editor_bridge.py
@@ -189,6 +198,7 @@ tests/test_gui_capture.py
 tests/test_hotkey.py
 tests/test_launcher.py
 tests/test_layer_modes.py
+tests/test_clip_audio.py
 tests/test_memory_watch.py
 tests/test_motion_clock.py
 tests/test_native_atomics.py
@@ -230,6 +240,7 @@ third_party/cvar_unlocker/THIRD_PARTY.json
 third_party/cvar_unlocker/bin/win64/server.dll
 third_party/cvar_unlocker/sdk-disconnect.patch
 third_party/cvar_unlocker/unlocker-shutdown.patch
+third_party/cvar_unlocker/unlocker-build-6712.patch
 third_party/notices/CS2RemoteConsole-MIT.txt
 third_party/notices/RUNTIME_NOTICES.md
 third_party/notices/VConsoleLib-python-MIT.txt
@@ -420,3 +431,12 @@ native/profiles/soundsystem-2026-09-09.json
 native/tests/sound_compat_tests.cpp
 tools/generate_sound_profile.py
 tests/test_sound_profile.py
+native/profiles/deadlock-2026-09-29-complete.json
+native/profiles/deadlock-2026-09-29-hotfix-complete.json
+native/include/dolly_follow_anchor.hpp
+native/src/native_follow_anchor_win.hpp
+native/src/dolly_follow_anchor_generated.hpp
+native/tests/follow_anchor_tests.cpp
+third_party/cvar_unlocker/unlocker-build-6722.patch
+native/profiles/scenesystem-2026-09-29.json
+native/profiles/soundsystem-2026-09-29.json
