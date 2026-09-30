@@ -4,7 +4,25 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from dolly.clip_audio import _ffmpeg
+from dolly.clip_audio import _ffmpeg, _sample_window
+
+
+class AudioWindowTests(unittest.TestCase):
+    def test_complete_window_uses_exact_sample_bounds(self):
+        self.assertEqual(_sample_window(.5, 3, 168000), (24000, 144000))
+
+    def test_missing_beginning_is_not_clamped_into_a_delayed_track(self):
+        with self.assertRaisesRegex(RuntimeError, 'complete video window'):
+            _sample_window(-.02, 3, 200000)
+
+    def test_missing_tail_is_not_silently_muxed_with_shortest(self):
+        with self.assertRaisesRegex(RuntimeError, 'complete video window'):
+            _sample_window(.5, 3, 167999)
+
+    def test_invalid_or_empty_timing_is_rejected(self):
+        for offset, duration in ((float('nan'), 3), (0, float('inf')), (0, 0), (0, 1e-9)):
+            with self.assertRaises(RuntimeError):
+                _sample_window(offset, duration, 200000)
 
 
 class AudioRuntimeTests(unittest.TestCase):

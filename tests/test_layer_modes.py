@@ -33,8 +33,8 @@ class LayerModeTests(unittest.TestCase):
         self.assertEqual(self.commands[-1],
                          "r_effects_bloom 0; r_post_bloom 0; r_post_bloom_strength 0")
         self.controller.end_matte_layer()
-        self.assertEqual(self.commands[-1],
-                         "r_effects_bloom 1; r_post_bloom 1; r_post_bloom_strength 1")
+        self.assertIn("r_effects_bloom 1; r_post_bloom 1; r_post_bloom_strength 1", self.commands)
+        self.assertIsNone(self.controller._matte_cvar_restore)
 
     def test_matte_layer_ignores_missing_cvars(self):
         original = self.request
@@ -47,6 +47,55 @@ class LayerModeTests(unittest.TestCase):
         self.controller._request = missing
         self.controller.begin_matte_layer()
         self.controller.end_matte_layer()
+
+    def test_unreadable_matte_value_is_never_modified(self):
+        self.controller._request = Mock(return_value='help text without a current value')
+        self.controller.begin_matte_layer()
+        self.controller.end_matte_layer()
+        self.assertEqual([call.args[0] for call in self.controller._request.call_args_list],
+                         list(Controller.MATTE_CVARS))
+        self.assertIsNone(self.controller._matte_cvar_restore)
+
+    def test_partial_matte_setup_keeps_originals_for_cleanup(self):
+        original = self.request
+        def failing(command):
+            if command.startswith('r_effects_bloom 0;'):
+                raise RuntimeError('batch failed after a prefix')
+            return original(command)
+        self.controller._request = failing
+        with self.assertRaisesRegex(RuntimeError, 'batch failed'):
+            self.controller.begin_matte_layer()
+        self.assertEqual(set(self.controller._matte_cvar_restore), set(Controller.MATTE_CVARS))
+        self.controller._request = original
+        self.controller.end_matte_layer()
+        self.assertIsNone(self.controller._matte_cvar_restore)
+        self.assertIn('r_effects_bloom 1; r_post_bloom 1; r_post_bloom_strength 1', self.commands)
+
+    def test_failed_matte_restore_can_be_retried(self):
+        self.controller.begin_matte_layer()
+        saved = dict(self.controller._matte_cvar_restore)
+        self.controller._request = Mock(side_effect=RuntimeError('connection lost'))
+        with self.assertRaisesRegex(RuntimeError, 'connection lost'):
+            self.controller.end_matte_layer()
+        self.assertEqual(self.controller._matte_cvar_restore, saved)
+        self.controller._request = self.request
+        self.controller.end_matte_layer()
+        self.assertIsNone(self.controller._matte_cvar_restore)
+
+    def test_matte_restore_readback_mismatch_keeps_originals(self):
+        self.controller.begin_matte_layer()
+        original = self.request
+        def clamped(command):
+            if command in Controller.MATTE_CVARS:
+                return command + ' = 0'
+            return original(command)
+        self.controller._request = clamped
+        with self.assertRaisesRegex(RuntimeError, 'use Stop / restore'):
+            self.controller.end_matte_layer()
+        self.assertTrue(self.controller._matte_cvar_restore)
+        self.controller._request = original
+        self.controller.end_matte_layer()
+        self.assertIsNone(self.controller._matte_cvar_restore)
 
     def hide_commands(self):
         return [command for command in self.commands if command.endswith(" 8")]
@@ -129,6 +178,11 @@ class LayerModeTests(unittest.TestCase):
         self.controller._request = failing
         with self.assertRaisesRegex(RuntimeError, "ParticleSystem"):
             self.controller.apply_layer_mode("world")
+        # A changing registry after a partial failure must not lose old names.
+        self.classes = ("SkinnedObject",)
+        self.controller._request = original
+        self.controller.reset_layer_modes()
+        self.assertIn("sc_setclassflags ParticleSystem 0", self.commands)
 
     def test_unknown_mode_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unknown layer mode"):

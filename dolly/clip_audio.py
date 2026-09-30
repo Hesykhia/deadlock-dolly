@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,18 @@ import tempfile
 from types import SimpleNamespace
 
 from .runtime import resource_root
+
+
+def _sample_window(offset: float, duration: float, available: int,
+                   sample_rate: int = 48000) -> tuple[int, int]:
+    """Require full reference coverage before writing or muxing clip audio."""
+    if not math.isfinite(offset) or not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError("Video audio timing is invalid")
+    start = round(offset * sample_rate)
+    frames = round(duration * sample_rate)
+    if offset < 0 or frames <= 0 or start + frames > available:
+        raise RuntimeError("Game audio does not cover the complete video window; the silent video is kept")
+    return start, frames
 
 
 def _ffmpeg() -> Path:
@@ -141,15 +154,14 @@ class ClipAudioCapture:
         origin = float(clock["first_sample_qpc_seconds"])
         offset = first_qpc / frequency - origin
         audio, rate = sf.read(self.reference, always_2d=True, dtype="float32")
-        if rate != 48000 or audio.shape[1] != 2 or offset < 0 or offset + duration > len(audio) / rate + .04:
-            raise RuntimeError("Deadlock audio capture does not cover the complete video")
+        if rate != 48000 or audio.shape[1] != 2:
+            raise RuntimeError("Game audio must be 48 kHz stereo")
+        start, frames = _sample_window(offset, duration, len(audio), rate)
         metadata = {"first_block_end_monotonic": origin + 1024 / rate,
                     "loopback_block_frames": 1024, "video_first_qpc": first_qpc,
                     "qpc_frequency": frequency, "clip_offset_seconds": offset,
                     "duration_seconds": duration}
         self.reference.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
-        start = max(0, round(offset * 48000))
-        frames = round(duration * 48000)
         tracks = []
         if self.game_audio:
             game_clip = self.video.with_name(self.video.stem + "_game_audio.wav")

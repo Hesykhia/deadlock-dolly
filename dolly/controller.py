@@ -4302,6 +4302,13 @@ class Controller:
             self._state["playing"] = False
         if not preserve_layers and self._console and self._console.is_connected and self._alive():
             try:
+                self.end_matte_layer()
+            except (RuntimeError, ValueError, OSError) as exc:
+                LOG.warning("Could not restore matte settings: %s", exc)
+                restoration_error = ((restoration_error or "")
+                                     + " Matte settings could not be restored; use Stop / restore to retry. "
+                                     + str(exc))
+            try:
                 self.reset_layer_modes()
             except (RuntimeError, ValueError, OSError) as exc:
                 LOG.warning("Could not restore scene classes: %s", exc)
@@ -4493,6 +4500,9 @@ class Controller:
         keep.update(spec.get("optional_keep", ()))
         targets = [name for name in classes if name not in keep] if keep else [
             name for name in classes if name in hide]
+        # A console batch can fail after earlier classes were hidden. Retain
+        # every possible owned change before the first command, for retry.
+        self._layer_hidden = set(targets) | set(self._layer_hidden or ())
         # Start from a clean slate: flags left by a previous layer must never
         # hide the class this layer keeps. Each class is its own short command
         # because the engine silently drops over-long multi-command lines.
@@ -4559,34 +4569,38 @@ class Controller:
         saved = {}
         for name in self.MATTE_CVARS:
             try:
-                saved[name] = self._request(name)
+                output = self._request(name)
+                read_cvar_value(name, output)
+                saved[name] = output
             except (RuntimeError, ValueError, OSError):
                 continue
         commands = [name + " 0" for name in saved]
-        if commands:
-            try:
-                self._request("; ".join(commands))
-            except (RuntimeError, ValueError, OSError):
-                return
+        # A failed batch may have applied a prefix. Keep originals until a
+        # successful restore rather than losing them on either failure path.
         self._matte_cvar_restore = saved
+        if commands:
+            self._request("; ".join(commands))
 
     def end_matte_layer(self):
         saved = getattr(self, "_matte_cvar_restore", None)
-        self._matte_cvar_restore = None
         if not saved:
+            self._matte_cvar_restore = None
             return
         commands = []
         for name, output in saved.items():
             try:
                 value = read_cvar_value(name, output)
                 commands.append(name + " " + format_cvar_value(value))
-            except (ValueError, TypeError):
-                continue
+            except (ValueError, TypeError) as exc:
+                raise RuntimeError("Could not read the saved matte setting for " + name) from exc
         if commands:
-            try:
-                self._request("; ".join(commands))
-            except (RuntimeError, ValueError, OSError):
-                pass
+            self._request("; ".join(commands))
+        for name, output in saved.items():
+            expected = float(read_cvar_value(name, output))
+            actual = float(read_cvar_value(name, self._request(name)))
+            if not math.isfinite(actual) or not math.isclose(actual, expected, rel_tol=1e-6, abs_tol=1e-6):
+                raise RuntimeError("Could not restore the matte setting for " + name + "; use Stop / restore to retry")
+        self._matte_cvar_restore = None
 
     def disconnect(self):
         self._recording_replay = None
@@ -4670,6 +4684,8 @@ class Controller:
                   "pending_cvar_restoration": self._restore,
                   "pending_playback_restoration": dict(self._playback_restore),
                   "pending_game_ui_restoration": dict(self._game_ui_restore),
+                  "pending_matte_restoration": dict(getattr(self, "_matte_cvar_restore", None) or {}),
+                  "pending_layer_restoration": sorted(self._layer_hidden or ()),
                   "last_playback": self._playback_details,
                   "native_camera": deepcopy(self._native_last_status),
                   "native_handoff": deepcopy(self._native_handoff_details),
