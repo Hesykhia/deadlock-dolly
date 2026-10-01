@@ -62,7 +62,7 @@ struct Projection {
         basis = angle_vectors(view.pose);
         origin = {view.pose[0], view.pose[1], view.pose[2]};
         tan_x = std::tan(view.horizontal_fov * 3.14159265358979323846 / 360);
-        tan_y = tan_x / view.pose[6];
+        tan_y = tan_x / (view.width / view.height);
         width = view.width;
         height = view.height;
         near_plane = view.near_plane;
@@ -286,14 +286,14 @@ bool project_visualization(const VisualizationPath& path, const VisualizationVie
         const auto kind = camera.index == path.selected_camera() ? VisualizationKind::SelectedCamera
                                                                  : VisualizationKind::Camera;
         // An orientation glyph, not a claim about the camera's final lens.
-        // The authored aspect controls its shape; its size stays 24 game units.
+        // Use a fixed shape; framing edits must not resize the saved marker.
         std::array<Vec3, 4> corners{};
         constexpr double xs[4] = {-1, 1, 1, -1}, ys[4] = {-1, -1, 1, 1};
         for (std::size_t i = 0; i < corners.size(); ++i)
             for (std::size_t axis = 0; axis < 3; ++axis)
                 corners[i][axis] = center[axis] + 24 * basis.forward[axis] +
                                    12 * xs[i] * basis.right[axis] +
-                                   12 / pose[6] * ys[i] * basis.up[axis];
+                                   6.75 * ys[i] * basis.up[axis];
         for (std::size_t i = 0; i < corners.size(); ++i) {
             append(center, corners[i], kind);
             append(corners[i], corners[(i + 1) % corners.size()], kind);

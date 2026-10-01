@@ -56,7 +56,8 @@ private:
 
 struct VisualizationView {
     // Final applied Source pose and horizontal FOV from the verified main
-    // view callback. pose[6] is its projection aspect (may differ from w/h).
+    // view callback. pose[6] is the framing control; viewport dimensions
+    // describe the rendered image containing the overlay.
     CameraPose pose{};
     double horizontal_fov = 0;
     double width = 0, height = 0;

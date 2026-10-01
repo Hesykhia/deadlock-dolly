@@ -144,13 +144,54 @@ void test_projection() {
     v = view();
     v.pose[6] = 1;
     require(dolly::project_visualization_point(v, {100, -50, 25}, p) && close(p.x, 750) &&
-                close(p.y, 187.5),
-            "Projection aspect incorrectly replaced by window aspect");
+                close(p.y, 125),
+            "Framing override stretched guide projection instead of uniform zoom");
     v.horizontal_fov = std::numeric_limits<double>::quiet_NaN();
     require(!dolly::project_visualization_point(v, {100, 0, 0}, p), "Invalid lens accepted");
 }
+void test_world_camera_markers() {
+    dolly::VisualizationGeometry baseline;
+    for (double aspect : {.5, 16.0 / 9, 4.0}) {
+        auto bytes = packet(1);
+        change_number(bytes, 72 + 48 + 6 * 8, aspect);
+        change_number(bytes, 72 + 104 + 6 * 8, aspect);
+        dolly::VisualizationPath path;
+        std::string error;
+        require(path.load(bytes.data(), bytes.size(), error), "Marker fixture rejected");
+        auto v = view();
+        v.pose[6] = aspect;
+        dolly::VisualizationGeometry geometry;
+        require(dolly::project_visualization(path, v, geometry) && geometry.line_count == 8,
+                "World marker missing");
+        if (!baseline.line_count)
+            baseline = geometry;
+        for (std::size_t i = 0; i < 8; ++i)
+            require(close(baseline.lines[i].b.x, geometry.lines[i].b.x) &&
+                        close(baseline.lines[i].b.y, geometry.lines[i].b.y),
+                    "Framing value changed marker geometry independently of actual FOV");
+        // The first corner remains the same real world point when looking up
+        // or down. A screen-sized/billboard approximation fails this check.
+        for (double pitch : {-15.0, 0.0, 15.0}) {
+            v.pose[3] = pitch;
+            require(dolly::project_visualization(path, v, geometry), "Pitched marker lost");
+            dolly::VisualizationPoint corner;
+            require(dolly::project_visualization_point(v, {124, 12, -6.75}, corner) &&
+                        close(geometry.lines[0].b.x, corner.x) &&
+                        close(geometry.lines[0].b.y, corner.y),
+                    "Marker corner drifted away from its world position");
+        }
+        v = view();
+        v.horizontal_fov = 60;
+        require(dolly::project_visualization(path, v, geometry), "Zoomed marker lost");
+        const double scale = 1 / std::tan(3.14159265358979323846 / 6);
+        require(close((geometry.lines[0].b.x - 500) / (baseline.lines[0].b.x - 500), scale) &&
+                    close((geometry.lines[0].b.y - 250) / (baseline.lines[0].b.y - 250), scale),
+                "Zoom must scale world marker width and height equally");
+    }
+}
 void self_test() {
     test_projection();
+    test_world_camera_markers();
     for (bool step : {false, true}) {
         auto lens_bytes = packet(3, 2048, 64, step, true);
         dolly::VisualizationPath lens_path;

@@ -29,6 +29,16 @@ changes focus, clicks coordinates, alters archived intro preferences, or dispatc
 guessed Panorama events. Input queue success is not preload readiness: the same
 full preload gate must still pass. A failed or ignored action is not blindly retried.
 
+Some sessions never run the hideout intro at all: the preload manager stays
+coherent but unstarted at intro phase 0, with no manifest, while the hideout
+renders normally and the HUD is visible. Waiting cannot change that state, so
+automatic startup stops early after a bounded window (`PRELOAD_INTRO_STALL_SECONDS`),
+records the observed last sample and trace under `preload_unavailable`, and
+leaves the game open. The desktop then offers the existing manual **Load replay**
+control, which loads without the preload check and therefore makes no verified
+preload claim. The early stop never fires once a started preload or a nonzero
+intro phase has been observed; those keep the full gate and its timeout.
+
 The build 6712 intro constructor at client+0x1a82910 stores the object at
 0x3bdf908 with vtable 0x2aa9390. The update at 0x1ac6050 uses phase getter
 0x1a9fa30, maps phase 1 to InPreIntro and 2 to InIntro, and caches it at +0x80.

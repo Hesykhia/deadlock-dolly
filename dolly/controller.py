@@ -65,6 +65,12 @@ CAMERA_READBACK_INTERVAL = .25
 CAMERA_DRIFT_LIMIT = 64.0
 CAMERA_DRIFT_SAMPLES = 3
 NATIVE_PAUSE_TIMEOUT = 8.0
+# Automatic startup normally advances Deadlock's hideout intro, and finishing
+# that intro starts the verified map/shader preload. A session that never runs
+# the intro (coherent preload manager, unstarted, intro phase 0) can never pass
+# the preload gate, so waiting the full timeout only delays the manual path.
+# After this window the controller stops early and offers that manual load.
+PRELOAD_INTRO_STALL_SECONDS = 45.0
 # Live-verified switches for the in-game health-bar toggle. Disabling
 # citadel_unit_status_enabled or citadel_hud_objective_health_enabled while a
 # replay renders hangs the game with a DX11 device error, so those master
@@ -78,6 +84,14 @@ OWN_HEALTH_HUD = "citadel_hud_hide_own_health"
 
 class CameraPositionError(RuntimeError):
     """A measured position response failed, eligible for one paused refresh."""
+
+
+class PreloadUnavailableError(RuntimeError):
+    """Deadlock never started its hideout intro/preload.
+
+    Verified automatic startup fails closed in that state; the game session
+    stays open so the replay can be loaded through the explicit manual path.
+    """
 
 
 def motion_clock_info():
@@ -676,7 +690,13 @@ class Controller:
         return {"method": "settled_status", "demo": demo}
 
     def _wait_dashboard_preload(self, initial_frame, cancel_event):
-        """Verify a started preload, not just an idle counter or elapsed time."""
+        """Verify a started preload, not just an idle counter or elapsed time.
+
+        If Deadlock never shows its hideout intro and never starts the preload,
+        automatic startup stops after ``PRELOAD_INTRO_STALL_SECONDS`` instead of
+        waiting for a state that cannot change; the game stays open and the
+        GUI offers the explicit manual replay load.
+        """
         monitor = PreloadMonitor(self._session)
         restore_hud = None
         try:
@@ -696,7 +716,8 @@ class Controller:
             last_message = None
             observed_at = time.monotonic()
             trace = {"first": None, "changes": [], "dropped_changes": 0,
-                     "observed_started": False, "observed_ready": False}
+                     "observed_started": False, "observed_ready": False,
+                     "observed_intro": False}
             self._startup_evidence["preload_trace"] = trace
             previous_sample = None
 
@@ -706,6 +727,8 @@ class Controller:
                 self._startup_evidence["preload"] = sample
                 trace["observed_started"] |= bool(sample.get("coherent") and sample.get("started"))
                 trace["observed_ready"] |= bool(sample.get("coherent") and sample.get("ready"))
+                trace["observed_intro"] |= bool(sample.get("coherent")
+                                                and sample.get("intro_phase") in (1, 2, 3))
                 if sample != previous_sample:
                     row = {"elapsed_seconds": round(time.monotonic() - observed_at, 3),
                            "sample": deepcopy(sample)}
@@ -724,6 +747,19 @@ class Controller:
                 if not sample.get("coherent"):
                     consecutive = 0
                     return None
+                if not trace["observed_started"] and not trace["observed_intro"]:
+                    elapsed = time.monotonic() - observed_at
+                    if elapsed >= PRELOAD_INTRO_STALL_SECONDS:
+                        message = ("Deadlock never showed its hideout intro or started the map and "
+                                   "shader preload, so Dolly stopped the automatic check. The game "
+                                   "session is still open: load the selected replay from Startup "
+                                   "controls to continue without preload verification.")
+                        self._startup_evidence["preload_unavailable"] = {
+                            "reason": "intro_never_started",
+                            "waited_seconds": round(elapsed, 3),
+                            "last_sample": deepcopy(sample)}
+                        self._message(message, startup_stage="preload_unavailable")
+                        raise PreloadUnavailableError(message)
                 if not sample["started"]:
                     message = ("waiting_preload_intro", "Preparing Deadlock's intro and map preload. "
                                "Your replay will open automatically when ready.")

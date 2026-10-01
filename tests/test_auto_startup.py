@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from dolly.controller import Controller
+from dolly.controller import Controller, PreloadUnavailableError
 from tests.test_native_flight_controller import configured_controller
 
 
@@ -168,6 +168,60 @@ class AutoStartupTests(unittest.TestCase):
         self.preload.close.assert_called_once()
         self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
         self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+
+    def test_intro_never_started_stops_early_and_records_the_manual_path(self):
+        self.controller._session, self.controller._console = self.session, self.console
+        self.console.values['citadel_hud_visible'] = 0
+        self.preload.sample.return_value = {
+            "coherent": True, "started": False, "completed": 4, "total": 4,
+            "intro_phase": 0, "scheduled": False, "job_complete": False,
+            "resource_complete": True, "job_active": False, "ready": False}
+        with patch('dolly.controller.PRELOAD_INTRO_STALL_SECONDS', 0):
+            with self.assertRaisesRegex(PreloadUnavailableError, 'never showed its hideout intro'):
+                self.controller._wait_dashboard_preload(0, None)
+        evidence = self.controller._startup_evidence['preload_unavailable']
+        self.assertEqual(evidence['reason'], 'intro_never_started')
+        self.assertEqual(evidence['last_sample']['intro_phase'], 0)
+        trace = self.controller._startup_evidence['preload_trace']
+        self.assertFalse(trace['observed_started'])
+        self.assertFalse(trace['observed_intro'])
+        self.assertEqual(self.controller._state['startup_stage'], 'preload_unavailable')
+        self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.preload.close.assert_called_once()
+
+    def test_observed_intro_keeps_waiting_for_the_verified_gate(self):
+        self.controller._session, self.controller._console = self.session, self.console
+        self.preload.sample.return_value = dict(self.preload.sample.return_value,
+                                                started=False, intro_phase=1, ready=False)
+
+        def wait(check, *args):
+            for _ in range(3):
+                self.assertIsNone(check())
+            raise RuntimeError('Timed out waiting for preload')
+
+        with patch.object(self.controller, '_startup_wait', side_effect=wait):
+            with patch('dolly.controller.PRELOAD_INTRO_STALL_SECONDS', 0):
+                with self.assertRaisesRegex(RuntimeError, 'Timed out waiting for preload'):
+                    self.controller._wait_dashboard_preload(0, None)
+        self.assertTrue(self.controller._startup_evidence['preload_trace']['observed_intro'])
+        self.assertNotIn('preload_unavailable', self.controller._startup_evidence)
+
+    def test_started_preload_never_offers_the_manual_load_early(self):
+        self.controller._session, self.controller._console = self.session, self.console
+        self.preload.sample.return_value = dict(self.preload.sample.return_value, ready=False)
+
+        def wait(check, *args):
+            for _ in range(3):
+                self.assertIsNone(check())
+            raise RuntimeError('Timed out waiting for preload')
+
+        with patch.object(self.controller, '_startup_wait', side_effect=wait):
+            with patch('dolly.controller.PRELOAD_INTRO_STALL_SECONDS', 0):
+                with self.assertRaisesRegex(RuntimeError, 'Timed out waiting for preload'):
+                    self.controller._wait_dashboard_preload(0, None)
+        self.assertNotIn('preload_unavailable', self.controller._startup_evidence)
+        self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
 
     def test_hidden_hud_is_shown_for_preload_and_restored_before_replay(self):
         self.console.values['citadel_hud_visible'] = 0

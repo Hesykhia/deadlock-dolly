@@ -1,5 +1,12 @@
 # Changes
 
+## 0.6.1 alpha — Anchored camera markers and a startup fallback for a missing preload
+
+**0.6.1-alpha**
+
+- **Steady saved-camera markers.** *Before:* camera boxes could deform and drift as framing, aspect or lens changed. *After:* markers keep the same anchored position and a consistent shape at any view, including path preview.
+- **Startup when Deadlock's intro never appears.** *Before:* if the game never ran its hideout intro, no map/shader preload could start, Dolly waited out the full timeout and no replay loaded. *After:* Dolly stops the automatic check early, explains what happened and offers to load the selected replay without the preload check; the game session stays open.
+
 ## 0.6.0 alpha — In-game camera editing, Undo/Redo and current Deadlock support
 
 **0.6.0-alpha**

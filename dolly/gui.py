@@ -25,7 +25,7 @@ from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, EDITOR_KEY_CHOICES
 from dolly.replays import discover_replays, find_replay_folder, parse_launch_options
 from dolly.bindings import CaptureBinding, DEFAULT_BINDING, KEY_CHOICES
 from dolly.branding import apply_window_icon
-from dolly.controller import Controller, tick_rate_advice, tick_rates_match
+from dolly.controller import Controller, PreloadUnavailableError, tick_rate_advice, tick_rates_match
 from dolly.clip_audio import ClipAudioCapture
 from dolly.curve import AspectCurve, RotationCurve, TimelineView
 from dolly.display import focus_window
@@ -2728,7 +2728,7 @@ class DollyApp:
                     self.status_text.set("Startup cancelled. You can choose a replay and try again.")
                     self._log(str(payload))
                 else:
-                    self._error(label, payload)
+                    self._report_operation_error(label, payload)
             elif kind == "done":
                 self.busy = False
                 self.busy_text.set("")
@@ -2751,6 +2751,7 @@ class DollyApp:
                 "not_launched": "Game not launched",
                 "waiting_hideout": "Waiting for hideout",
                 "waiting_preload_intro": "Preparing Deadlock intro",
+                "preload_unavailable": "Deadlock intro/preload not detected",
                 "waiting_replay_camera": "Waiting for replay intro camera",
                 "preloading": "Preloading map and shaders",
                 "preload_ready": "Preload complete — opening replay",
@@ -2916,6 +2917,22 @@ class DollyApp:
         label = getattr(self, "driver_indicator_label", None)
         if label is not None and label.cget("style") != style:
             label.configure(style=style)
+
+    def _report_operation_error(self, title, exc):
+        """Deadlock's missing intro/preload gets an actionable manual load."""
+        if isinstance(exc, PreloadUnavailableError) and not self.closed:
+            self._offer_unverified_replay(title, exc)
+        else:
+            self._error(title, exc)
+
+    def _offer_unverified_replay(self, title, exc):
+        text = str(exc) or type(exc).__name__
+        self.status_text.set(text[:240])
+        self._log(f"{title}: {text}")
+        if messagebox.askyesno("Deadlock intro/preload not detected",
+                               text + "\n\nLoad the selected replay now without the preload check?",
+                               parent=self.root):
+            self._load_replay()
 
     def _error(self, title, exc):
         text = str(exc) or type(exc).__name__

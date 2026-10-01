@@ -1,4 +1,4 @@
-DEADLOCK DOLLY 0.6.0 ALPHA — WINDOWS PORTABLE
+DEADLOCK DOLLY 0.6.1 ALPHA — WINDOWS PORTABLE
 
 A camera-path editor for local Deadlock replays.
 
@@ -22,6 +22,8 @@ GETTING STARTED
    Dolly advances the initial screen, prepares the hideout and waits for verified
    map/shader preload completion before automatically opening your paused replay.
    Do not manually load a demo or navigate the game's menus during startup.
+   If Deadlock never shows its intro or starts that preload, Dolly stops the
+   automatic check and asks whether to load the replay anyway; the game stays open.
 5. Move to a view and press Ctrl+Alt+K. Advance the replay and capture the next view.
    The In-game capture switch is on Library beside Open replay in Dolly; set the
    shortcut in Settings > Controls & keybinds. F8 opens the in-game panel.
@@ -132,10 +134,15 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
-0.6.0-alpha supports reviewed Deadlock build 6726. Camera-list selection,
+0.6.1-alpha supports reviewed Deadlock build 6726. Camera-list selection,
 double-click view, Delete and shared Undo/Redo are available in-game. The tabs
 are CAMERA, FOLLOW, BONE PICKER, LOOK and EXPORT. In the panel, Ctrl+Z undoes
 shot edits; Ctrl+Y or Ctrl+Shift+Z redoes them. History does not rewind the replay.
+
+Saved camera markers keep a steady anchored size and a consistent shape at any
+framing or aspect, including while previewing camera paths. If Deadlock never
+shows its intro or starts map/shader preload, Dolly stops the automatic startup
+check early and asks whether to load the selected replay anyway.
 
 FOLLOW selects a hero and follows their aim with adjustable distance, shoulder
 and height. Right-click sliders to reset them; choose whether to show the game

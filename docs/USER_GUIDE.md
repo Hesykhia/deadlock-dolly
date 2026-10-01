@@ -49,8 +49,11 @@ administrator** if it was enabled unnecessarily. If your computer requires that
 permission, close Dolly and use **Run as administrator** on `Dolly.exe`, then retry.
 Re-extracting the ZIP does not resolve this Windows permission requirement.
 A timeout, failed unlocker confirmation, or unverified preload does not
-automatically load the demo. Preload verification supports reviewed game builds;
-after a game update, Dolly may need an update before automatic startup can proceed.
+automatically load the demo. If Deadlock never shows its intro or starts the
+map and shader preload, Dolly stops the automatic check early and offers to load
+the selected replay without preload verification; the game session stays open.
+Preload verification supports reviewed game builds; after a game update, Dolly
+may need an update before automatic startup can proceed.
 
 Dolly starts with its reviewed editing `gameinfo.gi`, so competitive presets do
 not carry their framing and rendering overrides into the editing session. Your
