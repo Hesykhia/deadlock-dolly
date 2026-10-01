@@ -260,6 +260,48 @@ class ControllerTests(unittest.TestCase):
             self.controller._require_demo()
         self.assertEqual(self.console.requests, [])
 
+    def test_native_dof_enables_dynamic_shader_compile_and_restores_on_disconnect(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 1.0
+        project = make_project()
+        project.setup_values["r_dof_override"] = 1.0
+        self.assertTrue(self.controller.ensure_native_dof_shader_support(project))
+        self.assertEqual(self.console.values["mat_disable_dynamic_shader_compile"], 0.0)
+        self.assertIn("mat_forcereloadshaders dof", self.console.requests)
+        self.assertEqual(self.controller._dof_shader_restore,
+                         {"mat_disable_dynamic_shader_compile": 1.0})
+        evidence = self.controller._startup_evidence["dof_shader"]
+        self.assertEqual(evidence["settings"]["mat_disable_dynamic_shader_compile"], 0)
+        self.controller.disconnect()
+        self.assertEqual(self.console.values["mat_disable_dynamic_shader_compile"], 1.0)
+        self.assertEqual(self.controller._dof_shader_restore, {})
+
+    def test_native_dof_reports_checkerboard_risk_when_shader_compiler_is_unavailable(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx dx dll, "
+            "dynamic shader compile unavailable!")
+        project = make_project()
+        project.setup_values["r_dof_override"] = 1.0
+        self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        evidence = self.controller._startup_evidence["dof_shader"]
+        self.assertTrue(evidence["checkerboard_risk"])
+        self.assertIn("checkerboard", self.controller.status()["message"])
+
+    def test_native_dof_refreshes_shaders_without_changing_an_allowed_setting(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        project = make_project()
+        project.tracks.append(CvarTrack("r_dof_override", [TrackKey(0, 1), TrackKey(10, 1)], "step"))
+        self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        self.assertIn("mat_forcereloadshaders dof", self.console.requests)
+        self.assertEqual(self.console.values["mat_disable_dynamic_shader_compile"], 0.0)
+        self.assertEqual(self.controller._dof_shader_restore, {})
+
+    def test_project_without_native_dof_leaves_shader_settings_untouched(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 1.0
+        self.assertFalse(self.controller.ensure_native_dof_shader_support(make_project()))
+        self.assertEqual(self.console.values["mat_disable_dynamic_shader_compile"], 1.0)
+        self.assertEqual(self.controller._dof_shader_restore, {})
+
     def test_dead_process_console_failure_reports_the_crash_not_the_socket(self):
         process = self.process
 

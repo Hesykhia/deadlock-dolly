@@ -53,11 +53,13 @@ constexpr char kSeptemberEngineHash[] =
     "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4";
 constexpr char kBuild6726EngineHash[] =
     "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26";
+constexpr char kBuild6728EngineHash[] =
+    "8b846736ddbd833fcc85c943dccc7b7fe3cd13eeef772d1ca375c2961f51a53e";
 constexpr char kScene6726Hash[] =
     "026a6e953e6bf1f2fdbcf8388ba5f6868d830ad54216dcf4518df136be50fc5a";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
-constexpr char kUnlockerHash[] = "5a4629e4de5bc82e007d5c6879cc2adc691bcbb8a65889f9e70b085e25865edd";
+constexpr char kUnlockerHash[] = "76ed1c913305f03d629c0a3214de3d075db6472f9cbd20d2a72ae55c7a860fc5";
 // Reviewed scenesystem.dll for the player layer capture. Any other build keeps
 // the capture disabled instead of patching unverified producer code; re-review
 // this hash in the same turn as a game update.
@@ -81,6 +83,10 @@ constexpr EngineLayout kLegacyEngineLayout{kDemoGlobal, kDemoTable, kEngineTable
 constexpr EngineLayout kSeptemberEngineLayout{0x5b9270, 0x4d7f48, 0x4e2848, 0x2d6b0, 0x733e0,
                                               0x34fc0,  0x28c60,  0x35000,  0x73430};
 constexpr EngineLayout kEngine6726Layout{0x5b92b0, 0x4d7e88, 0x4e2790, 0x2d590, 0x732c0,
+                                         0x34ea0,  0x28b40,  0x34ee0,  0x73310};
+// October 1: the reviewed CDemoPlayer/CEngineClient vtables and every
+// accessor kept their RVAs; only the engine2 identity changed.
+constexpr EngineLayout kEngine6728Layout{0x5b92b0, 0x4d7e88, 0x4e2790, 0x2d590, 0x732c0,
                                          0x34ea0,  0x28b40,  0x34ee0,  0x73310};
 EngineLayout gEngineLayout = kLegacyEngineLayout;
 // Identical across every reviewed client build; the exact-hash path re-checks it.
@@ -1375,8 +1381,10 @@ static DWORD WINAPI worker(void*) {
             Sleep(20);
         }
         const bool engine6726 = module_matches(engine, kBuild6726EngineHash, 0x906000);
+        const bool engine6728 = module_matches(engine, kBuild6728EngineHash, 0x906000);
         const bool september_engine = module_matches(engine, kSeptemberEngineHash, 0x906000);
-        if (!engine6726 && !september_engine && !module_matches(engine, kEngineHash, 0x969000) &&
+        if (!engine6728 && !engine6726 && !september_engine &&
+            !module_matches(engine, kEngineHash, 0x969000) &&
             !module_matches(engine, kUpdatedEngineHash, 0x969000)) {
             startup_status(
                 State::Unsupported, 21,
@@ -1385,7 +1393,8 @@ static DWORD WINAPI worker(void*) {
         }
         gClient = reinterpret_cast<std::uintptr_t>(client);
         gEngine = reinterpret_cast<std::uintptr_t>(engine);
-        gEngineLayout = engine6726         ? kEngine6726Layout
+        gEngineLayout = engine6728         ? kEngine6728Layout
+                        : engine6726       ? kEngine6726Layout
                         : september_engine ? kSeptemberEngineLayout
                                            : kLegacyEngineLayout;
         gCompat = resolve_client_profile(client, true);

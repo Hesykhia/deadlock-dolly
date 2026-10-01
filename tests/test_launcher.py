@@ -1,6 +1,8 @@
 import hashlib
 import json
+import os
 import socket
+import stat
 import struct
 from pathlib import Path
 import tempfile
@@ -77,6 +79,19 @@ class GameInfoTests(unittest.TestCase):
         result = launcher.make_gameinfo(data.decode('utf-8'), 'citadel_dolly_test')
         self.assertIn('citadel_dolly_test/cvar_unlocker', result)
         self.assertNotIn('Game                citadel/cvar_unlocker', result)
+
+    def test_editing_baseline_does_not_mount_retired_addon_or_unlocker_paths(self):
+        root = Path(__file__).resolve().parents[1]
+        text = (root / 'assets/editing/gameinfo.gi').read_text(encoding='utf-8')
+        values = {token.value for token in launcher._tokens(text)}
+        self.assertNotIn('citadel/addons', values)
+        self.assertNotIn('citadel/cvar_unlocker', values)
+        self.assertNotIn('SwapChainSampleableDepth', values)
+        self.assertNotIn('AddonConfig', values)
+        result = launcher.make_gameinfo(text, 'citadel_dolly_test')
+        self.assertIn('Game\t"citadel_dolly_test/cvar_unlocker"', result)
+        self.assertRegex(result, r'(?m)^\s*Game\s+citadel\s*$')
+        self.assertRegex(result, r'(?m)^\s*Game\s+core\s*$')
 
     def test_changes_only_real_searchpath_and_preserves_comments_and_conditions(self):
         result = launcher.make_gameinfo(GAMEINFO, "citadel_dolly_test")
@@ -189,6 +204,48 @@ class LauncherTests(unittest.TestCase):
             self._launched_session()
         self.assertEqual(self.paths.gameinfo.read_bytes(), before)
         self.assertFalse(list(self.paths.game_dir.glob('citadel_dolly_*')))
+
+    def test_loose_panorama_sources_are_reported_with_relative_paths(self):
+        layout = self.paths.citadel_dir / 'panorama/layout'
+        scripts = self.paths.citadel_dir / 'panorama/scripts'
+        layout.mkdir(parents=True)
+        scripts.mkdir(parents=True)
+        (layout / 'hud.xml').write_text('<root/>', encoding='utf-8')
+        (scripts / 'hud.js').write_text('// stale', encoding='utf-8')
+        (layout / 'hud.vxml_c').write_bytes(b'compiled')
+        found = launcher.loose_ui_source_overrides(self.paths)
+        self.assertEqual([path.relative_to(self.paths.citadel_dir).as_posix() for path in found],
+                         ['panorama/layout/hud.xml', 'panorama/scripts/hud.js'])
+
+    def test_stale_uncompiled_panorama_refused_before_mount(self):
+        before = self.paths.gameinfo.read_bytes()
+        layout = self.paths.citadel_dir / 'panorama/layout'
+        layout.mkdir(parents=True)
+        (layout / 'hud.xml').write_text('<root/>', encoding='utf-8')
+        with self.assertRaisesRegex(launcher.LaunchError, 'panorama/layout/hud.xml'):
+            self._launched_session()
+        self.assertEqual(self.paths.gameinfo.read_bytes(), before)
+        self.assertFalse(list(self.paths.game_dir.glob('citadel_dolly_*')))
+
+    def test_atomic_write_replaces_read_only_target_and_preserves_mode(self):
+        target = self.folder / 'readonly.gi'
+        target.write_bytes(b'original')
+        os.chmod(target, 0o444)
+        self.addCleanup(os.chmod, target, 0o666)
+        launcher._atomic_write(target, b'patched', 0o444)
+        self.assertEqual(target.read_bytes(), b'patched')
+        self.assertFalse(stat.S_IMODE(target.stat().st_mode) & stat.S_IWRITE)
+
+    def test_atomic_write_keeps_no_temp_when_replace_fails(self):
+        target = self.folder / 'locked.gi'
+        target.write_bytes(b'original')
+        os.chmod(target, 0o444)
+        self.addCleanup(os.chmod, target, 0o666)
+        with patch.object(launcher.os, 'replace', side_effect=PermissionError(5, 'Access is denied')):
+            with self.assertRaises(PermissionError):
+                launcher._atomic_write(target, b'patched', 0o444)
+        self.assertEqual(target.read_bytes(), b'original')
+        self.assertEqual(list(self.folder.glob('.dolly-write-*.tmp')), [])
 
     def test_accepts_common_user_selected_install_paths(self):
         for path in (self.paths.root, self.paths.game_dir, self.paths.citadel_dir, self.paths.executable):
@@ -432,6 +489,22 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(self.paths.gameinfo.read_bytes(), before)
         self.assertFalse(session.overlay_dir.exists())
 
+    def test_assert_dialog_watcher_dismisses_and_logs_while_the_game_runs(self):
+        process = MagicMock()
+        process.pid = 2468
+        process.wait.return_value = 0
+        with patch.object(launcher, "_check_runtime"), \
+                patch.object(launcher, "running_processes", return_value={"steam.exe"}), \
+                patch.object(launcher, "PACKAGE_ROOT", self.package), \
+                patch.object(launcher.subprocess, "Popen", return_value=process), \
+                patch.object(launcher.threading, "Thread") as thread, \
+                patch.object(launcher, "dismiss_assert_dialogs",
+                             return_value=["Ignore For 24 Hours"]) as dismiss:
+            session = launcher.launch(self.paths.root)
+            thread.call_args.kwargs["target"]()
+        dismiss.assert_called_with(process.pid)
+        self.assertIn("Ignore For 24 Hours", session.read_log())
+
     def test_failed_process_creation_removes_only_generated_overlay(self):
         before = self.paths.gameinfo.read_bytes()
         with patch.object(launcher, "_check_runtime"), patch.object(launcher, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.package), patch.object(launcher.subprocess, "Popen", side_effect=OSError("fake start failure")):
@@ -562,11 +635,15 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(dll.read_bytes()).hexdigest(), meta["bundled_file_sha256"])
         self.assertEqual(meta["bundled_file_sha256"], launcher.UNLOCKER_SHA256)
         self.assertEqual(meta["license"], "MIT")
-        self.assertEqual(meta["version"], "v0.5.2-dolly-build-6726")
+        self.assertEqual(meta["version"], "v0.5.2-dolly-build-6731")
         self.assertEqual(dll.stat().st_size, meta["bundled_file_size"])
         self.assertIn("unlocker-build-6712.patch", meta["patches"])
         self.assertIn("unlocker-build-6722.patch", meta["patches"])
         self.assertIn("unlocker-build-6723.patch", meta["patches"])
+        self.assertIn("unlocker-build-6731.patch", meta["patches"])
+        self.assertIn("unlocker-build-6726.patch", meta["patches"])
+        self.assertIn("unlocker-build-6728.patch", meta["patches"])
+        self.assertIn("unlocker-build-6730.patch", meta["patches"])
         for patch in meta["patches"]:
             self.assertTrue((launcher.UNLOCKER_ROOT / patch).is_file(), patch)
 

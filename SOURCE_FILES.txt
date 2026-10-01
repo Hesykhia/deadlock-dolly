@@ -33,6 +33,7 @@ docs/USER_GUIDE.md
 docs/internal/VALIDATION.md
 dolly/__init__.py
 dolly/__main__.py
+dolly/assert_watcher.py
 dolly/bindings.py
 dolly/bootstrap.py
 dolly/branding.py
@@ -170,6 +171,7 @@ packaging/entrypoint.py
 requirements-build.txt
 tests/test_aspect_controller.py
 tests/test_aspect_path.py
+tests/test_assert_watcher.py
 tests/test_auto_startup.py
 tests/test_preload.py
 tests/test_replay_camera.py
@@ -450,3 +452,12 @@ native/profiles/deadlock-2026-09-30-6726-complete.json
 native/profiles/scenesystem-2026-09-30-6726.json
 native/profiles/soundsystem-2026-09-30-6726.json
 third_party/cvar_unlocker/unlocker-build-6726.patch
+
+native/profiles/deadlock-2026-10-01-6728-complete.json
+third_party/cvar_unlocker/unlocker-build-6728.patch
+
+native/profiles/deadlock-2026-10-01-6730-complete.json
+third_party/cvar_unlocker/unlocker-build-6730.patch
+
+native/profiles/deadlock-2026-10-01-6731-complete.json
+third_party/cvar_unlocker/unlocker-build-6731.patch

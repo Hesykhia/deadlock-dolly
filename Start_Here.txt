@@ -3,7 +3,7 @@ Tcl/Tk. Native features require the included Windows helper. Optional audio and
 build workflows need their documented dependencies. See docs/BUILDING.md.
 The instructions below also describe the separate portable Windows package.
 
-DEADLOCK DOLLY 0.6.1 ALPHA — WINDOWS PORTABLE
+DEADLOCK DOLLY 0.6.4 ALPHA — WINDOWS PORTABLE
 
 A camera-path editor for local Deadlock replays.
 
@@ -139,7 +139,7 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
-0.6.1-alpha supports reviewed Deadlock build 6726. Camera-list selection,
+0.6.4-alpha supports reviewed Deadlock build 6731. Camera-list selection,
 double-click view, Delete and shared Undo/Redo are available in-game. The tabs
 are CAMERA, FOLLOW, BONE PICKER, LOOK and EXPORT. In the panel, Ctrl+Z undoes
 shot edits; Ctrl+Y or Ctrl+Shift+Z redoes them. History does not rewind the replay.
@@ -166,6 +166,15 @@ long/4K exports or every GPU. The repeated intro remains visible during seeking.
 Native mode supports reviewed client.dll, engine2.dll and tier0.dll builds.
 A Deadlock update can require a Dolly update. Settings > Troubleshooting & recovery > Startup controls contains
 the Console (legacy) driver and manual startup controls.
+
+A read-only gameinfo.gi is supported and restored with its attribute. Stale
+uncompiled Panorama files left in game\citadel\panorama (for example by a HUD
+mod) are listed before launch; remove or rename that folder, or validate the
+game in Steam, then retry.
+
+Deadlock's development build can show its own assertion windows. Dolly chooses
+the ignore action for the game it launched so editing continues; the message
+stays in the session's game output log.
 
 Close Deadlock and Dolly before updating. Keep saved shots and logs, including
 pending recovery backups. Use the complete new portable folder; _internal must

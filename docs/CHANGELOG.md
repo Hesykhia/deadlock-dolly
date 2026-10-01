@@ -1,5 +1,28 @@
 # Changes
 
+## 0.6.4 alpha — Player lists, the replay timeline and the newest Deadlock update
+
+**0.6.4-alpha**
+
+- **Support for the newest Deadlock update.** *Before:* after Deadlock updated again, Dolly refused the new build and asked for a newer release. *After:* the native camera, automatic replay loading and the cvar unlocker are reviewed and enabled for Deadlock build 6731 (Steam build 25658155).
+- **Bone Picker and Game Follow read player IDs again.** *Before:* the player list came up empty, so those cameras could not select a hero on the new build. *After:* the reviewed spectator-to-player chain is relocated for build 6731 and both cameras resolve the selected player again.
+- **F9 brings the replay timeline back.** *Before:* pressing F9 returned the camera to the game but the demo overlay stayed hidden, so the timeline could not be scrubbed. *After:* F9 reopens Deadlock's replay UI and mouse cursor, and Stop still restores your original settings.
+
+## 0.6.3 alpha — Sessions keep going through Deadlock's own assertion dialogs
+
+**0.6.3-alpha**
+
+- **No frozen session when Deadlock shows its own assertion dialog.** *Before:* the game's development build could stop behind a modal assertion window while a replay loaded or exited, which looked like Dolly had broken. *After:* Dolly quietly chooses the dialog's ignore action for its own launched game, and the session continues. The assertion text still reaches the game console and the session's stdout log.
+- **Native depth of field checks the engine's shader support.** *Before:* the engine's native depth-of-field pass could use the missing-texture fallback when its shaders were disabled or stale. *After:* Dolly verifies the shader setting when native depth of field is first used, reloads the depth-of-field shaders when it must change that setting, restores the setting when you disconnect, and warns you when the game itself cannot compile the effect (which shows as a magenta/black checkerboard).
+- **Support for the October 1 Deadlock update.** *Before:* after Deadlock updated, Dolly refused the new build and asked for a newer release. *After:* the native camera, automatic replay loading and the cvar unlocker are reviewed and enabled for Deadlock build 6728 (Steam build 25658155).
+
+## 0.6.2 alpha — Launch recovery for protected gameinfo files and stale local UI files
+
+**0.6.2-alpha**
+
+- **Launch when `gameinfo.gi` is read-only.** *Before:* Steam verification or a modding guide could mark the file read-only, and Dolly's launch failed with "Access is denied" before the game started. *After:* Dolly swaps the file in place and restores the original bytes with the read-only attribute intact.
+- **Launch after a Deadlock update with local UI files.** *Before:* the editing configuration still mounted retired addon paths, so a stale loose file such as an old HUD `hud.xml` could crash the updated game during startup, before Dolly could connect. *After:* the editing configuration matches the official mount list, and a launch names any uncompiled Panorama files still in the game folder instead of only reporting an exit code.
+
 ## 0.6.1 alpha — Anchored camera markers and a startup fallback for a missing preload
 
 **0.6.1-alpha**

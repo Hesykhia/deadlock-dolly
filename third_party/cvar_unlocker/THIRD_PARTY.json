@@ -1,6 +1,6 @@
 {
   "name": "cvar-unhide-s2-citadel",
-  "version": "v0.5.2-dolly-build-6726",
+  "version": "v0.5.2-dolly-build-6731",
   "license": "MIT",
   "source_url": "https://github.com/Artemon121/cvar-unhide-s2-citadel",
   "release_url": "https://github.com/Artemon121/cvar-unhide-s2-citadel/releases/tag/v0.5.2",
@@ -8,8 +8,8 @@
   "release_archive_sha256": "f7b051319b65252002fa20c6b4dd9d0680fba811557cb951aeff2916c0e27a5f",
   "upstream_release_binary_sha256": "e86f270b1dedc81fd54a230f0080eee568a4f2bd39e1f41080dcf71d833267ba",
   "bundled_file": "bin/win64/server.dll",
-  "bundled_file_sha256": "5a4629e4de5bc82e007d5c6879cc2adc691bcbb8a65889f9e70b085e25865edd",
-  "bundled_file_size": 301056,
+  "bundled_file_sha256": "76ed1c913305f03d629c0a3214de3d075db6472f9cbd20d2a72ae55c7a860fc5",
+  "bundled_file_size": 301568,
   "source_checkout_commit": "505547d58e4b66001406a8fa618548364f7cdb4d",
   "sdk_checkout_commit": "7ae489c1722dfb117ff080d6403d85e01e9c53c9",
   "patches": [
@@ -18,11 +18,14 @@
     "unlocker-build-6712.patch",
     "unlocker-build-6722.patch",
     "unlocker-build-6723.patch",
-    "unlocker-build-6726.patch"
+    "unlocker-build-6726.patch",
+    "unlocker-build-6728.patch",
+    "unlocker-build-6730.patch",
+    "unlocker-build-6731.patch"
   ],
   "modifications": "MODIFICATIONS.md",
   "build_toolchain": "MSVC 19.38.33134.0 and MASM, x64 Release, static CRT, C++20",
   "retrieved_utc": "2026-09-07",
-  "modified_utc": "2026-09-30",
-  "notes": "Locally built from the pinned upstream source and SDK with the included patches. Preserves early owned-command teardown and SDK interface clearing. Adds exact-build ICvar adaptation for Deadlock build 6712, validates its server-config hook ABI, and accommodates a removed optional string-token debug database export; existing reviewed legacy tier0 builds retain their original SDK path. No game binaries are included in the source patch. The upstream project does not endorse this build. The unmodified upstream release binary hash is recorded for provenance. The upstream full gameinfo.gi is intentionally not bundled or installed. Dolly backs up current local gameinfo bytes, temporarily mounts the DLL via SearchPaths, and restores after initialization or game exit with journaled crash recovery. The standard citadel identity and secure-mode rejection are retained. Offline build, synthetic ABI/lifecycle tests and PE import audit passed; build 6712 startup and shutdown still need a bounded owned replay probe. Version6722 adds a separately reviewed server-module hash and relocated Source2ServerConfig001 vtable/method tuple. ICvar adapter ABI/tier0 pins and secure/shutdown guards are unchanged. Offline ABI/lifecycle tests and PE import audit passed; hotfix live validation pending. Version6723 adds its own exact server hash and Source2ServerConfig001 secondary vtable/method tuple, preserving previous reviewed build guards. Current tier0 imports, synthetic ABI and lifecycle checks pass; no6723 live runtime acceptance is claimed. Build6726 exact tier0/server pair, unchanged adapter slots and separately reviewed server secondary interface; offline tests pass, live verification pending."
+  "modified_utc": "2026-10-01",
+  "notes": "Locally built from the pinned upstream source and SDK with the included patches. Preserves early owned-command teardown and SDK interface clearing. Adds exact-build ICvar adaptation for Deadlock build 6712, validates its server-config hook ABI, and accommodates a removed optional string-token debug database export; existing reviewed legacy tier0 builds retain their original SDK path. No game binaries are included in the source patch. The upstream project does not endorse this build. The unmodified upstream release binary hash is recorded for provenance. The upstream full gameinfo.gi is intentionally not bundled or installed. Dolly backs up current local gameinfo bytes, temporarily mounts the DLL via SearchPaths, and restores after initialization or game exit with journaled crash recovery. The standard citadel identity and secure-mode rejection are retained. Offline build, synthetic ABI/lifecycle tests and PE import audit passed; build 6712 startup and shutdown still need a bounded owned replay probe. Version6722 adds a separately reviewed server-module hash and relocated Source2ServerConfig001 vtable/method tuple. ICvar adapter ABI/tier0 pins and secure/shutdown guards are unchanged. Offline ABI/lifecycle tests and PE import audit passed; hotfix live validation pending. Version6723 adds its own exact server hash and Source2ServerConfig001 secondary vtable/method tuple, preserving previous reviewed build guards. Current tier0 imports, synthetic ABI and lifecycle checks pass; no6723 live runtime acceptance is claimed. Build6726 exact tier0/server pair, unchanged adapter slots and separately reviewed server secondary interface; offline tests pass, live verification pending. Version6728 adds its own exact server hash and relocated Source2ServerConfig001 vtable/method tuple, preserving previous reviewed build guards. Current tier0 imports, synthetic ABI and lifecycle checks pass; no6728 live runtime acceptance is claimed. Version6730 adds its own exact server hash and relocated Source2ServerConfig001 vtable/method tuple, preserving previous reviewed build guards. Current tier0 imports, synthetic ABI and lifecycle checks pass; no6730 live runtime acceptance is claimed. Version6731 adds its own exact server hash and relocated Source2ServerConfig001 vtable/method tuple, preserving previous reviewed build guards. Current tier0 imports, synthetic ABI and lifecycle checks pass; no6731 live runtime acceptance is claimed."
 }

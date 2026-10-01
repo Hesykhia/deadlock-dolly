@@ -1,9 +1,12 @@
 # Deadlock Dolly — user guide
 
 Dolly connects its desktop editor and in-game panel to the same camera project.
-Version 0.6.0-alpha adds an in-game camera list and shared Undo/Redo, preserves
-captured lens settings, and updates support for Deadlock build 6726. Real-time
-game audio, fixed-step silent layers and optional ReShade are available.
+Version 0.6.4-alpha adds support for Deadlock build 6731, restores player-list
+reading for the Bone Picker and Game Follow cameras, and makes F9 bring back
+Deadlock's replay timeline during playback. The in-game camera list and shared
+Undo/Redo, captured lens settings, and the assertion-dialog and native
+depth-of-field safeguards are unchanged. Real-time game audio, fixed-step
+silent layers and optional ReShade are available.
 
 [Video and ReShade setup](VIDEO_AND_RESHADE.md) covers output settings, F11,
 installation and current limits. Windows/Deadlock validation is recorded in
@@ -684,7 +687,10 @@ For the upstream SearchPaths loading method, Dolly makes a temporary edit to
 the existing `game/citadel/gameinfo.gi`. It first writes an exact original backup
 and recovery journal to `logs/<session>/`, then atomically adds a unique plugin
 mount. The normal Citadel game directory is retained so an alternate game name
-does not introduce replay game-directory mismatch errors.
+does not introduce replay game-directory mismatch errors. A read-only
+`gameinfo.gi` (for example after Steam file verification or a modding guide) is
+supported: Dolly clears only that attribute for the atomic swap and restores the
+original bytes with the read-only attribute afterward.
 
 The original file is restored after automatic or manual hideout initialization
 confirms unlocker activation, when the game exits while Dolly is open, or when Dolly closes.
@@ -717,6 +723,15 @@ launch attempts also record your selected executable/replay paths and the error,
 failed before a game session existed. This version adds a bounded raw console
 history and logs from up to eight recent sessions, so a successful retry does
 not hide a preceding crashed launch. New session journals retain exit code/time.
+If Deadlock closes within seconds of a Dolly launch, development mode may have
+loaded an uncompiled Panorama file left in the game folder (for example
+`game/citadel/panorama/layout/hud.xml` from a HUD mod or an older build). Dolly
+refuses that launch and lists the files. Move or rename the
+`game/citadel/panorama` folder, or validate Deadlock's files in Steam, then retry.
+If Deadlock's development build shows one of its own assertion windows, Dolly
+chooses the ignore action for the game process it launched so the session
+continues; the assertion text remains in that session's game output log and the
+dismissal is recorded in its launch log.
 Native runs also retain sampled original/applied view poses, callback counts,
 native timing and handoff checks. These are diagnostic samples, not a complete
 record of every rendered frame. The export does not include the replay itself

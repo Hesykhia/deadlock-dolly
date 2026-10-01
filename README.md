@@ -5,7 +5,7 @@
 A camera-path editor for local Deadlock replays. Capture the free camera,
 shape a shot and play it back with animated framing and camera variables.
 
-**Current source: 0.6.1-alpha.** The portable Windows build opens through
+**Current source: 0.6.4-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.
 
 **THIS MOD INJECTS CODE INTO DEADLOCK — USE AT YOUR OWN RISK.**
@@ -48,6 +48,22 @@ Deadlock normally.
 - Optional ReShade color effects, its in-game menu on a configurable F11 key, and the verified scene depth published to ReShade for depth-based effects.
 - Startup update check with manual checks in Settings.
 - Optional game-only audio for real-time video, plus a separate advanced reconstructed-audio workflow.
+
+### 0.6.4 highlights
+
+Reviewed compatibility for **Deadlock build 6731 / Steam build 25658155**:
+native camera, automatic replay loading and the cvar unlocker are updated.
+The Bone Picker and Game Follow cameras read player IDs again, and pressing F9
+during playback brings back Deadlock's replay UI and timeline for scrubbing.
+
+### 0.6.3 highlights
+
+Reviewed compatibility for **Deadlock build 6728 / Steam build 25658155**:
+native camera, automatic replay loading and the cvar unlocker are updated.
+Dolly now steps over Deadlock's own assertion dialogs instead of appearing
+frozen, checks native depth-of-field shader support and warns when the game
+cannot compile the effect (the magenta/black checkerboard), and the editing
+configuration tolerates a read-only `gameinfo.gi`.
 
 ### 0.6.1 fixes
 
@@ -207,6 +223,12 @@ and [Video and ReShade](docs/VIDEO_AND_RESHADE.md) for workflow limits.
 
 Each editing launch creates a temporary `game/citadel_dolly_…` folder for its
 plugins. The original `gameinfo.gi` is restored after unlocker initialization.
+A read-only `gameinfo.gi` is supported and keeps its attribute. Uncompiled
+Panorama files left in `game/citadel/panorama` are listed and refused before
+launch, because development mode would load them before the packaged UI.
+Deadlock's development build can show its own assertion dialogs; Dolly chooses
+the ignore action for the game process it launched and records it in the
+session, so a game-side failure cannot freeze editing.
 The temporary folder is removed when the game exits. If Dolly closes first,
 a background helper waits for that game process and then removes its files.
 It exits afterward and does not start another game.

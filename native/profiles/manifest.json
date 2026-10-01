@@ -1,14 +1,14 @@
 {
   "manifest_format": 1,
   "native_abi": 4,
-  "generated_utc": "2026-09-30",
+  "generated_utc": "2026-10-01",
   "generator": "tools/generate_profile.py",
   "reviewed_client_utc": "2026-09-30",
   "modules": {
     "citadel/bin/win64/client.dll": {
       "role": "client",
-      "reviewed_utc": "2026-09-30",
-      "latest_timestamp": 1790806362,
+      "reviewed_utc": "2026-10-01",
+      "latest_timestamp": 1790893562,
       "accepted": [
         "c7d068857c617c9c41d2c501865a94d93c52f3081864623ae23146e495f3021b",
         "769bf1e74afd67ab0aa02fa94c0c7eb3c133991d32c43e099289210511551a2b",
@@ -21,23 +21,27 @@
         "bc0dae383a2cd65dc1616515cdffa6c947fd057e5590edf0f5a01bd953ec19c9",
         "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc",
         "14a1f187b4dbe0801c805cfb4050dff495601867b1f0c7a21889d47c633a4bf3",
-        "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e"
+        "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e",
+        "810d5d7a7bab8b0906739c11fbf9744dba9bc31b558173d401a8408afc6f0b5f",
+        "5c5ef78cf648066d78cf0f8155647eb3521bf31c3cf9607e4c304b121fec6647",
+        "cb244664a4b42057b02788bc95be489140fbba587266fdb40c5faf7d4d0784e3"
       ],
       "feature_pins": {
         "automatic preload": [
-          "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e"
+          "cb244664a4b42057b02788bc95be489140fbba587266fdb40c5faf7d4d0784e3"
         ]
       }
     },
     "bin/win64/engine2.dll": {
       "role": "engine",
-      "reviewed_utc": "2026-09-30",
-      "latest_timestamp": 1790806171,
+      "reviewed_utc": "2026-10-01",
+      "latest_timestamp": 1790863204,
       "accepted": [
         "887201acec33837fdb18d73c04f8e0894971d26eebafe992a28a12fada118afb",
         "301d042c7443090241d7b83244747bf8a32916f61df60aea5d8a1799f432ef8d",
         "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4",
-        "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26"
+        "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26",
+        "8b846736ddbd833fcc85c943dccc7b7fe3cd13eeef772d1ca375c2961f51a53e"
       ]
     },
     "bin/win64/tier0.dll": {
@@ -109,6 +113,9 @@
     "deadlock-2026-09-30-complete.json",
     "deadlock-2026-09-30-6726-complete.json",
     "scenesystem-2026-09-30-6726.json",
-    "soundsystem-2026-09-30-6726.json"
+    "soundsystem-2026-09-30-6726.json",
+    "deadlock-2026-10-01-6728-complete.json",
+    "deadlock-2026-10-01-6730-complete.json",
+    "deadlock-2026-10-01-6731-complete.json"
   ]
 }

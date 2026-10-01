@@ -8,23 +8,23 @@ from .preload import PreloadError, _image_bytes
 from .replay_camera import CLIENT_SHA256, ReplayCameraMonitor
 
 TIER0_SHA256 = '6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332'
-CLIENT_SPANS = ((0x8ec90, 0xd66), (0x906e0, 0xa6), (0x230640, 0x73),
-                (0x23a4a00, 0x81), (0x24dd70, 0xa), (0x604ca6, 0xb))
+CLIENT_SPANS = ((0x8f000, 0xd66), (0x90a50, 0xa6), (0x2308d0, 0x73),
+                (0x23a6440, 0x81), (0x24e000, 0xa), (0x605706, 0xb))
 TIER0_SPANS = ((0x20fd40, 0x279),)
 REFS = {
-    'pivot_x_offset': 0x35f9900, 'pivot_y_offset': 0x35f9910,
-    'pivot_z_offset': 0x35f9920, 'pivot_x_offset_crouching': 0x35f9930,
-    'pivot_y_offset_crouching': 0x35f9940, 'pivot_z_offset_crouching': 0x35f9950,
-    'x_offset': 0x35f9960, 'y_offset': 0x35f9970, 'z_offset': 0x35f9980,
-    'x_worst_case_offset': 0x35f9990, 'y_worst_case_offset': 0x35f99a0,
-    'z_worst_case_offset': 0x35f99b0, 'ads_x_offset': 0x35f99c0,
-    'ads_y_offset': 0x35f99d0, 'ads_z_offset': 0x35f99e0,
-    'fov': 0x35f99f0, 'ads_fov': 0x35f9a00,
+    'pivot_x_offset': 0x35fcf00, 'pivot_y_offset': 0x35fcf10,
+    'pivot_z_offset': 0x35fcf20, 'pivot_x_offset_crouching': 0x35fcf30,
+    'pivot_y_offset_crouching': 0x35fcf40, 'pivot_z_offset_crouching': 0x35fcf50,
+    'x_offset': 0x35fcf60, 'y_offset': 0x35fcf70, 'z_offset': 0x35fcf80,
+    'x_worst_case_offset': 0x35fcf90, 'y_worst_case_offset': 0x35fcfa0,
+    'z_worst_case_offset': 0x35fcfb0, 'ads_x_offset': 0x35fcfc0,
+    'ads_y_offset': 0x35fcfd0, 'ads_z_offset': 0x35fcfe0,
+    'fov': 0x35fcff0, 'ads_fov': 0x35fd000,
 }
 # Same blocked bits as the existing reviewed native effect binding.
 BLOCKED_FLAGS = sum(1 << bit for bit in (2, 9, 10, 13, 15, 18, 22))
 OWN_HEALTH_HUD = 'citadel_hud_hide_own_health'
-OWN_HEALTH_SPANS = ((0x1b6820, 0xae), (0x1ace550, 0x347), (0x1aafc90, 0x2f))
+OWN_HEALTH_SPANS = ((0x1b6850, 0xae), (0x1acf610, 0x323), (0x1ab0c10, 0x2f))
 # Current settings-checkbox binding marks its own ConVar with bit30. This
 # allowance belongs only to this reviewed panel, never the shared rig policy.
 OWN_HEALTH_ALLOWED_FLAGS = 0x40080088
@@ -47,7 +47,7 @@ class FollowCapabilityMonitor(ReplayCameraMonitor):
             if not module or module[1] != tier0_path.resolve():
                 raise PreloadError('Game Follow tier0 module path differs from the reviewed installation.')
             for base, data, spans, image_size in (
-                    (self.base, client_data, CLIENT_SPANS, 0x40f7000),
+                    (self.base, client_data, CLIENT_SPANS, 0x40fa000),
                     (module[0], tier0_data, TIER0_SPANS, 0x401000)):
                 pe_offset = struct.unpack_from('<I', data, 0x3c)[0]
                 size_address = pe_offset + 24 + 56
@@ -69,7 +69,7 @@ class FollowCapabilityMonitor(ReplayCameraMonitor):
         if self.memory is None:
             raise PreloadError('Game Follow capability monitor is closed.')
         refs = {PREFIX + suffix: (rva, 7) for suffix, rva in REFS.items()}
-        refs.update({ENABLED: (0x35f98f0, 0), FOLLOW_AIM: (0x35f9628, 0)})
+        refs.update({ENABLED: (0x35fcef0, 0), FOLLOW_AIM: (0x35fcc28, 0)})
         result = {}
         for name, (rva, expected_type) in refs.items():
             result[name] = self._sample_ref(name, rva, expected_type, 0x80080,
@@ -89,7 +89,7 @@ class FollowCapabilityMonitor(ReplayCameraMonitor):
             if value not in (0, 1):
                 raise ValueError('Health HUD panel setting must be boolean.')
             return float(value)
-        result = self._sample_ref(OWN_HEALTH_HUD, 0x3be1b98, 0, 0x80000, boolean,
+        result = self._sample_ref(OWN_HEALTH_HUD, 0x3be5158, 0, 0x80000, boolean,
                                   allowed_flags=OWN_HEALTH_ALLOWED_FLAGS)
         self._owned()
         return result

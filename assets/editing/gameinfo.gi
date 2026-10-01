@@ -70,27 +70,14 @@
 			// These are optional low-violence paths. They will only get mounted if you're in a low-violence mode.
 			Game_LowViolence	citadel_lv
 
-			Mod				citadel
-			Write				citadel
-			Game				citadel/cvar_unlocker
-			Game				citadel/addons
 			Game				citadel
-			Mod				core
-			Write				core
 			Game				core
-			AddonRoot			citadel_addons
-			OfficialAddonRoot	citadel_community_addons
 		}
 
 		"UserSettingsPathID"		"USRLOCAL"
 		"LegacyUserSettingsPathID"	"MOD"
 	}
 	
-	AddonConfig
-	{
-		"UseOfficialAddons" "1"
-	}
-
 	MaterialSystem2
 	{
 		RenderModes
@@ -139,7 +126,6 @@
 		UseReverseDepth 1
 		Use32BitDepthBuffer 0
 		Use32BitDepthBufferWithoutStencil 0
-		SwapChainSampleableDepth 1
 		VulkanMutableSwapchain 1
 		"LowLatency"								"1"
 		"VulkanRequireSubgroupWaveOpSupport"		"1"

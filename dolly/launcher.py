@@ -26,6 +26,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 import uuid
+from .assert_watcher import dismiss_assert_dialogs
 from .runtime import application_root, resource_root, external_program_environment
 from .native_bridge import NativeBridge, ABI as NATIVE_ABI
 from . import __version__ as DOLLY_VERSION
@@ -43,7 +44,7 @@ NATIVE_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "native"
 EDITING_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "assets" / "editing"
 CONFETTI_PACK = NATIVE_ROOT / "assets" / "confetti" / "pak01_dir.vpk"
 CONFETTI_PACK_SHA256 = "99c0325fe333bfa12c3f23a2808767c2fd27b49fe0e5abe4531fa472519f8ae6"
-UNLOCKER_SHA256 = "5a4629e4de5bc82e007d5c6879cc2adc691bcbb8a65889f9e70b085e25865edd"
+UNLOCKER_SHA256 = "76ed1c913305f03d629c0a3214de3d075db6472f9cbd20d2a72ae55c7a860fc5"
 # Accepted game-module SHA-256 pins come from native/profiles/manifest.json, the
 # single source of truth shared with the native bridge and its build tests.
 try:
@@ -504,6 +505,43 @@ def _validate_port(port: int) -> int:
     return port
 
 
+def loose_ui_source_overrides(paths: GamePaths) -> list[Path]:
+    """Uncompiled Panorama files that a development launch loads before the VPK.
+
+    Deadlock ships compiled layouts and scripts inside pak01, but development
+    mode gives a same-named ``.xml``/``.js`` source precedence. Stale sources
+    left behind by a HUD mod or an earlier build can abort startup before the
+    console exists, so the launcher can report the real cause instead of only
+    the game's exit code.
+    """
+    found: list[Path] = []
+    for relative in ("panorama/layout", "panorama/scripts"):
+        root = paths.citadel_dir / relative
+        try:
+            if root.is_dir():
+                found.extend(path for path in root.rglob("*")
+                             if path.is_file() and path.suffix.casefold() in (".xml", ".js"))
+        except OSError:
+            continue  # Best-effort diagnostic; the launch check follows anyway.
+    return sorted(found)
+
+
+def _refuse_loose_ui_sources(paths: GamePaths) -> None:
+    overrides = loose_ui_source_overrides(paths)
+    if not overrides:
+        return
+    names = "\n".join("  " + path.relative_to(paths.citadel_dir).as_posix() for path in overrides[:8])
+    if len(overrides) > 8:
+        names += f"\n  ... and {len(overrides) - 8} more"
+    raise LaunchError(
+        "Deadlock's development mode loads uncompiled Panorama files from the game folder "
+        "before the packaged UI, and this install still contains stale ones:\n"
+        f"{names}\n"
+        "The updated game closes while loading these files. Move or rename the "
+        "game\\citadel\\panorama folder (for example to panorama.disabled), or validate "
+        "Deadlock's files in Steam, then launch again. No game files were changed.")
+
+
 def build_command(paths: GamePaths, overlay_dir: Path, port: int, demo_path: Path | None = None, protocol: str = "netcon", launch_options: str = "", *, native: bool = False) -> list[str]:
     """Start the development lobby; replay loading waits for unlocker readiness.
 
@@ -587,20 +625,36 @@ def _verified_confetti_pack() -> Path:
 
 
 def _atomic_write(path: Path, data: bytes, mode: int | None = None) -> None:
-    """Replace one file atomically after flushing its new contents to disk."""
+    """Replace one file atomically after flushing its new contents to disk.
+
+    Steam validation and modding guides can leave gameinfo.gi read-only, and
+    Windows refuses to replace a read-only destination. Clear exactly that
+    attribute for the swap, then apply the recorded mode to the final file.
+    """
     descriptor, name = tempfile.mkstemp(prefix=".dolly-write-", suffix=".tmp", dir=path.parent)
     temp = Path(name)
+    writable = stat.S_IWRITE | stat.S_IREAD
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+        try:
+            os.replace(temp, path)
+        except PermissionError:
+            if os.name != "nt" or not path.exists():
+                raise
+            os.chmod(path, writable)
+            os.replace(temp, path)
         if mode is not None:
-            os.chmod(temp, mode)
-        os.replace(temp, path)
+            os.chmod(path, mode)
     finally:
         if temp.exists():
-            temp.unlink()
+            try:
+                os.chmod(temp, writable)
+                temp.unlink()
+            except OSError:
+                pass  # A locked leftover must not hide the real write result.
 
 
 def _save_record(session_dir: Path, record: dict[str, Any]) -> None:
@@ -835,6 +889,7 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     from .replays import parse_launch_options
     parse_launch_options(launch_options)  # Validate before changing game files.
     paths = validate_game(game_path)
+    _refuse_loose_ui_sources(paths)
     port = _validate_port(port)
     if protocol not in ("vconsole", "netcon"):
         raise LaunchError("Console protocol must be vconsole or netcon.")
@@ -891,7 +946,7 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
                 f"DOLLY_NATIVE_1\n{bridge.token}\n{bridge.editor_pid}\n",
                 encoding="ascii", newline="\n")
         command = build_command(paths, overlay, port, demo, protocol, launch_options, native=native)
-        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6726", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
+        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6731", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
         metadata["editing_gameinfo_sha256"] = hashlib.sha256(editing.encode("utf-8")).hexdigest()
         if native:
             metadata["native_camera"] = {"abi": NATIVE_ABI, "game_sha256": NATIVE_GAME_SHA256,
@@ -936,7 +991,17 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         session = Session(process, session_dir, overlay, log_path, tuple(command), port, protocol, native=bridge)
 
         def watch() -> None:
-            code = process.wait()
+            while True:
+                try:
+                    for action in dismiss_assert_dialogs(process.pid):
+                        session.log("Dismissed Deadlock's assertion dialog with '" + action + "'.")
+                except Exception:
+                    pass  # Dismissal is best-effort and must never end the watch.
+                try:
+                    code = process.wait(timeout=0.5)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
             try:
                 session.record_exit(code)
             except (OSError, LaunchError) as exc:

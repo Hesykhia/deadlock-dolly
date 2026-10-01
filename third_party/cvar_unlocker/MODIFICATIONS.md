@@ -14,6 +14,24 @@ already invalidated, producing an access violation on normal game exit.
 
 ## Changes
 
+- `unlocker-build-6731.patch` (apply after the 6728 patch): adds the exact
+  October1 server hash and its relocated Source2ServerConfig001 vtable and
+  methods. Connect/Disconnect keep the this-8 thunk ABI and the tick method
+  still returns a float. Unknown module identities remain refused. Import,
+  offline ABI and lifecycle checks pass; build6731 live acceptance pending.
+
+- `unlocker-build-6730.patch` (apply after the 6728 patch): adds the exact
+  October1 server hash and its relocated Source2ServerConfig001 vtable and
+  methods. Connect/Disconnect keep the this-8 thunk ABI and the tick method
+  still returns a float. Unknown module identities remain refused. Import,
+  offline ABI and lifecycle checks pass; build6730 live acceptance pending.
+
+- `unlocker-build-6728.patch` (apply after the 6726 patch): adds the exact
+  October1 server hash and its relocated Source2ServerConfig001 vtable and
+  methods. Connect/Disconnect keep the this-8 thunk ABI and the tick method
+  still returns a float. Unknown module identities remain refused. Import,
+  offline ABI and lifecycle checks pass; build6728 live acceptance pending.
+
 - `unlocker-build-6723.patch` (apply after the 6722 patch): adds the exact
   September30 server hash and reviewed secondary configuration interface.
   Connect/Disconnect retain their this-8 thunk ABI and the tick method still
@@ -69,7 +87,7 @@ provenance.
 
 Apply `unlocker-shutdown.patch` to the pinned upstream source and
 `sdk-disconnect.patch` to its pinned SDK first, then apply
-`unlocker-build-6712.patch` at the source root. Then apply `unlocker-build-6722.patch` and `unlocker-build-6723.patch` in order.
+`unlocker-build-6712.patch` at the source root. Then apply `unlocker-build-6722.patch`, `unlocker-build-6723.patch`, `unlocker-build-6726.patch`, `unlocker-build-6728.patch` and `unlocker-build-6730.patch` in order.
 The 6712 patch includes `CMakeLists.txt`
 and offline tests. With the SDK at `sdk/`:
 
