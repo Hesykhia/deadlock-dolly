@@ -114,6 +114,39 @@ class BonePickerTests(unittest.TestCase):
         opened.assert_not_called()
         self.assertEqual(self.app.project.keyframes, [])
 
+    def test_first_bone_camera_transfers_follow_before_capture(self):
+        self.app.project = Project()
+        self.app._resolve_replay_tick_rate = Mock(return_value=32)
+        self.controller._follow_active = True
+        self.controller.status.return_value = {"tick": 1234}
+        picker.start_attached_view(self.app, Mock())
+        work = self.app._submit.call_args.args[1]
+        work()
+        names = [call[0] for call in self.controller.method_calls]
+        self.assertLess(names.index("enter_native_flight"), names.index("capture_at_replay"))
+        self.controller.enter_native_flight.assert_called_once_with(owner="panel")
+
+    def test_existing_bone_picker_transfers_follow_in_worker(self):
+        self.app._bone_picker_context = None
+        self.controller._follow_active = True
+        self.controller._recorder_active.return_value = False
+        self.bridge.editor_status.return_value = dict(ready=True, flight_active=False, paused=True)
+        picker.open_picker(self.app)
+        self.controller.enter_native_flight.assert_not_called()
+        self.app._submit.call_args.args[1]()
+        self.controller.enter_native_flight.assert_called_once_with(owner="panel")
+
+    def test_failed_follow_handoff_does_not_capture_or_open_picker(self):
+        self.app.project = Project()
+        self.app._resolve_replay_tick_rate = Mock(return_value=32)
+        self.controller._follow_active = True
+        self.controller.enter_native_flight.side_effect = RuntimeError("Restoration failed")
+        picker.start_attached_view(self.app, Mock())
+        with self.assertRaisesRegex(RuntimeError, "Restoration failed"):
+            self.app._submit.call_args.args[1]()
+        self.controller.capture_at_replay.assert_not_called()
+        self.assertEqual(self.app.project.keyframes, [])
+
     def test_timed_bone_export_preserves_identity_offsets_and_compiles(self):
         from dolly.native_effects import compile_shot
         original = copy.deepcopy(self.app.project)

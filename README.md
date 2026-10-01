@@ -5,7 +5,7 @@
 A camera-path editor for local Deadlock replays. Capture the free camera,
 shape a shot and play it back with animated framing and camera variables.
 
-**Current source: 0.5.46 alpha.** The portable Windows build opens through
+**Current source: 0.6.0-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.
 
 **THIS MOD INJECTS CODE INTO DEADLOCK — USE AT YOUR OWN RISK.**
@@ -25,6 +25,11 @@ Deadlock normally.
 
 ## Features
 
+- In-game camera list: click to select, double-click to view, and delete the selected camera.
+- Shared shot Undo/Redo in the desktop and in-game editors.
+- Game Follow with hero selection, adjustable distance/shoulder/height, slider resets and optional game HUD.
+- Bone-camera preview and attachment, including direct transfer from paused Follow.
+- Captured lens metadata preserved through replay reloads, playback, save/reopen and history.
 - Capture cameras from the game with configurable keyboard or mouse bindings.
 - Smooth position paths, rotation and camera bank.
 - Native camera playback evaluated for each main rendered view.
@@ -42,6 +47,18 @@ Deadlock normally.
 - Isolated world, players and effects layer takes; players and effects get a real alpha channel from black and white matte passes.
 - Optional ReShade color effects, its in-game menu on a configurable F11 key, and the verified scene depth published to ReShade for depth-based effects.
 - Startup update check with manual checks in Settings.
+- Optional game-only audio for real-time video, plus a separate advanced reconstructed-audio workflow.
+
+### 0.6.0 highlights
+
+This release updates reviewed compatibility for **Deadlock build 6726 / Steam
+build 25639407**, restores player discovery in local `tv_record` demos, and
+adds the in-game camera list and shared Undo/Redo. It also fixes captured-lens
+framing, floating health-bar controls, real-time recording gaps caused by
+repeated replay-clock values, and final-frame loss when adding audio.
+
+See the [changelog](docs/CHANGELOG.md) for details. Older custom-lens shots that
+lack lens metadata may need recapture; new captures preserve their framing.
 
 ## Using the Windows app
 
@@ -75,13 +92,28 @@ supported effects follow each rendered frame; Updates / s controls monitoring.
 
 Enable the desktop **Full editor** switch for Cameras, Effects and the shot
 timeline. The switch preserves the current shot and remembers the layout.
-In-game, **Camera**, **Lens** and **Export** divide the floating panel.
+In-game, the tabs are **CAMERA, FOLLOW, BONE PICKER, LOOK and EXPORT**.
+
+On **CAMERA**, one click selects a saved camera without moving the view;
+double-click jumps to it. Delete removes only that camera. Undo/Redo restore
+shot edits through the desktop or in-game controls. With the Dolly panel open,
+use **Ctrl+Z** to undo and **Ctrl+Y / Ctrl+Shift+Z** to redo. These controls do
+not rewind the replay or undo external game settings, and are guarded during
+playback, recording and active pickers.
+
+On **FOLLOW**, choose a hero to follow their aim with the game's camera.
+Adjust distance, shoulder and height; right-click a slider to reset its normal
+value. The HUD option lets you retain or hide the game UI. Follow is separate
+from a bone attachment. You can open **BONE PICKER** directly from paused Follow.
+
+Regular camera paths hold their final view when playback finishes. Explicit
+**F9** or **F6 / Stop–restore** returns control through the spectator handoff.
 
 On the desktop Effects tab, **+ Range DOF** creates a four-value range track.
 Its value order is near blurry, near crisp, far crisp, far blurry. See the
 [supported camera cvars](docs/SUPPORTED_CAMERA_CVARS.md) for values and examples.
 
-In the in-game **Looks** tab, right-click a DOF value to restore Dolly's default.
+In the in-game **LOOK** tab, right-click a DOF value to restore Dolly's default.
 Enabling Citadel DOF switches off Native range DOF and supplies a usable aperture
 when none is authored. Switching back retains your range settings and animation.
 
@@ -104,7 +136,10 @@ Choose an output path, FPS and encoder on **Export**, then use **F8 → Export �
 and **Finish recording** in the game. Video capture excludes Dolly controls
 and path guides. Real-time capture follows the game; fixed-step export advances
 the simulation one frame at a time so the output stays deterministic. There is
-no audio, and output resolution follows the game. Recording continues through
+optional game-only audio for real-time capture, and output resolution follows
+the game. Fixed-step bundled audio is rejected; export silent layers separately.
+Reconstructed audio is an advanced workflow with additional tools.
+Recording continues through
 camera handoffs and desktop controls; use Finish recording to save.
 
 The **Depth master** option writes a paired depth `.mov` (and optional EXR
@@ -129,7 +164,8 @@ and limits.
 Local tv_record .dem files can be selected like other replays. If a native shot
 starts between recorded packets, Dolly starts at the next verified packet and
 reports the skipped fraction. Camera/effect key times stay unchanged. Frozen
-native preview holds the current scene without seeking. Some console position-
+native preview holds the current scene without seeking. The scripted intro
+remains visible during shot preparation until a true skip is verified. Some console position-
 calibration recoveries still require exact ticks and can fail on sparse recordings.
 
 ## Compatibility
@@ -142,16 +178,22 @@ unrecognized build instead of injecting. **Settings → Troubleshooting & recove
 Native is unavailable. See [game updates](docs/internal/GAME_UPDATES.md) for the
 manifest, signature scanning and profile-generation workflow.
 
-0.5.24 is an alpha. Camera capture and native playback build on the
-0.4.x baseline, with rotation curves, attachment and in-between shot seeking. The 0.5.x line adds
-the compatibility scanner and AOB fallback, real-time and fixed-step recording,
-the paired depth master and layer takes, the ReShade runtime with a bundled
-shader library and depth publication, the Citadel glow / health-bar / DOF
-controls, the live replay speed control, in-folder update staging, and the
-startup update check. Earlier
-renderer slowdowns do not have a confirmed general fix; build and release checks
-live in [VALIDATION.md](docs/internal/VALIDATION.md). Audio, expanded in-game curve
-editing and arbitrary output resizing remain planned.
+0.6.0-alpha was checked against build 6726. Current-build checks covered camera
+paths and mode transitions, camera-list/history controls, health/HUD restoration,
+DOF with Confetti, short layer exports, and a three-second 180-frame Color/audio
+take with zero missed slots and user-confirmed smooth, aligned playback.
+These bounded checks do not certify every GPU, long take or 4K workload.
+
+Floating health bars and the selected hero's health/ability HUD use separate
+controls. Glow remains subject to the game's eligibility rules: enabling it
+does not force every hero to glow, and its visual effect was not conclusively
+verified. A reported particle checkerboard was not reproduced locally across
+the tested presets and quality settings; do not assume every installation is fixed.
+
+Real-time recording now retains rendered frames when replay time briefly repeats.
+Genuine missed capture slots are still reported; high export FPS is not a promise
+that the game or encoder can sustain that rate. See [validation notes](docs/internal/VALIDATION.md)
+and [Video and ReShade](docs/VIDEO_AND_RESHADE.md) for workflow limits.
 
 ## Session files
 

@@ -39,6 +39,7 @@ from dolly.path import (AttachKey, CONFETTI_SPAWN_HEIGHT_DEFAULT, CURVE_CHANNELS
                         CvarTrack, Keyframe, Project, TrackKey, parse_cvar_value,
                         format_cvar_value)
 from dolly.settings import AppSettings, load_settings, save_settings
+from dolly.shot_history import ShotHistory
 from dolly.particles import (LABEL_TO_ID, PARTICLE_DEFAULT, PARTICLE_INTENSITY_DEFAULT,
                              PARTICLE_INTENSITY_MAX, PARTICLE_INTENSITY_MIN, PARTICLE_LABELS)
 from dolly.smoothing import smoothing_window
@@ -148,6 +149,7 @@ class DollyApp:
         self.dirty = False
         self.file_path: Path | None = None
         self.project = Project(name="Untitled shot", keyframes=[], tracks=[])
+        self.shot_history = ShotHistory(self.project)
         self.controller = Controller(log_callback=self._enqueue_log)
         self.video_export = VideoExport(self.controller)
         self.worker = threading.Thread(target=self._worker_loop, name="dolly-ui-operations", daemon=True)
@@ -279,6 +281,9 @@ class DollyApp:
         self.root.bind("<Control-s>", lambda _event: self.save())
         self.root.bind("<Control-o>", lambda _event: self.open())
         self.root.bind("<Control-n>", lambda _event: self.new())
+        self.root.bind("<Control-z>", self._history_shortcut)
+        self.root.bind("<Control-y>", lambda event: self._history_shortcut(event, True))
+        self.root.bind("<Control-Shift-Z>", lambda event: self._history_shortcut(event, True))
         self.root.after(80, self._poll)
         self._submit("Looking for Deadlock", discover_game, self._discovered)
 
@@ -366,6 +371,10 @@ class DollyApp:
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self._on_close)
         menu.add_cascade(label="File", menu=file_menu)
+        self.edit_menu = tk.Menu(menu, tearoff=False, postcommand=self._refresh_history_menu)
+        self.edit_menu.add_command(label="Undo shot edit", accelerator="Ctrl+Z", command=self.undo_shot)
+        self.edit_menu.add_command(label="Redo shot edit", accelerator="Ctrl+Y", command=self.redo_shot)
+        menu.add_cascade(label="Edit", menu=self.edit_menu)
         self.root.config(menu=menu)
 
     def _build_window(self):
@@ -2378,6 +2387,8 @@ class DollyApp:
             self.status_text.set("Please wait for the current operation to finish.")
             return False
         self._close_paused_camera(stop=False)
+        if function == self.controller.stop:
+            function = lambda: self.controller.stop(preserve_speed=True)
         return self._submit(label, function)
 
     def _open_coordinates(self):
@@ -3095,8 +3106,14 @@ class DollyApp:
         self._guard("Shot settings", self._sync_options)
 
     def _sync_options(self):
-        tick = _finite(self.start_tick.get(), "Shot start tick")
-        rate = _finite(self.tick_rate.get(), "Ticks per second")
+        def numeric(variable, original, label):
+            raw = variable.get()
+            value = _finite(raw, label)
+            # A refreshed text field displays a rounded number. Merely syncing
+            # that field must not introduce an edit or erase Redo after Undo.
+            return original if raw.strip() == _number(original) else value
+        tick = numeric(self.start_tick, self.project.start_tick, "Shot start tick")
+        rate = numeric(self.tick_rate, self.project.tick_rate, "Ticks per second")
         if tick < 0 or int(tick) != tick:
             raise ValueError("Shot start tick must be a non-negative whole number.")
         if rate <= 0:
@@ -3106,12 +3123,18 @@ class DollyApp:
         confetti_despawn = getattr(self, "confetti_despawn_on_ground", None)
         preset_variable = getattr(self, "particles_preset", None)
         intensity_variable = getattr(self, "particles_intensity", None)
+        aspect = self._read_standard_aspect()
+        aspect_display = next((label for label, value in ASPECT_PRESETS.items()
+                               if abs(value - self.project.standard_aspect) < 1e-7),
+                              _number(self.project.standard_aspect))
+        if self.standard_aspect.get().strip() == aspect_display:
+            aspect = self.project.standard_aspect
         values = dict(start_tick=int(tick), tick_rate=rate, interpolation=self.interpolation.get(),
-                      rotation_mode=self.rotation.get(), standard_aspect=self._read_standard_aspect(),
+                      rotation_mode=self.rotation.get(), standard_aspect=aspect,
                       lens_interpolation=self.lens_interpolation.get(),
                       confetti_enabled=(bool(confetti_enabled.get()) if confetti_enabled is not None
                                         else self.project.confetti_enabled),
-                      confetti_spawn_height=(_finite(confetti_height.get(), "Particle spawn height")
+                      confetti_spawn_height=(numeric(confetti_height, self.project.confetti_spawn_height, "Particle spawn height")
                                              if confetti_height is not None else self.project.confetti_spawn_height),
                       confetti_despawn_on_ground=(bool(confetti_despawn.get()) if confetti_despawn is not None
                                                   else self.project.confetti_despawn_on_ground),
@@ -3119,7 +3142,7 @@ class DollyApp:
                                                         self.project.particles_preset)
                                         if preset_variable is not None
                                         else self.project.particles_preset),
-                      particles_intensity=(_finite(intensity_variable.get(), "Particle intensity")
+                      particles_intensity=(numeric(intensity_variable, self.project.particles_intensity, "Particle intensity")
                                            if intensity_variable is not None
                                            else self.project.particles_intensity))
         changed = any(getattr(self.project, name) != value for name, value in values.items())
@@ -3160,6 +3183,9 @@ class DollyApp:
         self.project = candidate
         self._mark_dirty()
         self._refresh_keys(select_time)
+        history = getattr(self, "shot_history", None)
+        if history is not None:
+            history.select(select_time)
 
     def _add_key(self):
         def operation():
@@ -3177,6 +3203,7 @@ class DollyApp:
             key = self._read_key()
             existing = self.project.keyframes[index]
             key.fov = existing.fov  # Legacy metadata stays intact.
+            key.lens_scale = existing.lens_scale
             key.source = existing.source
             key.source_blend = existing.source_blend
             key.attach = copy.deepcopy(existing.attach)
@@ -3191,14 +3218,27 @@ class DollyApp:
         self._guard("Update keyframe", operation)
 
     def _delete_key(self):
+        if not self._shot_edit_ready():
+            return
         index = self._selection_index(self.camera_tree)
-        if index is not None:
-            self._guard("Delete keyframe", lambda: self._commit_camera([key for i, key in enumerate(self.project.keyframes) if i != index]))
+        if index is not None and 0 <= index < len(self.project.keyframes):
+            keys = [key for i, key in enumerate(self.project.keyframes) if i != index]
+            selected_time = keys[min(index, len(keys) - 1)].time if keys else None
+            def operation():
+                self._commit_camera(keys, selected_time)
+                if not keys:
+                    self._set_time(0)
+                    self.preview_attach = False
+                self.status_text.set(f"Camera {index + 1:02d} deleted. Undo restores it.")
+            self._guard("Delete keyframe", operation)
 
     def _select_key(self, _event=None):
         index = self._selection_index(self.camera_tree)
         if index is not None and index < len(self.project.keyframes):
             key = self.project.keyframes[index]
+            history = getattr(self, "shot_history", None)
+            if history is not None:
+                history.select(key.time)
             for field in FIELDS:
                 self.key_vars[field].set(_number(getattr(key, field)))
             self._set_time(key.time)
@@ -4172,10 +4212,68 @@ class DollyApp:
         self.root.title(f"Deadlock Dolly — {self.project.name}{marker}")
 
     def _mark_dirty(self):
+        history = getattr(self, "shot_history", None)
+        if history is not None:
+            index = self._selection_index(self.camera_tree)
+            selected_time = (self.project.keyframes[index].time
+                             if index is not None and 0 <= index < len(self.project.keyframes) else None)
+            history.record(self.project, selected_time,
+                           merge_key=getattr(self, "_history_edit_group", None))
         self.dirty = True
         self._title()
         if hasattr(self, "native_editor_active"):
             editor_session.configure(self)
+
+    def _shot_edit_ready(self):
+        video = getattr(self, "video_export", None)
+        recording = video is not None and video.status().get("state") in ACTIVE_STATES
+        if (self.busy or self.playing or recording or getattr(self, "_layer_queue", None)
+                or getattr(self, "_active_layer_take", None) or getattr(self, "_pending_capture", None)
+                or getattr(self, "_bone_picker_context", None) or getattr(self, "preview_attach", False)):
+            self.status_text.set("Stop playback/recording and detach any live bone preview before editing the shot.")
+            return False
+        return True
+
+    def _refresh_history_menu(self):
+        history = self.shot_history
+        self.edit_menu.entryconfigure(0, state="normal" if history.can_undo else "disabled")
+        self.edit_menu.entryconfigure(1, state="normal" if history.can_redo else "disabled")
+
+    def _history_shortcut(self, event, redo=False):
+        if event.widget.winfo_class() in ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "TCombobox"):
+            return None
+        (self.redo_shot if redo else self.undo_shot)()
+        return "break"
+
+    def _move_shot_history(self, redo=False):
+        if not self._shot_edit_ready():
+            return
+        # Commit valid desktop option edits before Undo; a no-op must preserve Redo.
+        self._sync_options()
+        state = self.shot_history.move(redo)
+        if state is None:
+            self.status_text.set("Nothing to redo." if redo else "Nothing to undo.")
+            return
+        self.project = state.project
+        self.dirty = self.shot_history.is_dirty(self.project)
+        self._native_editor_config_cache = None
+        self._native_attach_cache = None
+        self._native_camera_selected = None
+        self._refreshing_shot_history = True
+        try:
+            self._refresh_project()
+            self._refresh_keys(state.selected_time)
+            self._set_time(state.selected_time or 0)
+        finally:
+            self._refreshing_shot_history = False
+        editor_session.configure(self)
+        self.status_text.set("Shot edit redone." if redo else "Shot edit undone.")
+
+    def undo_shot(self):
+        self._guard("Undo shot edit", self._move_shot_history)
+
+    def redo_shot(self):
+        self._guard("Redo shot edit", lambda: self._move_shot_history(True))
 
     def _allow_discard(self):
         if self.playing or self.busy:
@@ -4198,6 +4296,8 @@ class DollyApp:
             return
         self._close_paused_camera()
         self.project = Project(name="Untitled shot", keyframes=[], tracks=[])
+        self.shot_history.reset(self.project)
+        self._native_camera_page = 0
         self.file_path = None
         self.dirty = False
         self._refresh_project()
@@ -4216,6 +4316,8 @@ class DollyApp:
             project.validate()
             self._close_paused_camera()
             self.project = project
+            self.shot_history.reset(self.project)
+            self._native_camera_page = 0
             self.file_path = Path(path)
             self.dirty = False
             self._refresh_project()
@@ -4244,6 +4346,7 @@ class DollyApp:
                     return False
                 path = Path(chosen)
             self.project.save(path)
+            self.shot_history.mark_saved(self.project)
             self.file_path = path
             self.dirty = False
             self._title()

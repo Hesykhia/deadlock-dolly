@@ -1,4 +1,5 @@
 #include "dolly_video_math.hpp"
+#include "dolly_capture_timing.hpp"
 #include <array>
 #include <cstdlib>
 #include <cstdio>
@@ -13,6 +14,20 @@ void require(bool value) {
 
 int main() {
     using namespace dolly::video;
+    CaptureTrace capture_trace;
+    require(!capture_trace.begin(false, 0, 1, 0));
+    require(!capture_trace.begin(true, -1, 1, 0));
+    require(!capture_trace.begin(true, std::numeric_limits<double>::quiet_NaN(), 1, 0));
+    require(capture_trace.size == 0);
+    for (unsigned i = 0; i < 512; ++i) {
+        auto* sample = capture_trace.begin(true, i / 120.0, i + 1, 2);
+        require(sample && sample->entry == i + 1 && sample->pending == 2);
+        sample->outcome = CaptureTrace::admitted;
+    }
+    require(!capture_trace.begin(true, 5, 999, 0));
+    require(capture_trace.size == 512 && capture_trace.samples[0].entry == 1 &&
+            capture_trace.samples[511].entry == 512);
+
     require(frame_admission_open(0, 2) && frame_admission_open(1, 2));
     require(!frame_admission_open(2, 2) && !frame_admission_open(1000, 2));
     require(frame_admission_open(std::numeric_limits<std::uint64_t>::max(), 0));
@@ -27,6 +42,34 @@ int main() {
     require(trace.samples[255].frame == 255 && !trace.samples[255].native);
     require(trace.samples[255].phase == 255 / 60.0);
 
+    // Recorded startup repeats must not create a gap in real-time video.
+    // At120rendered frames/s, a30Hz replay clock can repeat four times.
+    for (bool fixed : {false, true}) {
+        Cadence clock;
+        clock.frequency = 120000;
+        clock.fps = 60;
+        double previous = -1;
+        unsigned admitted = 0;
+        std::uint64_t total_missed = 0;
+        for (unsigned i = 0; i < 120; ++i) {
+            const double phase = (i / 4) / 30.0;
+            if (!dolly::capture_video_phase(previous, phase, fixed, true, false))
+                continue;
+            previous = phase;
+            std::uint64_t stamp = 0, dropped = 0;
+            if (clock.sample(i * 1000, stamp, dropped)) {
+                ++admitted;
+                total_missed += dropped;
+            }
+        }
+        require(admitted == (fixed ? 30u : 60u));
+        require(fixed || total_missed == 0);
+    }
+    require(!dolly::capture_video_phase(1, 1, false, true, true));
+    require(!dolly::capture_video_phase(1, 1, false, false, false));
+    require(!dolly::capture_video_phase(1, .9, false, true, false));
+    require(!dolly::capture_video_phase(0, -1, false, true, false));
+    require(dolly::capture_video_phase(.9, 1, false, true, true));
     Cadence cadence;
     cadence.frequency = 10000000;
     cadence.fps = 60;

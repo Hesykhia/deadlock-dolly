@@ -49,10 +49,10 @@ struct SceneLayout {
     std::uintptr_t object, table, producer, frame, stack, records, capacity, ids, transforms;
     std::uintptr_t cpu_transforms, owner, gpu_buffer;
 };
-constexpr SceneLayout kLegacyScene{0x8cd2e0, 0x5d4fe8, 0x564b0, 0x8ce9b8, 0x8cfce8,
-    0x8cfde0, 0x8cfde8, 0x8cfc50, 0x8cfd40, 0x8cfce0, 0xc0, 0x60};
-constexpr SceneLayout kSeptemberScene{0x955cc0, 0x61e7d0, 0x5c8e0, 0x957458, 0x957be8,
-    0x957ce0, 0x957ce8, 0x957b48, 0x957c40, 0x957be0, 0xd8, 0x70};
+constexpr SceneLayout kLegacyScene{0x8cd2e0, 0x5d4fe8, 0x564b0,  0x8ce9b8, 0x8cfce8, 0x8cfde0,
+                                   0x8cfde8, 0x8cfc50, 0x8cfd40, 0x8cfce0, 0xc0,     0x60};
+constexpr SceneLayout kSeptemberScene{0x955cc0, 0x61e7d0, 0x5c8e0,  0x957458, 0x957be8, 0x957ce0,
+                                      0x957ce8, 0x957b48, 0x957c40, 0x957be0, 0xd8,     0x70};
 SceneLayout sceneLayout = kLegacyScene;
 std::atomic<PoseObserver> poseObserver{nullptr};
 bool configured = false, hashesOk = false, attempted = false, captured = false,
@@ -562,7 +562,9 @@ std::uintptr_t cpu(std::uintptr_t global) noexcept {
     return sceneBase ? value<std::uintptr_t>(value<std::uintptr_t>(sceneBase + global) + 0x18) : 0;
 }
 std::uintptr_t buffer(std::uintptr_t global) noexcept {
-    return sceneBase ? value<std::uintptr_t>(value<std::uintptr_t>(sceneBase + global) + sceneLayout.gpu_buffer) : 0;
+    return sceneBase ? value<std::uintptr_t>(value<std::uintptr_t>(sceneBase + global) +
+                                             sceneLayout.gpu_buffer)
+                     : 0;
 }
 // Diagnostics keep a chronological log. Shot exports recycle only unreferenced
 // slots; GPU evidence stays pinned until its frame has been verified and written.
@@ -621,8 +623,8 @@ struct Write {
     }
 };
 int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
-                    std::uint32_t mode, unsigned char* flag, std::uint32_t* outA,
-                    std::uint32_t* outB, std::uint32_t* outC) {
+                std::uint32_t mode, unsigned char* flag, std::uint32_t* outA, std::uint32_t* outB,
+                std::uint32_t* outC) {
     const auto obj = reinterpret_cast<std::uintptr_t>(object);
     ++producerCalls;
     if (auto observer = poseObserver.load(std::memory_order_acquire))
@@ -632,7 +634,8 @@ int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* 
     // allocation, no GPU work.
     if (hidingActive.load(std::memory_order_acquire) &&
         !captureActive.load(std::memory_order_acquire) && !sequenceV2) {
-        const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+        const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque,
+                                            params, mode, flag, outA, outB, outC);
         if (result >= 0 && static_cast<unsigned>(result) < HideSlots)
             hideOwners[result].store((std::uint64_t(frame()) << 32) |
                                          value<std::uint32_t>(obj + sceneLayout.owner),
@@ -644,15 +647,16 @@ int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* 
     if (captureActive.load(std::memory_order_acquire)) {
         const auto owner = value<std::uint32_t>(obj + sceneLayout.owner);
         if (!owner_is_player(owner, obj)) {
-            const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+            const int result = forward_producer(original, originalSeptember, a, object, mesh,
+                                                opaque, params, mode, flag, outA, outB, outC);
             // Instance indices are recycled, including within one frame. A
             // non-selected owner must replace any old selected-owner entry.
             // Otherwise equal GPU record words can validate a stale identity.
-            if (result >= 0 &&
-                static_cast<unsigned>(result) < value<std::uint32_t>(sceneBase + sceneLayout.capacity)) {
+            if (result >= 0 && static_cast<unsigned>(result) <
+                                   value<std::uint32_t>(sceneBase + sceneLayout.capacity)) {
                 const std::uint32_t empty[8]{};
-                producer_store(frame(), static_cast<unsigned>(result), buffer(sceneLayout.records), 0, empty,
-                               0);
+                producer_store(frame(), static_cast<unsigned>(result), buffer(sceneLayout.records),
+                               0, empty, 0);
             }
             return result;
         }
@@ -662,7 +666,8 @@ int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* 
         // preparation frames would otherwise fill the bounded event buffer
         // before the first frame can be sealed.
         if (sequenceV3 && authoredReplayTime.load(std::memory_order_acquire) < 0.0)
-            return forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+            return forward_producer(original, originalSeptember, a, object, mesh, opaque, params,
+                                    mode, flag, outA, outB, outC);
         ++producerKnownCalls;
     }
     if (sequenceV2) {
@@ -670,8 +675,8 @@ int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* 
         // never consume the bounded event ring: a players-only take would
         // otherwise fill it long before the last frame is sealed.
         const auto engineFrame = frame();
-        const int sequenceResult =
-            forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+        const int sequenceResult = forward_producer(original, originalSeptember, a, object, mesh,
+                                                    opaque, params, mode, flag, outA, outB, outC);
         const auto ownerHandle = value<std::uint32_t>(obj + sceneLayout.owner);
         const auto stack = value<std::uintptr_t>(sceneBase + sceneLayout.stack);
         const auto base = value<std::uintptr_t>(stack + 0x18);
@@ -699,12 +704,14 @@ int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* 
         e->w[7] = m;
         e->w[8] = value<std::uint32_t>(obj + sceneLayout.owner);
         e->w[9] = value<std::uintptr_t>(obj);
-        e->w[34] = value<std::uint64_t>(septemberScene ? m + 0x40 : value<std::uintptr_t>(m + 0x48) + 0x10);
+        e->w[34] = value<std::uint64_t>(septemberScene ? m + 0x40
+                                                       : value<std::uintptr_t>(m + 0x48) + 0x10);
         e->w[35] = mode;
     }
     // Exactly one original invocation. The first register argument remains
     // opaque; caller-owned in/out pointers and all nine argument slots survive.
-    const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
+    const int result = forward_producer(original, originalSeptember, a, object, mesh, opaque,
+                                        params, mode, flag, outA, outB, outC);
     const auto engineFrame = frame();
     const auto ownerHandle = value<std::uint32_t>(obj + sceneLayout.owner);
     const auto stack = value<std::uintptr_t>(sceneBase + sceneLayout.stack);
@@ -750,21 +757,23 @@ int hook_common(std::uintptr_t a, void* object, void* mesh, void* opaque, void* 
     return result;
 }
 int __fastcall hook(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
-                    std::uint32_t mode, unsigned char* flag, std::uint32_t* outA, std::uint32_t* outB) {
+                    std::uint32_t mode, unsigned char* flag, std::uint32_t* outA,
+                    std::uint32_t* outB) {
     return hook_common(a, object, mesh, opaque, params, mode, flag, outA, outB, nullptr);
 }
-int __fastcall hook_september(std::uintptr_t a, void* object, void* mesh, void* opaque, void* params,
-                    std::uint32_t mode, unsigned char* flag, std::uint32_t* outA, std::uint32_t* outB,
-                    std::uint32_t* outC) {
+int __fastcall hook_september(std::uintptr_t a, void* object, void* mesh, void* opaque,
+                              void* params, std::uint32_t mode, unsigned char* flag,
+                              std::uint32_t* outA, std::uint32_t* outB, std::uint32_t* outC) {
     return hook_common(a, object, mesh, opaque, params, mode, flag, outA, outB, outC);
 }
 bool install(void* target) noexcept {
     if (!hashesOk || !sceneBase ||
         value<std::uintptr_t>(sceneBase + sceneLayout.object) != sceneBase + sceneLayout.table)
         return false;
-    constexpr unsigned char septemberPrologue[] = {
-        0x48,0x8b,0xc4,0x4c,0x89,0x48,0x20,0x4c,0x89,0x40,0x18,0x48,0x89,0x50,0x10,0x48,
-        0x89,0x48,0x08,0x55,0x53,0x48,0x8d,0x68,0xe8,0x48,0x81,0xec,0x08,0x01,0x00,0x00};
+    constexpr unsigned char septemberPrologue[] = {0x48, 0x8b, 0xc4, 0x4c, 0x89, 0x48, 0x20, 0x4c,
+                                                   0x89, 0x40, 0x18, 0x48, 0x89, 0x50, 0x10, 0x48,
+                                                   0x89, 0x48, 0x08, 0x55, 0x53, 0x48, 0x8d, 0x68,
+                                                   0xe8, 0x48, 0x81, 0xec, 0x08, 0x01, 0x00, 0x00};
     unsigned char bytes[sizeof(Prologue)]{};
     if (!read(reinterpret_cast<std::uintptr_t>(target), bytes) ||
         std::memcmp(bytes, septemberScene ? septemberPrologue : Prologue, sizeof(bytes)))
@@ -772,8 +781,11 @@ bool install(void* target) noexcept {
     const auto init = MH_Initialize();
     if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED)
         return false;
-    if (MH_CreateHook(target, septemberScene ? reinterpret_cast<void*>(&hook_september) : reinterpret_cast<void*>(&hook),
-                      septemberScene ? reinterpret_cast<void**>(&originalSeptember) : reinterpret_cast<void**>(&original)) != MH_OK)
+    if (MH_CreateHook(target,
+                      septemberScene ? reinterpret_cast<void*>(&hook_september)
+                                     : reinterpret_cast<void*>(&hook),
+                      septemberScene ? reinterpret_cast<void**>(&originalSeptember)
+                                     : reinterpret_cast<void**>(&original)) != MH_OK)
         return false;
     if (MH_EnableHook(target) != MH_OK) {
         MH_RemoveHook(target);
@@ -922,7 +934,7 @@ void mapped_upload(ID3D11DeviceContext* context, ID3D11Resource* resource, unsig
         reinterpret_cast<std::uintptr_t>(mappedBuffer.Get()) == buffer(sceneLayout.records))
         submittedOwners.invalidate(); // Unsupported writer: no stale ownership.
 }
-void configure(std::uintptr_t base, bool hashes_ok, bool september) noexcept {
+void configure(std::uintptr_t base, bool hashes_ok, bool september, bool build6726) noexcept {
     if (configured)
         return;
     configured = true;
@@ -930,6 +942,8 @@ void configure(std::uintptr_t base, bool hashes_ok, bool september) noexcept {
     hashesOk = hashes_ok;
     septemberScene = september && hashes_ok;
     sceneLayout = septemberScene ? kSeptemberScene : kLegacyScene;
+    if (hashes_ok && build6726)
+        sceneLayout.table = 0x61e860;
     layoutRequested.store(hashes_ok, std::memory_order_release);
     HMODULE self = nullptr;
     wchar_t path[32768]{};
@@ -997,9 +1011,9 @@ void stall_report() noexcept {
       << lastPresentDevice.load() << " changes " << presentDeviceChanges.load() << "\n";
     f << "calls draw " << drawHookCalls.load() << " producers " << producerCalls.load() << " known "
       << producerKnownCalls.load() << "\n";
-    f << "buffers records " << buffer(sceneLayout.records) << " ids " << buffer(sceneLayout.ids) << " stack "
-      << buffer(sceneLayout.stack) << " capacity " << buffer(sceneLayout.capacity) << " frame " << frame()
-      << " presentEpoch " << presentEpoch.load() << "\n";
+    f << "buffers records " << buffer(sceneLayout.records) << " ids " << buffer(sceneLayout.ids)
+      << " stack " << buffer(sceneLayout.stack) << " capacity " << buffer(sceneLayout.capacity)
+      << " frame " << frame() << " presentEpoch " << presentEpoch.load() << "\n";
     for (unsigned i = 0; i < SequenceRing; ++i) {
         const auto& s = colorFrames[i];
         f << "ring " << i << " sealed " << (s.sealed ? 1 : 0) << " prepared "
@@ -1112,7 +1126,8 @@ void tick() noexcept {
             return;
         attempted = true;
         if (!hashesOk || !sceneBase ||
-            value<std::uintptr_t>(sceneBase + sceneLayout.object) != sceneBase + sceneLayout.table) {
+            value<std::uintptr_t>(sceneBase + sceneLayout.object) !=
+                sceneBase + sceneLayout.table) {
             status("rejected exact module/layout gate");
             captured = true;
             return;

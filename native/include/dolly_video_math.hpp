@@ -39,6 +39,28 @@ inline std::uint64_t final_sample_end(std::uint64_t previous_pts, std::uint32_t 
         end = clock_units(frame + 2, fixed_fps, 10000000);
     return end;
 }
+// Bounded diagnostic trace for explicitly capped takes. The render producer
+// owns writes; the encoder reads only after ready=false and producer quiescence.
+struct CaptureTrace {
+    enum Outcome : unsigned { other, admitted, cadence_wait, repeated_phase, queue_full, count };
+    struct Sample {
+        std::uint64_t entry = 0, readback = 0, end = 0, missed = 0;
+        double phase = 0;
+        unsigned pending = 0;
+        Outcome outcome = other;
+    };
+    std::array<Sample, 512> samples{};
+    std::size_t size = 0;
+    Sample* begin(bool enabled, double phase, std::uint64_t entry, unsigned pending) noexcept {
+        if (!enabled || !std::isfinite(phase) || phase < 0 || size == samples.size())
+            return nullptr;
+        auto& sample = samples[size++];
+        sample.entry = entry;
+        sample.phase = phase;
+        sample.pending = pending;
+        return &sample;
+    }
+};
 struct Cadence {
     std::uint64_t frequency = 1, start = 0, last_slot = 0;
     std::uint32_t fps = 30;

@@ -35,6 +35,14 @@ The build 6712 intro constructor at client+0x1a82910 stores the object at
 The normal key handler at 0x1aae800 calls dismissal at 0x1a8b7d0. Relevant live
 code spans and object type/phase are verified under the same exact client hash.
 
+Build 6726 was reviewed separately: manager client+0x31487b0, manager vtable
+0x26246a8, resource singleton pointer 0x3d823b0, and intro pointer 0x3be1e08.
+The resource module fingerprint is now 86d09bc9.... Its CResourceSystem RTTI
+still identifies table 0x6bc58 and slot +0xc0 points to 0x1c860. The complete
+13-byte query is unchanged: null returns true; otherwise it reads manifest+0x44.
+The client lifecycle code spans retain their reviewed instructions after relocation.
+This offline review does not substitute for the startup gate's live readiness checks.
+
 The reviewed client and resourcesystem SHA-256 pins are separate from Native
 camera compatibility. Exact file hashes, relevant live code spans and runtime
 vtable/query identities must agree. Unknown builds fail closed for automatic

@@ -26,6 +26,7 @@ FORMAT_VERSION = 2
 VECTOR_FORMAT_VERSION = 3
 CONFETTI_FORMAT_VERSION = 7
 PARTICLE_FORMAT_VERSION = 8
+LENS_FORMAT_VERSION = 9
 CONFETTI_SPAWN_HEIGHT_DEFAULT = 250.0
 CONFETTI_SPAWN_HEIGHT_MIN = 100.0
 CONFETTI_SPAWN_HEIGHT_MAX = 1500.0
@@ -240,6 +241,9 @@ class Keyframe:
     curve_yaw: float | None = None
     curve_roll: float | None = None
     source_blend: float = 0.0  # Seconds of eased arrival into this key's source.
+    # Captured tan(horizontal FOV / 2) / aspect. Independent of the game's
+    # spectator lens, which can change when a replay restarts.
+    lens_scale: float | None = None
 
 
 @dataclass
@@ -262,6 +266,8 @@ _LEGACY_CAMERA_FIELDS = CAMERA_FIELDS[:-1]
 
 def _keyframe_dict(key: Keyframe) -> dict[str, Any]:
     data: dict[str, Any] = {"time": key.time, **{name: getattr(key, name) for name in CAMERA_FIELDS}}
+    if key.lens_scale is not None:
+        data["lens_scale"] = key.lens_scale
     if key.source != "free":
         data["source"] = key.source
         data["attach"] = _attach_dict(key.attach)
@@ -276,6 +282,8 @@ def _keyframe_dict(key: Keyframe) -> dict[str, Any]:
 
 def channel_value(key: Keyframe, name: str) -> float:
     """Effective authored value: a rotation-curve override replaces the angle."""
+    if name == "lens_scale":
+        return key.lens_scale if key.lens_scale is not None else .75
     if name in CURVE_CHANNELS:
         override = getattr(key, "curve_" + name)
         if override is not None:
@@ -447,6 +455,8 @@ class Project:
                 _finite(getattr(key, name), f"Camera keyframe {i}.{name}")
             if not 1.0 <= key.fov <= 179.0:
                 raise ValueError(f"Camera keyframe {i}.fov must be between 1 and 179 degrees")
+            if key.lens_scale is not None and not .001 <= _finite(key.lens_scale, "Camera lens scale") <= 100:
+                raise ValueError("Camera lens scale must be between 0.001 and 100")
             if not ASPECT_MIN <= key.aspect_ratio <= ASPECT_MAX:
                 raise ValueError(
                     f"Camera keyframe {i}.aspect_ratio must be between {ASPECT_MIN:g} and {ASPECT_MAX:g}; "
@@ -541,12 +551,13 @@ class Project:
             raise ValueError("Add a camera keyframe before evaluating the shot")
         times = [float(key.time) for key in self.keyframes]
         result: dict[str, Any] = {}
-        for name in CAMERA_FIELDS:
+        fields = CAMERA_FIELDS + (("lens_scale",) if any(k.lens_scale is not None for k in self.keyframes) else ())
+        for name in fields:
             values = [float(channel_value(key, name)) for key in self.keyframes]
             wrap = self.rotation_mode == "shortest" and name in ("yaw", "roll")
             if wrap:
                 values = _unwrap(values)
-            interpolation = self.lens_interpolation if name == "aspect_ratio" else self.interpolation
+            interpolation = self.lens_interpolation if name in ("aspect_ratio", "lens_scale") else self.interpolation
             value = _sample(times, values, time, interpolation, monotone=name not in ("x", "y", "z"))
             result[name] = value
         cvars = {name: validate_cvar_value(name, value) for name, value in self.setup_values.items()}
@@ -586,6 +597,9 @@ class Project:
                           self.particles_intensity != PARTICLE_INTENSITY_DEFAULT)
         if particles_used:
             version = PARTICLE_FORMAT_VERSION
+        if any(k.lens_scale is not None for k in self.keyframes):
+            version = LENS_FORMAT_VERSION
+            particles_used = True  # New-format files include the existing optional-setting schema.
         return {
             "format": FORMAT_NAME,
             "version": version,
@@ -619,9 +633,9 @@ class Project:
         if isinstance(version, bool) or not isinstance(version, int) \
                 or version not in (1, FORMAT_VERSION, VECTOR_FORMAT_VERSION, ATTACH_FORMAT_VERSION,
                                    ROTATION_FORMAT_VERSION, BLEND_FORMAT_VERSION,
-                                   CONFETTI_FORMAT_VERSION, PARTICLE_FORMAT_VERSION):
+                                   CONFETTI_FORMAT_VERSION, PARTICLE_FORMAT_VERSION, LENS_FORMAT_VERSION):
             raise ValueError(f"Unsupported project version: {version!r}; expected 1 through "
-                             f"{PARTICLE_FORMAT_VERSION}")
+                             f"{LENS_FORMAT_VERSION}")
         allowed = ("format", "version", "name", "interpolation", "rotation_mode",
                    "start_tick", "tick_rate", "setup_values", "keyframes", "tracks")
         if version >= FORMAT_VERSION:
@@ -653,6 +667,8 @@ class Project:
                 allowed += tuple("curve_" + channel for channel in CURVE_CHANNELS)
             if version >= BLEND_FORMAT_VERSION:
                 allowed += ("source_blend",)
+            if version >= LENS_FORMAT_VERSION:
+                allowed += ("lens_scale",)
             _members(key, allowed, "camera keyframe")
             # A corrupt v2 shot must never silently lose its authored zoom.
             if version >= FORMAT_VERSION and "aspect_ratio" not in key:
@@ -680,6 +696,8 @@ class Project:
                 pose = {name: key[name] for name in fields if name in key}
                 if "source_blend" in key:
                     pose["source_blend"] = key["source_blend"]
+                if "lens_scale" in key:
+                    pose["lens_scale"] = key["lens_scale"]
                 for channel in CURVE_CHANNELS:
                     field_name = "curve_" + channel
                     if field_name in key:

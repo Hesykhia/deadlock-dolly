@@ -729,6 +729,22 @@ class NativeBridge(MediaTransport):
             self._store(offset + 8, even)
             self._editor_follow_sequence = even
 
+    def configure_editor_cameras(self, project, revision, first=0, *, can_undo=False, can_redo=False):
+        """Bounded camera-list page. Existing editor ABI and offsets stay unchanged."""
+        from . import editor_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, '_editor_cameras_sequence', 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack_camera_list(odd, project, revision, first,
+                                         can_undo=can_undo, can_redo=can_redo)
+            offset = wire.CAMERA_LIST_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_cameras_sequence = even
+
     def configure_editor_attach(self, offsets, attach=None, preview=False, snap_request=0, picker=False):
         """Optional attach block: schema offsets plus the selected key's state."""
         from . import editor_wire as wire

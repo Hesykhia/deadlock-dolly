@@ -1,9 +1,38 @@
 // Included after checked memory, replay and editor helpers, inside bridge scope.
-// Version6722 only. Correct a private blend input, never persistent game state.
+// Exact reviewed version6722 and6723 profiles. Correct a private blend input, never persistent game state.
 #include "dolly_follow_anchor_generated.hpp"
+
+struct FollowAnchorProfile {
+    const char* hash;
+    std::uintptr_t controller, observer_base, composition, blend, blend_caller;
+    const FollowCodeSpan* spans;
+    std::size_t count;
+    std::size_t image_size = 0x40f5000;
+    std::uintptr_t rig = 0x35f7180;
+    std::uintptr_t manager = 0x35f5780;
+    std::uintptr_t manager_table = 0x261d0a0;
+    std::uintptr_t camera_table = 0x2624b08;
+    std::uintptr_t controller_table = 0x2683968;
+    std::uintptr_t entity_list = 0x33e37c8;
+    std::uintptr_t observer_table = 0x2601268;
+    std::uintptr_t services_table = 0x26843b0;
+    std::uintptr_t pawn_table = 0x260dc30;
+};
+constexpr FollowAnchorProfile kFollowAnchorProfiles[] = {
+    {"44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc", 0x3b7c0f0, 0x2a191c8,
+     0x5dffc0, 0x5f5d20, 0x5e01e7, kFollowCode6722Spans, std::size(kFollowCode6722Spans)},
+    {"14a1f187b4dbe0801c805cfb4050dff495601867b1f0c7a21889d47c633a4bf3", 0x3b7c100, 0x2a191b8,
+     0x5dfff0, 0x5f5d50, 0x5e0217, kFollowCode6723Spans, std::size(kFollowCode6723Spans)},
+    {"07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e", 0x3b7dba8, 0x2a1c4e8,
+     0x5dffb0, 0x5f5d10, 0x5e01d7, kFollowCode6726Spans, std::size(kFollowCode6726Spans), 0x40f7000,
+     0x35f98f0, 0x35f7ec0, 0x26200f0, 0x2627b58, 0x2686c08, 0x33e5d58, 0x26041f8, 0x2687650,
+     0x2610c60},
+};
+const FollowAnchorProfile* gFollowAnchorProfile = &kFollowAnchorProfiles[0];
+
 using FollowCompositionFn = void(__fastcall*)(void*, void*, float, dolly::FollowDescriptor*);
 using FollowBlendFn = void(__fastcall*)(float, const dolly::FollowDescriptor*,
-                                      const dolly::FollowDescriptor*, dolly::FollowDescriptor*);
+                                        const dolly::FollowDescriptor*, dolly::FollowDescriptor*);
 FollowCompositionFn gOriginalFollowComposition = nullptr;
 FollowBlendFn gOriginalFollowBlend = nullptr;
 std::atomic<bool> gFollowAnchorInstalled{false};
@@ -27,211 +56,229 @@ static bool follow_anchor_enabled() noexcept {
     unsigned char enabled = 0;
     constexpr char expected[] = "citadel_camera_overrides_enabled";
     char actual[sizeof(expected)]{};
-    constexpr auto blocked = (1ull<<2)|(1ull<<9)|(1ull<<10)|(1ull<<13)|
-                             (1ull<<15)|(1ull<<18)|(1ull<<22);
-    return read_value(gClient+0x35f7180,ref) && (ref.id&0xffff)!=0xffff && ref.data &&
-        read_value(ref.data,name) && read_memory(name,actual,sizeof(actual)) &&
-        !std::memcmp(actual,expected,sizeof(actual)) &&
-        read_value(ref.data+0x28,type) && type==0 &&
-        read_value(ref.data+0x30,flags) && !(flags&blocked) && (flags&0x80080)==0x80080 &&
-        read_value(ref.data+0x58,enabled) && enabled==1 &&
-        read_value(gClient+0x35f7180,after) && after.id==ref.id && after.data==ref.data;
+    constexpr auto blocked = (1ull << 2) | (1ull << 9) | (1ull << 10) | (1ull << 13) |
+                             (1ull << 15) | (1ull << 18) | (1ull << 22);
+    return read_value(gClient + gFollowAnchorProfile->rig, ref) && (ref.id & 0xffff) != 0xffff &&
+           ref.data && read_value(ref.data, name) && read_memory(name, actual, sizeof(actual)) &&
+           !std::memcmp(actual, expected, sizeof(actual)) && read_value(ref.data + 0x28, type) &&
+           type == 0 && read_value(ref.data + 0x30, flags) && !(flags & blocked) &&
+           (flags & 0x80080) == 0x80080 && read_value(ref.data + 0x58, enabled) && enabled == 1 &&
+           read_value(gClient + gFollowAnchorProfile->rig, after) && after.id == ref.id &&
+           after.data == ref.data;
 }
 
 // Bind the exact current ThirdPerson camera, observer serial and tracked pawn.
 // These offsets/types are independently reviewed in the version6722 monitor.
 static bool follow_anchor_target(std::uintptr_t camera, std::uintptr_t pawn,
                                  std::uint32_t& target) noexcept {
-    std::uintptr_t current=0, table=0, controller=0, system=0, observer=0, services=0;
-    unsigned char blending=0, mode=0;
-    std::uint32_t observer_handle=0, camera_handle=0;
-    if (!read_value(gClient+0x35f5780,table) || table!=gClient+0x261d0a0 ||
-        !read_value(gClient+0x35f5780+0x28,current) || current!=camera ||
-        !read_value(gClient+0x35f5780+0x38,blending) || blending ||
-        !read_value(camera,table) || table!=gClient+0x2624b08 ||
-        !read_value(gClient+0x3b7c0f0,controller) || !controller ||
-        !read_value(controller,table) || table!=gClient+0x2683968 ||
-        !read_value(controller+0x6bc,observer_handle) ||
-        !read_value(gClient+0x33e37c8,system) || !system)
+    std::uintptr_t current = 0, table = 0, controller = 0, system = 0, observer = 0, services = 0;
+    unsigned char blending = 0, mode = 0;
+    std::uint32_t observer_handle = 0, camera_handle = 0;
+    if (!read_value(gClient + gFollowAnchorProfile->manager, table) ||
+        table != gClient + gFollowAnchorProfile->manager_table ||
+        !read_value(gClient + gFollowAnchorProfile->manager + 0x28, current) || current != camera ||
+        !read_value(gClient + gFollowAnchorProfile->manager + 0x38, blending) || blending ||
+        !read_value(camera, table) || table != gClient + gFollowAnchorProfile->camera_table ||
+        !read_value(gClient + gFollowAnchorProfile->controller, controller) || !controller ||
+        !read_value(controller, table) ||
+        table != gClient + gFollowAnchorProfile->controller_table ||
+        !read_value(controller + 0x6bc, observer_handle) ||
+        !read_value(gClient + gFollowAnchorProfile->entity_list, system) || !system)
         return false;
-    const auto resolve=[&](std::uint32_t handle, std::uintptr_t& instance) {
-        auto index=handle&0x7fff;
-        std::uintptr_t chunk=0, identity=0, back=0;
-        std::uint32_t actual=0;
-        if (handle==0xffffffff || handle==0xfffffffe || index>=0x7fff ||
-            !read_value(system+8*(index>>9),chunk) || !chunk)
+    const auto resolve = [&](std::uint32_t handle, std::uintptr_t& instance) {
+        auto index = handle & 0x7fff;
+        std::uintptr_t chunk = 0, identity = 0, back = 0;
+        std::uint32_t actual = 0;
+        if (handle == 0xffffffff || handle == 0xfffffffe || index >= 0x7fff ||
+            !read_value(system + 8 * (index >> 9), chunk) || !chunk)
             return false;
-        identity=chunk+0x70*(index&0x1ff);
-        return read_value(identity,instance) && instance &&
-            read_value(identity+0x10,actual) && actual==handle &&
-            read_value(instance+0x10,back) && back==identity;
+        identity = chunk + 0x70 * (index & 0x1ff);
+        return read_value(identity, instance) && instance && read_value(identity + 0x10, actual) &&
+               actual == handle && read_value(instance + 0x10, back) && back == identity;
     };
-    if (!resolve(observer_handle,observer) || !read_value(observer,table) ||
-        table!=gClient+0x2601268 || !read_value(observer+0xe40,services) || !services ||
-        !read_value(services,table) || (table!=gClient+0x26843b0 && table!=gClient+0x2a191c8) ||
-        !read_value(services+0x48,mode) || (mode!=2 && mode!=3) ||
-        !read_value(services+0x4c,target) || !read_value(camera+0xb0,camera_handle) ||
-        camera_handle!=target)
+    if (!resolve(observer_handle, observer) || !read_value(observer, table) ||
+        table != gClient + gFollowAnchorProfile->observer_table ||
+        !read_value(observer + 0xe40, services) || !services || !read_value(services, table) ||
+        (table != gClient + gFollowAnchorProfile->services_table &&
+         table != gClient + gFollowAnchorProfile->observer_base) ||
+        !read_value(services + 0x48, mode) || (mode != 2 && mode != 3) ||
+        !read_value(services + 0x4c, target) || !read_value(camera + 0xb0, camera_handle) ||
+        camera_handle != target)
         return false;
-    const auto service_type=table;
-    std::uintptr_t selected=0;
-    if (!resolve(target,selected) || selected!=pawn || !read_value(pawn,table) ||
-        table!=gClient+0x260dc30)
+    const auto service_type = table;
+    std::uintptr_t selected = 0;
+    if (!resolve(target, selected) || selected != pawn || !read_value(pawn, table) ||
+        table != gClient + gFollowAnchorProfile->pawn_table)
         return false;
     // Recheck the ownership chain rather than treating mixed reads as a sample.
-    std::uintptr_t again=0;
-    std::uint32_t handle_again=0;
-    unsigned char mode_again=0;
-    return read_value(gClient+0x35f5780,again) && again==gClient+0x261d0a0 &&
-        read_value(camera,again) && again==gClient+0x2624b08 &&
-        read_value(gClient+0x35f5780+0x38,mode_again) && mode_again==0 &&
-        read_value(gClient+0x35f5780+0x28,again) && again==camera &&
-        read_value(gClient+0x33e37c8,again) && again==system &&
-        read_value(gClient+0x3b7c0f0,again) && again==controller &&
-        read_value(controller+0x6bc,handle_again) && handle_again==observer_handle &&
-        read_value(controller,again) && again==gClient+0x2683968 &&
-        resolve(observer_handle,again) && again==observer &&
-        read_value(observer,again) && again==gClient+0x2601268 &&
-        read_value(observer+0xe40,again) && again==services &&
-        read_value(services,again) && again==service_type &&
-        read_value(services+0x48,mode_again) && mode_again==mode &&
-        read_value(services+0x4c,handle_again) && handle_again==target &&
-        read_value(camera+0xb0,handle_again) && handle_again==target &&
-        resolve(target,again) && again==pawn &&
-        read_value(pawn,again) && again==gClient+0x260dc30;
+    std::uintptr_t again = 0;
+    std::uint32_t handle_again = 0;
+    unsigned char mode_again = 0;
+    return read_value(gClient + gFollowAnchorProfile->manager, again) &&
+           again == gClient + gFollowAnchorProfile->manager_table && read_value(camera, again) &&
+           again == gClient + gFollowAnchorProfile->camera_table &&
+           read_value(gClient + gFollowAnchorProfile->manager + 0x38, mode_again) &&
+           mode_again == 0 && read_value(gClient + gFollowAnchorProfile->manager + 0x28, again) &&
+           again == camera && read_value(gClient + gFollowAnchorProfile->entity_list, again) &&
+           again == system && read_value(gClient + gFollowAnchorProfile->controller, again) &&
+           again == controller && read_value(controller + 0x6bc, handle_again) &&
+           handle_again == observer_handle && read_value(controller, again) &&
+           again == gClient + gFollowAnchorProfile->controller_table &&
+           resolve(observer_handle, again) && again == observer && read_value(observer, again) &&
+           again == gClient + gFollowAnchorProfile->observer_table &&
+           read_value(observer + 0xe40, again) && again == services &&
+           read_value(services, again) && again == service_type &&
+           read_value(services + 0x48, mode_again) && mode_again == mode &&
+           read_value(services + 0x4c, handle_again) && handle_again == target &&
+           read_value(camera + 0xb0, handle_again) && handle_again == target &&
+           resolve(target, again) && again == pawn && read_value(pawn, again) &&
+           again == gClient + gFollowAnchorProfile->pawn_table;
 }
 
 static bool follow_anchor_session(dolly::EditorFollowConfig& config,
                                   std::shared_ptr<const Command>& command) noexcept {
     if (!gFollowAnchorInstalled.load() || !gEditor ||
-        WaitForSingleObject(gEditor,0)!=WAIT_TIMEOUT || gWorkerError.load() ||
-        now_seconds()-gHeartbeatTime.load()>=2 ||
-        !dolly::editor_follow_config(config) || !dolly::follow_anchor_flags(config.flags) ||
-        !follow_anchor_enabled())
+        WaitForSingleObject(gEditor, 0) != WAIT_TIMEOUT || gWorkerError.load() ||
+        now_seconds() - gHeartbeatTime.load() >= 2 || !dolly::editor_follow_config(config) ||
+        !dolly::follow_anchor_flags(config.flags) || !follow_anchor_enabled())
         return false;
-    command=std::atomic_load(&gCommand);
+    command = std::atomic_load(&gCommand);
     DemoState demo{};
-    return command && command->wire.mode==std::uint32_t(Mode::Release) &&
-        read_demo(demo) && demo.playing && !demo.seeking &&
-        same_demo(command->wire.demo_name,demo.name);
+    return command && command->wire.mode == std::uint32_t(Mode::Release) && read_demo(demo) &&
+           demo.playing && !demo.seeking && same_demo(command->wire.demo_name, demo.name);
 }
 
 __declspec(noinline) static void __fastcall follow_composition_hook(
-        void* camera, void* pawn, float delta, dolly::FollowDescriptor* descriptor) {
+    void* camera, void* pawn, float delta, dolly::FollowDescriptor* descriptor) {
     FollowAnchorContext context{};
     dolly::EditorFollowConfig config{};
     dolly::FollowDescriptor input{};
-    context.camera=reinterpret_cast<std::uintptr_t>(camera);
-    context.pawn=reinterpret_cast<std::uintptr_t>(pawn);
-    const auto previous=gFollowAnchorContext;
+    context.camera = reinterpret_cast<std::uintptr_t>(camera);
+    context.pawn = reinterpret_cast<std::uintptr_t>(pawn);
+    const auto previous = gFollowAnchorContext;
     // Every invocation scopes its own context, including nested rejected calls.
-    gFollowAnchorContext=nullptr;
-    if (follow_anchor_session(config,context.command) &&
-        follow_anchor_target(context.camera,context.pawn,context.handle) &&
-        read_value(reinterpret_cast<std::uintptr_t>(descriptor),input)) {
-        context.sequence=config.sequence;
-        std::copy_n(input.begin()+3,3,context.anchor.begin());
-        if (std::all_of(context.anchor.begin(),context.anchor.end(),
-                        [](float v){return std::isfinite(v);})) {
-            gFollowAnchorContext=&context;
+    gFollowAnchorContext = nullptr;
+    if (follow_anchor_session(config, context.command) &&
+        follow_anchor_target(context.camera, context.pawn, context.handle) &&
+        read_value(reinterpret_cast<std::uintptr_t>(descriptor), input)) {
+        context.sequence = config.sequence;
+        std::copy_n(input.begin() + 3, 3, context.anchor.begin());
+        if (std::all_of(context.anchor.begin(), context.anchor.end(),
+                        [](float v) { return std::isfinite(v); })) {
+            gFollowAnchorContext = &context;
             ++gFollowAnchorScopes;
         }
     }
     struct RestoreContext {
         const FollowAnchorContext* previous;
-        ~RestoreContext(){gFollowAnchorContext=previous;}
+        ~RestoreContext() { gFollowAnchorContext = previous; }
     } restore{previous};
-    gOriginalFollowComposition(camera,pawn,delta,descriptor);
+    gOriginalFollowComposition(camera, pawn, delta, descriptor);
 }
 
-__declspec(noinline) static void __fastcall follow_blend_hook(
-        float weight, const dolly::FollowDescriptor* a,
-        const dolly::FollowDescriptor* b, dolly::FollowDescriptor* output) {
-    const auto caller=reinterpret_cast<std::uintptr_t>(_ReturnAddress());
-    const auto context=gFollowAnchorContext;
-    if (caller==gClient+0x5e01e7 && context) {
+__declspec(noinline) static void __fastcall follow_blend_hook(float weight,
+                                                              const dolly::FollowDescriptor* a,
+                                                              const dolly::FollowDescriptor* b,
+                                                              dolly::FollowDescriptor* output) {
+    const auto caller = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
+    const auto context = gFollowAnchorContext;
+    if (caller == gClient + gFollowAnchorProfile->blend_caller && context) {
         ++gFollowAnchorBlends;
         dolly::EditorFollowConfig config{};
         std::shared_ptr<const Command> command;
-        std::uint32_t target=0;
-        dolly::FollowDescriptor av{},bv{};
+        std::uint32_t target = 0;
+        dolly::FollowDescriptor av{}, bv{};
         alignas(16) dolly::FollowDescriptor corrected{};
-        float crouch=0;
-        const bool owned=a!=b && a!=output && b!=output &&
-            follow_anchor_session(config,command) && config.sequence==context->sequence &&
-            command==context->command &&
-            follow_anchor_target(context->camera,context->pawn,target) && target==context->handle &&
-            read_value(context->camera+0x158,crouch) && crouch==weight &&
-            read_value(reinterpret_cast<std::uintptr_t>(a),av) &&
-            read_value(reinterpret_cast<std::uintptr_t>(b),bv);
-        if (dolly::follow_anchor_copy(weight,owned,av,bv,context->anchor,corrected)) {
-            gFollowAnchorTarget=target;
+        float crouch = 0;
+        const bool owned =
+            a != b && a != output && b != output && follow_anchor_session(config, command) &&
+            config.sequence == context->sequence && command == context->command &&
+            follow_anchor_target(context->camera, context->pawn, target) &&
+            target == context->handle && read_value(context->camera + 0x158, crouch) &&
+            crouch == weight && read_value(reinterpret_cast<std::uintptr_t>(a), av) &&
+            read_value(reinterpret_cast<std::uintptr_t>(b), bv);
+        if (dolly::follow_anchor_copy(weight, owned, av, bv, context->anchor, corrected)) {
+            gFollowAnchorTarget = target;
             ++gFollowAnchorCorrections;
-            gOriginalFollowBlend(weight,&corrected,b,output);
+            gOriginalFollowBlend(weight, &corrected, b, output);
             return;
         }
         ++gFollowAnchorRejected;
     }
-    gOriginalFollowBlend(weight,a,b,output);
+    gOriginalFollowBlend(weight, a, b, output);
 }
 
 static bool install_follow_anchor(HMODULE client) {
-    if (!module_matches(client,
-        "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc",0x40f5000))
+    gFollowAnchorProfile = nullptr;
+    for (const auto& profile : kFollowAnchorProfiles)
+        if (module_matches(client, profile.hash, profile.image_size)) {
+            gFollowAnchorProfile = &profile;
+            break;
+        }
+    if (!gFollowAnchorProfile)
         return true; // Older reviewed builds keep their existing behavior.
-    for (const auto& span:kFollowCodeSpans) {
+    for (std::size_t index = 0; index < gFollowAnchorProfile->count; ++index) {
+        const auto& span = gFollowAnchorProfile->spans[index];
         std::vector<unsigned char> actual(span.size);
-        if (!read_memory(gClient+span.rva,actual.data(),actual.size()) ||
-            std::memcmp(actual.data(),span.bytes,span.size))
+        if (!read_memory(gClient + span.rva, actual.data(), actual.size()) ||
+            std::memcmp(actual.data(), span.bytes, span.size))
             return false;
     }
-    void* composition=reinterpret_cast<void*>(gClient+0x5dffc0);
-    void* blend=reinterpret_cast<void*>(gClient+0x5f5d20);
-    if (MH_CreateHook(composition,reinterpret_cast<void*>(follow_composition_hook),
-                      reinterpret_cast<void**>(&gOriginalFollowComposition))!=MH_OK)
+    void* composition = reinterpret_cast<void*>(gClient + gFollowAnchorProfile->composition);
+    void* blend = reinterpret_cast<void*>(gClient + gFollowAnchorProfile->blend);
+    if (MH_CreateHook(composition, reinterpret_cast<void*>(follow_composition_hook),
+                      reinterpret_cast<void**>(&gOriginalFollowComposition)) != MH_OK)
         return false;
-    if (MH_CreateHook(blend,reinterpret_cast<void*>(follow_blend_hook),
-                      reinterpret_cast<void**>(&gOriginalFollowBlend))!=MH_OK) {
+    if (MH_CreateHook(blend, reinterpret_cast<void*>(follow_blend_hook),
+                      reinterpret_cast<void**>(&gOriginalFollowBlend)) != MH_OK) {
         MH_RemoveHook(composition);
         return false;
     }
     // Both callbacks stay resident with the existing pinned bridge. They only
     // correct while the current editor/replay/target ownership checks succeed.
-    if (MH_QueueEnableHook(composition)!=MH_OK || MH_QueueEnableHook(blend)!=MH_OK) {
+    if (MH_QueueEnableHook(composition) != MH_OK || MH_QueueEnableHook(blend) != MH_OK) {
         // Nothing has executed yet; cancel queued state before removal.
-        MH_QueueDisableHook(composition); MH_QueueDisableHook(blend);
-        MH_RemoveHook(composition); MH_RemoveHook(blend);
+        MH_QueueDisableHook(composition);
+        MH_QueueDisableHook(blend);
+        MH_RemoveHook(composition);
+        MH_RemoveHook(blend);
         return false;
     }
-    if (MH_ApplyQueued()!=MH_OK) {
+    if (MH_ApplyQueued() != MH_OK) {
         // Applying can fail after one callback was enabled. Never free either
         // trampoline without quiescence; retained callbacks remain pass-through.
-        MH_DisableHook(composition); MH_DisableHook(blend);
+        MH_DisableHook(composition);
+        MH_DisableHook(blend);
         return false;
     }
-    gFollowAnchorInstalled=true;
+    gFollowAnchorInstalled = true;
     return true;
 }
 
 static void publish_follow_anchor(unsigned char* memory) noexcept {
     struct Diagnostics {
-        char magic[8]; std::uint32_t sequence,abi,flags,target;
-        std::uint64_t scopes,blends,corrections,rejected;
+        char magic[8];
+        std::uint32_t sequence, abi, flags, target;
+        std::uint64_t scopes, blends, corrections, rejected;
     } value{};
-    static_assert(sizeof(value)==56,"Optional Follow diagnostics layout");
-    std::memcpy(value.magic,"DLYFANC1",8); value.abi=1;
-    value.flags=gFollowAnchorInstalled.load()?1:0;
-    value.target=gFollowAnchorTarget.load(); value.scopes=gFollowAnchorScopes.load();
-    value.blends=gFollowAnchorBlends.load(); value.corrections=gFollowAnchorCorrections.load();
-    value.rejected=gFollowAnchorRejected.load();
-    constexpr std::size_t offset=2*1024*1024+23088;
-    auto out=memory+offset;
-    auto sequence=reinterpret_cast<volatile LONG*>(out+8);
-    auto old=InterlockedCompareExchange(sequence,0,0);
-    auto even=(old&1)?old+1:old;
-    InterlockedExchange(sequence,even+1);
-    value.sequence=even+2;
-    std::memcpy(out,value.magic,8);
-    std::memcpy(out+12,reinterpret_cast<unsigned char*>(&value)+12,sizeof(value)-12);
-    MemoryBarrier(); InterlockedExchange(sequence,even+2);
+    static_assert(sizeof(value) == 56, "Optional Follow diagnostics layout");
+    std::memcpy(value.magic, "DLYFANC1", 8);
+    value.abi = 1;
+    value.flags = gFollowAnchorInstalled.load() ? 1 : 0;
+    value.target = gFollowAnchorTarget.load();
+    value.scopes = gFollowAnchorScopes.load();
+    value.blends = gFollowAnchorBlends.load();
+    value.corrections = gFollowAnchorCorrections.load();
+    value.rejected = gFollowAnchorRejected.load();
+    constexpr std::size_t offset = 2 * 1024 * 1024 + 23088;
+    auto out = memory + offset;
+    auto sequence = reinterpret_cast<volatile LONG*>(out + 8);
+    auto old = InterlockedCompareExchange(sequence, 0, 0);
+    auto even = (old & 1) ? old + 1 : old;
+    InterlockedExchange(sequence, even + 1);
+    value.sequence = even + 2;
+    std::memcpy(out, value.magic, 8);
+    std::memcpy(out + 12, reinterpret_cast<unsigned char*>(&value) + 12, sizeof(value) - 12);
+    MemoryBarrier();
+    InterlockedExchange(sequence, even + 2);
 }

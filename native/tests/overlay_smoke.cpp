@@ -28,6 +28,11 @@ HWND attached = nullptr;
 dolly::EditorSnapshot snapshot;
 bool observed_mouse_down[5]{};
 bool present_keeps_os_cursor = false;
+struct ObservedAction {
+    dolly::EditorAction action;
+    double value, revision;
+};
+std::vector<ObservedAction> observed_actions;
 void require(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
@@ -489,6 +494,18 @@ namespace dolly {
 EditorSnapshot editor_snapshot() noexcept {
     return snapshot;
 }
+bool editor_camera_list(EditorCameraList& out) noexcept {
+    out = {};
+    std::memcpy(out.magic, "DLYCAMS1", 8);
+    out.abi = 1;
+    out.revision = 7;
+    out.total = snapshot.camera_count;
+    out.count = std::min<std::uint32_t>(out.total, kEditorCameraListCount);
+    out.flags = 3;
+    for (std::uint32_t i = 0; i < out.count; ++i)
+        out.rows[i] = {double(i) * 3, 16.0 / 9, double(i) * 4, i % 2, 0};
+    return true;
+}
 EditorBinding editor_binding_snapshot(EditorAction action) noexcept {
     EditorBinding binding{};
     // A representative default so the key-cap hints render in the smoke test.
@@ -519,7 +536,12 @@ bool editor_roster_snapshot(EditorRoster& out) noexcept {
     out.players[0].entity_index = 76;
     return true;
 }
-bool editor_enqueue(EditorAction, double, const CameraPose*) noexcept {
+bool editor_enqueue(EditorAction action, double value, const CameraPose* pose) noexcept {
+    try {
+        observed_actions.push_back({action, value, pose ? (*pose)[0] : 0});
+    } catch (...) {
+        return false;
+    }
     return true;
 }
 bool editor_bones_snapshot(EditorBones& out) noexcept {
@@ -604,10 +626,10 @@ int main(int argc, char** argv) {
         std::vector<unsigned char> diagnostic_memory(dolly::kMappingBytes, 0xa5);
         for (const auto& profile : dolly::kRendererDiagnosticLayouts) {
             require(dolly::renderer_diagnostic_layout(profile.hash, profile.image_size,
-                                                       profile.timestamp) == &profile,
+                                                      profile.timestamp) == &profile,
                     "Reviewed renderer diagnostic layout did not resolve");
             require(!dolly::renderer_diagnostic_layout(profile.hash, profile.image_size + 1,
-                                                        profile.timestamp) &&
+                                                       profile.timestamp) &&
                         !dolly::renderer_diagnostic_layout(profile.hash, profile.image_size,
                                                            profile.timestamp + 1) &&
                         !dolly::renderer_diagnostic_layout("unknown", profile.image_size,
@@ -755,6 +777,89 @@ int main(int argc, char** argv) {
         context->Unmap(staging, 0);
         staging->Release();
         require(drawn, "Present ran but the in-game panel did not change the backbuffer");
+        // Exercise rendered UI shortcuts with local ImGui events. This is not
+        // OS-wide input and does not launch or attach to Deadlock.
+        {
+            ImGui::SetCurrentContext(screenshot_context);
+            auto* panel = ImGui::FindWindowByName("DEADLOCK DOLLY");
+            require(panel != nullptr, "Camera panel missing");
+            ImGui::FocusWindow(panel);
+            auto render = [&] {
+                require(SUCCEEDED(chain->Present(0, 0)), "Camera UI Present failed");
+            };
+            render();
+            auto shortcut = [&](ImGuiKey key, bool shift, dolly::EditorAction expected) {
+                observed_actions.clear();
+                auto& io = ImGui::GetIO();
+                io.AddKeyEvent(ImGuiMod_Ctrl, true);
+                io.AddKeyEvent(ImGuiMod_Shift, shift);
+                io.AddKeyEvent(key, true);
+                render();
+                render();
+                require(observed_actions.size() == 1 && observed_actions[0].action == expected &&
+                            observed_actions[0].revision == 7,
+                        "Rendered history shortcut did not enqueue one revision-bound action");
+                io.AddKeyEvent(key, false);
+                io.AddKeyEvent(ImGuiMod_Ctrl, false);
+                io.AddKeyEvent(ImGuiMod_Shift, false);
+                render();
+            };
+            shortcut(ImGuiKey_Z, false, dolly::EditorAction::UndoShot);
+            shortcut(ImGuiKey_Y, false, dolly::EditorAction::RedoShot);
+            shortcut(ImGuiKey_Z, true, dolly::EditorAction::RedoShot);
+            std::puts("Rendered history shortcuts: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z passed.");
+            ImGuiTable* cameras = nullptr;
+            auto& tables = screenshot_context->Tables;
+            for (int index = 0; index < tables.GetMapSize(); ++index) {
+                auto* table = tables.GetByIndex(index);
+                if (table && table->ColumnsCount == 4 && table->ColumnsNames.Buf.Size &&
+                    std::strcmp(table->ColumnsNames.Buf.Data, "Camera") == 0)
+                    cameras = table;
+            }
+            require(cameras != nullptr, "Rendered camera chooser table missing");
+            // At the smoke test's 600-pixel height, the chooser is below the
+            // content fold. Scroll its real containing editor before clicking.
+            for (auto* parent = cameras->OuterWindow; parent; parent = parent->ParentWindow) {
+                if (parent->ScrollMax.y > 0) {
+                    ImGui::SetScrollY(parent, 180);
+                    break;
+                }
+            }
+            render();
+            render();
+            const float x = cameras->Columns[0].MinX + 20;
+            const float y = (cameras->RowPosY1 + cameras->RowPosY2) / 2;
+            auto mouse = [&](bool down) {
+                ImGui::GetIO().AddMousePosEvent(x, y);
+                ImGui::GetIO().AddMouseButtonEvent(0, down);
+                render();
+            };
+            observed_actions.clear();
+            mouse(false);
+            mouse(true);
+            mouse(false);
+            if (observed_actions.size() != 1 ||
+                observed_actions[0].action != dolly::EditorAction::SelectCamera ||
+                observed_actions[0].value != 1) {
+                std::fprintf(stderr, "Chooser click at %.1f %.1f: %zu actions\n", x, y,
+                             observed_actions.size());
+                for (const auto& action : observed_actions)
+                    std::fprintf(stderr, "Action %u value %.1f revision %.1f\n",
+                                 unsigned(action.action), action.value, action.revision);
+            }
+            require(observed_actions.size() == 1 &&
+                        observed_actions[0].action == dolly::EditorAction::SelectCamera &&
+                        observed_actions[0].value == 1 && observed_actions[0].revision == 7,
+                    "A camera row click must select only, with its current revision");
+            observed_actions.clear();
+            mouse(true);
+            mouse(false);
+            require(observed_actions.size() == 1 &&
+                        observed_actions[0].action == dolly::EditorAction::ViewCamera &&
+                        observed_actions[0].value == 1 && observed_actions[0].revision == 7,
+                    "A camera row double-click must request the selected view");
+            std::puts("Rendered camera chooser: click selects, double-click views passed.");
+        }
         check_guide_visibility(chain, device, context, target, backbuffer);
         stress_game_buffer_lifetimes(chain, device, context, target);
         viewer.check_lifecycle();

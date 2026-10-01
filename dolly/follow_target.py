@@ -8,17 +8,17 @@ from .replay_camera import CLIENT_SHA256
 from .preload import _image_bytes
 from .replay_camera import ReplayCameraMonitor
 
-TARGET_SPANS = ((0x15eb080, 0x79), (0x860a40, 5),
-                (0x860a50, 0x5c), (0x832400, 0xc1))
+TARGET_SPANS = ((0x15ee2f0, 0x79), (0x862f30, 5),
+                (0x862f40, 0x5c), (0x8348f0, 0xc1))
 # Exact stock HUD getter chain and its entity predicates. Camera mode alone
 # cannot prove that health/ability children have a non-null player receiver.
-HEALTH_CONTEXT_SPANS = ((0x92be50, 0x21), (0x15eb060, 0x17),
-                        (0x576e50, 0xfc), (0x812470, 0x11),
-                        (0x812490, 0x11), (0x860ae0, 0x89),
-                        (0x1b0f9b0, 0x129), (0x1b0fed0, 0x41),
-                        (0x7bb110, 0x37), (0x4a08c0, 5),
-                        (0x70e3b0, 3), (0x15c79b0, 3),
-                        (0x529da0, 3), (0x584f60, 3), (0x84a680, 0x17c))
+HEALTH_CONTEXT_SPANS = ((0x92e2f0, 0x21), (0x15ee2d0, 0x17),
+                        (0x576e30, 0xfc), (0x814960, 0x11),
+                        (0x814980, 0x11), (0x862fd0, 0x89),
+                        (0x1b12ef0, 0x129), (0x1b13540, 0x41),
+                        (0x7bd600, 0x37), (0x4a0790, 5),
+                        (0x710760, 3), (0x15cac20, 3),
+                        (0x529c70, 3), (0x584f40, 3), (0x84cb70, 0x17c))
 
 
 class FollowTargetMonitor(FollowCapabilityMonitor):
@@ -85,7 +85,7 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
             if not address or pointer(address) not in tuple(self.base + rva for rva in rvas):
                 raise PreloadError('Game Follow observer object type differs from the reviewed build.')
 
-        entity_system = pointer(self.base + 0x33e37c8)
+        entity_system = pointer(self.base + 0x33e5d58)
         if not entity_system:
             raise PreloadError('Game Follow entity system is unavailable.')
 
@@ -104,20 +104,20 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
                 raise PreloadError('Game Follow observer identity backpointer differs.')
             return instance
 
-        controller = pointer(self.base + 0x3b7c0f0)
-        require_type(controller, (0x2683968,))
+        controller = pointer(self.base + 0x3b7dba8)
+        require_type(controller, (0x2686c08,))
         pawn = resolve(uint(controller + 0x6bc))
-        require_type(pawn, (0x2601268,))
+        require_type(pawn, (0x26041f8,))
         if _require_health_context:
             if (read(controller + 0x3ef, 1)[0] in (2, 3)
                     or read(pawn + 0x3ef, 1)[0] in (2, 3)
-                    or pointer(self.base + 0x2601268 + 0xac8) != self.base + 0x529da0):
+                    or pointer(self.base + 0x26041f8 + 0xac8) != self.base + 0x529c70):
                 raise PreloadError('Health HUD requires the reviewed spectator player branch.')
         services = pointer(pawn + 0xe40)
-        require_type(services, (0x26843b0, 0x2a191c8))
+        require_type(services, (0x2687650, 0x2a1c4e8))
         vtable = pointer(services)
-        if (pointer(vtable + 0xf0) != self.base + 0x860a40
-                or pointer(vtable + 0x100) != self.base + 0x860a50):
+        if (pointer(vtable + 0xf0) != self.base + 0x862f30
+                or pointer(vtable + 0x100) != self.base + 0x862f40):
             raise PreloadError('Game Follow observer getters differ from the reviewed build.')
         mode = read(services + 0x48, 1)[0]
         if not _selection_only and (mode not in (0, 1, 2, 3) or (require_chase and mode not in (2, 3))):
@@ -129,17 +129,17 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
             pass  # Previous target may be absent/recycled; it will not be used.
         elif handle not in (0xffffffff, 0xfffffffe):
             target = resolve(handle)
-            require_type(target, (0x260dc30,))
+            require_type(target, (0x2610c60,))
             if _require_health_context:
-                if (pointer(self.base + 0x260dc30 + 0x4e0) != self.base + 0x15c79b0
-                        or pointer(self.base + 0x260dc30 + 0xac8) != self.base + 0x584f60):
+                if (pointer(self.base + 0x2610c60 + 0x4e0) != self.base + 0x15cac20
+                        or pointer(self.base + 0x2610c60 + 0xac8) != self.base + 0x584f40):
                     raise PreloadError('Health HUD player predicates differ from the reviewed build.')
                 target_controller = resolve(uint(target + 0x51c))
-                require_type(target_controller, (0x2683968,))
-                if (pointer(self.base + 0x2683968 + 0x4e8) != self.base + 0x70e3b0
+                require_type(target_controller, (0x2686c08,))
+                if (pointer(self.base + 0x2686c08 + 0x4e8) != self.base + 0x710760
                         # Final network-bound type, not the temporary base
                         # vtable installed earlier inside the constructor.
-                        or pointer(target_controller + 0x908) != self.base + 0x2683938):
+                        or pointer(target_controller + 0x908) != self.base + 0x2686bd8):
                     raise PreloadError('Health HUD player data receiver differs from the reviewed build.')
         elif require_chase or _require_health_context:
             raise PreloadError('Game Follow observer target is unavailable.')

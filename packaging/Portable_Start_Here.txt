@@ -1,4 +1,4 @@
-DEADLOCK DOLLY 0.5.39 ALPHA — WINDOWS PORTABLE
+DEADLOCK DOLLY 0.6.0 ALPHA — WINDOWS PORTABLE
 
 A camera-path editor for local Deadlock replays.
 
@@ -26,7 +26,7 @@ GETTING STARTED
    The In-game capture switch is on Library beside Open replay in Dolly; set the
    shortcut in Settings > Controls & keybinds. F8 opens the in-game panel.
 6. Enable Full editor for desktop Cameras, Effects and the shot timeline.
-   Save shots from Library or the File menu. F8 has Camera/Lens/Export tabs.
+   Save shots from Library or the File menu. F8 has CAMERA / FOLLOW / BONE PICKER / LOOK / EXPORT tabs.
 7. Click Play shot or press F5 to play the replay and camera path together.
    Hide HUD controls HUD visibility during playback; it returns afterward.
 
@@ -113,7 +113,8 @@ Return to the game and use F8 > Record video, then Play shot or F5.
 F8 > Finish recording saves the MP4. Recording continues through camera handoffs and desktop controls. Wait for finalization before closing Deadlock.
 
 Capture uses the current even-sized SDR game resolution, up to 3840 x 2160.
-It records in real time without audio. Missed capture slots are counted; lower
+Real-time recording supports optional game-only audio. Fixed-step bundled audio
+is not supported; use silent fixed-step layer exports separately. Missed capture slots are counted; lower
 resolution, shader cost or export FPS if the game/encoder cannot keep up.
 Dolly controls and guides are excluded. The game HUD follows playback settings.
 
@@ -121,8 +122,8 @@ ReShade 6.8.0/API 20 with full add-on support is a separate download. Extract Re
 add-on setup EXE with 7-Zip into a folder outside the game. Select it in Settings > ReShade
 and enable it. F11 opens its own menu; change the shortcut in Settings > Controls & keybinds.
 A single-sample SDR swapchain and manual runtime functions are required. Add shader/texture search
-paths and presets through ReShade. Color effects are supported; no game depth
-texture is supplied yet. Native Dolly DOF still works.
+paths and presets through ReShade. Color effects and verified scene depth for compatible depth-based effects are
+supported. Native Dolly DOF is also available.
 
 ReShade config: %APPDATA%\DeadlockDolly\ReShade\ReShade.ini
 The runtime path is remembered. Disable affects this session; Forget clears
@@ -131,11 +132,24 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
-0.5.3 is an alpha. The camera hook and interpolation remain unchanged from
-0.4.7. Recorded-demo handling from 0.4.8 is retained. Earlier renderer slowdowns
-do not have a confirmed general fix. MP4 and ReShade need in-game testing.
-Fixed-step rendering, audio, separate layers and expanded in-game curves
-remain planned.
+0.6.0-alpha supports reviewed Deadlock build 6726. Camera-list selection,
+double-click view, Delete and shared Undo/Redo are available in-game. The tabs
+are CAMERA, FOLLOW, BONE PICKER, LOOK and EXPORT. In the panel, Ctrl+Z undoes
+shot edits; Ctrl+Y or Ctrl+Shift+Z redoes them. History does not rewind the replay.
+
+FOLLOW selects a hero and follows their aim with adjustable distance, shoulder
+and height. Right-click sliders to reset them; choose whether to show the game
+HUD. Paused Follow can transfer directly to Bone Picker. Regular paths hold
+their last view on completion; F9 or Stop / restore explicitly hands back control.
+
+New captures preserve their lens through reloads and playback. Older custom-lens
+shots may need recapture. Floating health bars and the hero health/ability HUD
+are separate controls. Glow depends on the game's eligibility rules.
+
+Real-time recording preserves repeated replay-clock frames and adding audio
+preserves the final video frame. Actual missed slots remain visible in diagnostics.
+Short bounded layer/audio and packaged-app checks passed; this does not certify
+long/4K exports or every GPU. The repeated intro remains visible during seeking.
 
 Native mode supports reviewed client.dll, engine2.dll and tier0.dll builds.
 A Deadlock update can require a Dolly update. Settings > Troubleshooting & recovery > Startup controls contains

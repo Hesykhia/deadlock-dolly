@@ -93,6 +93,8 @@ class NativeDialogLifecycleTests(unittest.TestCase):
             ticks = []
             copied = []
             errors = []
+            sounds = []
+            dialogs._play_error_sound = lambda: sounds.append('error')
             dialogs._copy_text = lambda text: copied.append((text, threading.get_ident())) or True
             main_thread = threading.get_ident()
             user32 = ctypes.WinDLL("user32")
@@ -127,6 +129,7 @@ class NativeDialogLifecycleTests(unittest.TestCase):
                     assert copied == [("expected details", copied[0][1])], copied
                     assert copied[0][1] != main_thread
                     assert not dialogs._ACTIVE
+                    assert sounds == ['error'], sounds
                 except Exception as exc:
                     errors.append(exc)
                 finally:

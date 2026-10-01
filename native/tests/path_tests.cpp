@@ -137,6 +137,41 @@ void self_test() {
     require(path.load(changed.data(), changed.size(), error),
             "Finite extreme derivatives rejected");
     require(path.evaluate(1.5, pose) && pose[0] == 1.6e308, "Extreme derivative fallback failed");
+    // Version 2 preserves a captured lens independently of the live game FOV.
+    std::vector<std::uint8_t> lens{'D', 'L', 'Y', 'P', 'A', 'T', 'H', 0};
+    u32(lens, 2);
+    u32(lens, 1);
+    u32(lens, 8);
+    u32(lens, 0);
+    number(lens, 1);
+    number(lens, 0);
+    number(lens, 1);
+    for (int end = 0; end < 2; ++end)
+        for (int channel = 0; channel < 8; ++channel)
+            number(lens, channel == 7 ? .75 + .25 * end : channel == 6 ? 16.0 / 9 : 0);
+    number(lens, 0);
+    number(lens, 1);
+    for (int channel = 0; channel < 8; ++channel) {
+        u32(lens, 1);
+        u32(lens, 1);
+        number(lens, channel == 7 ? .75 : channel == 6 ? 16.0 / 9 : 0);
+        number(lens, channel == 7 ? 1 : channel == 6 ? 16.0 / 9 : 0);
+        number(lens, 0);
+        number(lens, 0);
+    }
+    require(path.load(lens.data(), lens.size(), error), "Captured lens path rejected");
+    double scale = 0;
+    require(path.evaluate(.5, pose, &scale) && scale == .875, "Captured lens interpolation failed");
+    require(path.evaluate(-1, pose, &scale) && scale == .75, "Captured lens first hold failed");
+    require(path.evaluate(2, pose, &scale) && scale == 1, "Captured lens last hold failed");
+    changed = lens;
+    set_number(changed, 104, std::numeric_limits<double>::quiet_NaN());
+    require(!path.load(changed.data(), changed.size(), error), "Nonfinite captured lens accepted");
+    for (std::size_t size = 0; size < lens.size(); ++size)
+        require(!path.load(lens.data(), size, error), "Truncated lens path accepted");
+    require(path.load(bytes.data(), bytes.size(), error) && path.evaluate(1, pose, &scale) &&
+                scale == 0,
+            "Legacy lens fallback changed");
     std::cout << "Native path self-tests passed\n";
 }
 

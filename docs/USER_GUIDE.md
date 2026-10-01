@@ -1,8 +1,9 @@
 # Deadlock Dolly — user guide
 
 Dolly connects its desktop editor and in-game panel to the same camera project.
-Version 0.5.0 adds real-time MP4 recording and an optional ReShade color-effects
-runtime. The existing native camera hook and interpolation are unchanged.
+Version 0.6.0-alpha adds an in-game camera list and shared Undo/Redo, preserves
+captured lens settings, and updates support for Deadlock build 6726. Real-time
+game audio, fixed-step silent layers and optional ReShade are available.
 
 [Video and ReShade setup](VIDEO_AND_RESHADE.md) covers output settings, F11,
 installation and current limits. Windows/Deadlock validation is recorded in
@@ -94,6 +95,8 @@ older workflow without the Stage 1 DX11 panel/native flight.
 | Comma / Period | Seek backward / forward one second |
 | F7 | Open/close console, reserved |
 | F8 | Dolly in-game panel |
+| Ctrl+Z | Undo a shot edit while the Dolly panel is open |
+| Ctrl+Y / Ctrl+Shift+Z | Redo a shot edit while the Dolly panel is open |
 | F9 | Original game replay UI / hero selection |
 | F10 | Paused flight |
 | WASD | Move relative to the camera |
@@ -167,6 +170,12 @@ scrolling changes the live framing that the next capture will save. The wheel
 scrolls menus normally while a panel or ReShade has input focus.
 
 The in-game **Look** tab contains the depth-of-field controls.
+
+**Toggle floating health bars** hides unit bars using the game's panel scales.
+Press it again to restore their exact previous sizes. The choice stays active
+across shot playback; disconnecting restores the saved values. The tilted hero
+health/ability panel is controlled by **Show game HUD during replay**, which retains its camera-mode
+safeguards. Health-bar glow remains a separate **Toggle Citadel glow** setting.
 After capturing a camera, **Enable DOF** turns on both native switches and
 initializes **Focus ranges** like the desktop **+ Range DOF** button. Existing
 range edits are preserved when switching off and back on. The four controls
@@ -189,6 +198,10 @@ restarting the path. Use F5 to restart the authored shot. Stop a frozen preview
 before trying to resume replay time. Comma/Period uses the project's ticks per
 second; check that value in **More → Coordinates / timing…** before timing work.
 
+**Stop / restore** keeps your selected replay speed while editing, so you can
+continue positioning cameras in slow motion. Leaving the editing session still
+restores Dolly's replay-speed override to normal speed.
+
 Some replays initially expose tick 0 but can only seek back to tick 1. When
 the game confirms that boundary, Play shot starts at tick 1 with the matching
 camera/effect phase (1/64 second for a shot starting at zero at 64 ticks/sec).
@@ -200,6 +213,27 @@ may briefly seek to an adjacent tick and return, then verifies XYZ movement.
 Release movement keys during preparation. It uses external keyboard input and
 arrow-key look, not native mouse look. Stop that legacy flight before typing
 in the game console. The native input behavior above does not apply to it.
+
+### Select, delete and restore saved cameras
+
+The in-game **Camera** tab lists each saved camera with its arrival time,
+aspect and bank. Click a row to select it for editing without moving the live
+camera. Double-click the row, or press **View selected**, to visit its view at
+the current paused replay moment. This does not seek to the camera's recorded
+replay time. For longer lists, **Earlier** and **Later** browse the saved cameras.
+
+**Delete camera** removes the selected camera immediately. **Undo** restores
+it, including its player/bone attachment and framing; **Redo** repeats the
+deletion. The desktop **Edit** menu and in-game buttons use the same shot edit
+history. Ctrl+Z undoes; Ctrl+Y or Ctrl+Shift+Z redoes. Typing in a text field
+keeps that field's normal editing shortcuts.
+
+History covers authored shot data, including camera edits, timing and effect
+tracks. It does not rewind the game, replay controls, Follow settings or exports.
+Pause playback, finish recording and detach an active bone preview before
+deleting cameras or using shot Undo/Redo. Saving keeps history; opening or
+starting another project clears it. History is limited to recent edits and is
+not saved across app restarts. A new edit after Undo replaces the redo branch.
 
 ### Edit a view between saved cameras
 
@@ -337,7 +371,15 @@ Choose 16:10, 21:9 or 4:3, or type a custom ratio/decimal and press Enter for a 
 Use **Reset** to set the selected camera's framing to Normal. Changing Normal
 changes the reference value; it does not replace every existing framing key.
 
-Native capture stores the rendered positive aspect ratio. Console capture
+Native capture stores the rendered positive aspect ratio and lens together,
+so a camera captured from a customized spectator view keeps its framing when
+the replay restarts for playback. Shots with captured lenses save in format 9
+and require the updated native backend; older Dolly versions cannot open them.
+Existing shots without captured lenses retain their earlier behavior. If old
+and new cameras are mixed, old cameras use the standard lens baseline; recapture
+an old camera if it originally used a custom lens.
+
+Console capture
 retains an explicit positive `r_aspectratio` value. If the game reports
 its automatic value **0**, Dolly resolves it from the launched game's largest
 visible client area on Windows, falling back to the shot's Normal value when
@@ -404,12 +446,17 @@ and choose **Eyes**, **Weapon** or **Bone**. Bone offers names from the selected
 player's live model; you can also type a valid name on desktop. Use **Apply to
 camera** to save that source, or **Apply to all** for every view in the shot.
 
-In-game, choose the player and point in **Camera → Attach camera**. Enter
+In-game, choose the player and point in the **BONE PICKER** tab. Enter
 **Fly camera**, frame your view, then use **Snap** to calculate offsets that
 reproduce it. **Attach here** previews the source; moving while attached edits
 its offsets. **Detach** ends live preview. **Hide this hero** suppresses the
 identified body draws during preview and playback. Export follows the saved
 sources and offsets, including edits made in preview.
+
+From a paused **FOLLOW** view, opening **Bone Picker** or choosing **Attach here**
+transfers camera control automatically. You do not need **Restore rig** first.
+**Snap** still requires **Fly camera**, because it calculates offsets from your
+current free-camera view.
 
 Attachment uses replay character models; it does not create first-person arms.
 For a head camera, select **Point: Bone**, choose **head**, then **Attach here**.

@@ -167,16 +167,18 @@ bool VisualizationPath::load(const void* data, std::size_t bytes, std::string& e
     NativePath path;
     if (!path.load(blob, path_bytes, error))
         return false;
+    const bool captured_lens = u32(blob + 8) == 2;
+    const auto header_bytes =
+        captured_lens ? NativePath::lens_header_bytes : NativePath::header_bytes;
+    const auto segment_bytes =
+        captured_lens ? NativePath::lens_segment_bytes : NativePath::segment_bytes;
     if (u32(blob + 12) + 1 != count)
         return fail("Viewer timestamps do not match the camera path");
     for (std::uint32_t i = 0; i < count; ++i) {
         const double time = number(times + i * 8);
         const double expected =
-            i + 1 == count
-                ? number(blob + 40)
-                : number(blob + (count == 1
-                                     ? 32
-                                     : NativePath::header_bytes + i * NativePath::segment_bytes));
+            i + 1 == count ? number(blob + 40)
+                           : number(blob + (count == 1 ? 32 : header_bytes + i * segment_bytes));
         if (!std::isfinite(time) || time < 0 || time != expected ||
             (i && time <= number(times + (i - 1) * 8)))
             return fail("Viewer timestamps are not the authored camera timestamps");
@@ -200,8 +202,7 @@ bool VisualizationPath::load(const void* data, std::size_t bytes, std::string& e
             const std::size_t steps = edges / segments + (i < edges % segments ? 1 : 0);
             bool position_step = false;
             for (std::size_t channel = 0; channel < 3; ++channel) {
-                const auto* record = blob + NativePath::header_bytes +
-                                     i * NativePath::segment_bytes + 16 + 40 * channel;
+                const auto* record = blob + header_bytes + i * segment_bytes + 16 + 40 * channel;
                 position_step |= u32(record) == 0 && number(record + 8) != number(record + 16);
             }
             for (std::size_t j = 1; j <= steps; ++j) {

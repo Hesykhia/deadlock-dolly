@@ -14,8 +14,9 @@ Hermite derivatives use shot seconds; evaluation uses normalized segment
 position and the segment duration. Unknown bits, versions and trailing bytes
 are rejected by the native parser. No console command or cvar name is stored.
 
-Channel order is X, Y, Z, pitch, yaw, roll, aspect ratio. FOV is legacy shot
-metadata. native_effects wraps this unchanged camera blob with supported DOF
+Channel order is X, Y, Z, pitch, yaw, roll, aspect ratio. Captured lenses use
+version 2: an eighth lens-scale channel, 176-byte header and 336-byte segments.
+The old FOV field remains legacy metadata. native_effects wraps the camera blob with supported DOF
 curves; their final timestamp extends the overall native shot duration.
 """
 
@@ -32,6 +33,7 @@ MAGIC = b"DLYPATH\0"
 VERSION = 1
 MAX_CAMERA_KEYS = 4096
 HEADER = struct.Struct("<8sIIII17d")
+LENS_HEADER = struct.Struct("<8sIIII19d")
 SEGMENT_TIMES = struct.Struct("<2d")
 CHANNEL_RECORD = struct.Struct("<II4d")
 HEADER_BYTES = HEADER.size
@@ -56,11 +58,12 @@ The callback consumes these coefficients rather than a sampled pose stream.
         raise ValueError(f"Native camera paths support at most {MAX_CAMERA_KEYS:,} camera keys")
     times = [float(key.time) for key in keys]
     channels: list[tuple[list[float], int, int, list[float]]] = []
-    for name in CHANNELS:
+    names = CHANNELS + (("lens_scale",) if any(k.lens_scale is not None for k in keys) else ())
+    for name in names:
         values = [float(channel_value(key, name)) for key in keys]
         if name in ("yaw", "roll") and project.rotation_mode == "shortest":
             values = _unwrap(values)
-        interpolation = project.lens_interpolation if name == "aspect_ratio" else project.interpolation
+        interpolation = project.lens_interpolation if name in ("aspect_ratio", "lens_scale") else project.interpolation
         flags = int(name not in ("x", "y", "z"))
         kind = 0 if interpolation == "step" else 1
         tangents = [0.0] * len(keys)
@@ -74,8 +77,8 @@ The callback consumes these coefficients rather than a sampled pose stream.
                 # Exactly the same full-channel fallback as Project.evaluate.
                 pass
         channels.append((values, kind, flags, tangents))
-    result = bytearray(HEADER.pack(
-        MAGIC, VERSION, len(keys) - 1, len(CHANNELS), 0,
+    result = bytearray((LENS_HEADER if len(names) == 8 else HEADER).pack(
+        MAGIC, 2 if len(names) == 8 else VERSION, len(keys) - 1, len(names), 0,
         project.duration, times[0], times[-1],
         *(channel[0][0] for channel in channels),
         *(channel[0][-1] for channel in channels),

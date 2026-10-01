@@ -1,11 +1,11 @@
 {
   "format": 1,
-  "description": "Version6722 hotfix baseline: installed gameinfo is unchanged from the reviewed September 29 configuration; established editing mounts, addon enablement and sampleable depth are preserved. Client compatibility reviewed offline; hotfix live validation and export checks ongoing.",
+  "description": "Build6726 / Steam25639407 reviewed offline. Official gameinfo unchanged; Dolly editing baseline retained. Live verification pending.",
   "gameinfo_sha256": "07d709c11030bfd64bdc7c1e6f3cfdf8167cbf2c8266e544caaf76525f79000e",
   "modules": {
-    "citadel/bin/win64/client.dll": "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc",
-    "bin/win64/engine2.dll": "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4",
-    "bin/win64/tier0.dll": "493bf3ca610bac0eec1369d19aa67f4c279c6ae1c8f1243b3bad0974c6a8db82"
+    "citadel/bin/win64/client.dll": "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e",
+    "bin/win64/engine2.dll": "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26",
+    "bin/win64/tier0.dll": "6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332"
   },
-  "unlocker_server_sha256": "d8039b48395c79a5332939bfa25038732b14ab6fce541eefebb82f05c4a9abe0"
+  "unlocker_server_sha256": "1c8bd4615c494796b05826bd5fc55fed78cfcfc7a0b75a571145f6b34e6c3065"
 }

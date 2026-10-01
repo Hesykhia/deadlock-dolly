@@ -145,6 +145,8 @@ def _configure_visualization(app, bridge, active, selected):
 
 
 def configure(app):
+    if getattr(app, "_refreshing_shot_history", False):
+        return
     bridge = _bridge(app)
     if bridge is None or getattr(app, "closed", False):
         return
@@ -197,6 +199,22 @@ def configure(app):
         app._native_editor_config_cache = values
         app._native_editor_bridge = bridge
     _configure_visualization(app, bridge, active, selected)
+    publish_cameras = getattr(bridge, "configure_editor_cameras", None)
+    history = getattr(app, "shot_history", None)
+    if callable(publish_cameras) and history is not None:
+        from .editor_wire import CAMERA_LIST_COUNT
+        first = getattr(app, "_native_camera_page", 0)
+        first = min(first, max(0, (count - 1) // CAMERA_LIST_COUNT) * CAMERA_LIST_COUNT)
+        if selected != getattr(app, "_native_camera_selected", selected) and not first <= selected < first + CAMERA_LIST_COUNT:
+            first = selected // CAMERA_LIST_COUNT * CAMERA_LIST_COUNT
+        app._native_camera_selected = selected
+        app._native_camera_page = first
+        camera_values = (history.revision, first, history.can_undo, history.can_redo)
+        if (getattr(app, "_native_cameras_bridge", None) is not bridge
+                or getattr(app, "_native_cameras_cache", None) != camera_values):
+            publish_cameras(app.project, history.revision, first,
+                            can_undo=history.can_undo, can_redo=history.can_redo)
+            app._native_cameras_bridge, app._native_cameras_cache = bridge, camera_values
     publish_dof = getattr(bridge, "configure_editor_dof", None)
     if callable(publish_dof):
         from .editor_dof import values_at
@@ -295,7 +313,7 @@ def _attach_state(app, selected, count):
             "key_count": len(app.project.keyframes)}
 
 
-def _select(app, index):
+def _select(app, index, *, view=True):
     if not app.project.keyframes:
         app.status_text.set("Capture a camera first.")
         return
@@ -303,6 +321,8 @@ def _select(app, index):
     app.camera_tree.selection_set(str(index))
     app.camera_tree.see(str(index))
     app._select_key()
+    if not view:
+        return
     # The selected camera changes at the current paused replay moment.
     # Reuse the paused-view controller instead of seeking to its shot time.
     key = app.project.keyframes[index]
@@ -346,6 +366,18 @@ def _pose_matches_key(app, index, pose):
 
 
 def dispatch(app, event, bridge):
+    action = event["action"]
+    previous = getattr(app, "_history_edit_group", None)
+    app._history_edit_group = ((action, app._selection_index(app.camera_tree),
+                                float(_value(app, "shot_time", 0) or 0))
+                               if action.startswith("set_") else None)
+    try:
+        return _dispatch(app, event, bridge)
+    finally:
+        app._history_edit_group = previous
+
+
+def _dispatch(app, event, bridge):
     """Dispatch one event on Tk's thread. False means leave it queued."""
     if app.busy:
         return False
@@ -372,9 +404,41 @@ def dispatch(app, event, bridge):
             raise ValueError("Stop path playback before resetting the camera path.")
         # The native panel confirms replacement before sending this snapshot.
         app._capture_view("start", native_snapshot=event, replacement_confirmed=True)
+    elif action in ("select_camera", "view_camera", "delete_camera", "undo_shot", "redo_shot", "camera_page"):
+        history = getattr(app, "shot_history", None)
+        revision = event["pose"][0]
+        if history is None or revision != history.revision:
+            raise ValueError("The camera list changed. Select the camera again.")
+        if not app._shot_edit_ready():
+            return True
+        value = event["value"]
+        if not math.isfinite(value) or value != int(value):
+            raise ValueError("Invalid in-game camera selection")
+        if action in ("undo_shot", "redo_shot"):
+            if value != 0:
+                raise ValueError("Invalid shot history action")
+            (app.redo_shot if action == "redo_shot" else app.undo_shot)()
+        elif action == "camera_page":
+            from .editor_wire import CAMERA_LIST_COUNT
+            if value < 0 or value % CAMERA_LIST_COUNT or value > max(0, len(app.project.keyframes) - 1):
+                raise ValueError("Invalid camera list page")
+            app._native_camera_page = int(value)
+            configure(app)
+        else:
+            if not 0 <= value < len(app.project.keyframes):
+                raise ValueError("Selected in-game camera no longer exists")
+            _select(app, int(value), view=action == "view_camera")
+            if action == "delete_camera":
+                app._delete_key()
+            configure(app)
     elif action in ("capture", "replace"):
         operation = "replace" if action == "replace" else ("append" if app.project.keyframes else "start")
-        app._capture_view(operation, native_snapshot=event)
+        snapshot = dict(event)
+        # New native builds put the rendered horizontal FOV in the otherwise
+        # unused Capture/Replace value. Zero remains the legacy wire value.
+        if event.get("value", 0) != 0:
+            snapshot["horizontal_fov"] = event["value"]
+        app._capture_view(operation, native_snapshot=snapshot)
     elif action == "set_framing":
         factor = event["pose"][6]
         native_index = event["value"]
@@ -496,7 +560,8 @@ def dispatch(app, event, bridge):
     elif action == "stop_video":
         app._stop_video_recording(cancel=False)
     elif action == "stop":
-        _native_operation(app, "Stopping and restoring", app.controller.stop, bridge)
+        _native_operation(app, "Stopping and restoring",
+                          lambda: app.controller.stop(preserve_speed=True), bridge)
     elif action in ("previous_view", "next_view", "select_view"):
         selected = app._selection_index(app.camera_tree)
         if action == "select_view":
@@ -798,6 +863,19 @@ def dispatch(app, event, bridge):
     elif action == "attach_preview":
         if event["value"] not in (0, 1):
             raise ValueError("Attach preview must be on or off.")
+        if event["value"] == 1 and getattr(app.controller, "_follow_active", False) is True:
+            project = app.project
+
+            def attached_after_follow(_):
+                if app.project is not project:
+                    raise ValueError("The shot changed while switching from Follow. Select the camera again.")
+                app.preview_attach = True
+                app.status_text.set("Attach preview on. Fly with WASD/mouse to edit the offsets.")
+                configure(app)
+
+            app._submit("Switching Follow to attached camera",
+                        lambda: app.controller.enter_native_flight(owner="panel"), attached_after_follow)
+            return True
         app.preview_attach = bool(event["value"])
         app.status_text.set("Attach preview on. Fly with WASD/mouse to edit the offsets."
                             if app.preview_attach else "Attach preview off.")

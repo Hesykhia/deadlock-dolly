@@ -126,6 +126,9 @@ class ReplayRecoveryTests(unittest.TestCase):
                     self.assertFalse(self.controller._health_panel_held())
 
     def test_disabled_glow_is_reapplied_after_recovery(self):
+        self.console.values.update({"citadel_boss_glow_disabled": 0,
+            "citadel_player_glow_disabled": 0, "citadel_trooper_glow_disabled": 0,
+            "r_citadel_glow_health_bars": 1})
         self.console.values["citadel_boss_glow_disabled"] = 0.0
         self.controller.toggle_citadel_glow()
         self.console.requests.clear()
@@ -141,6 +144,16 @@ class ReplayRecoveryTests(unittest.TestCase):
         self.console.operations.clear()
         self.recover()
         self.assertNotIn("glow", " ".join(self.console.requests + self.console.operations))
+
+    def test_hidden_healthbars_survive_replay_recovery_with_originals_intact(self):
+        original = {'citadel_unit_status_min_distance_scale': .2,
+                    'citadel_unit_status_max_distance_scale': 1}
+        self.console.values.update(original)
+        self.controller.toggle_healthbars()
+        self.console.values.update(original)  # replay reload resets panel values
+        self.recover()
+        self.assertTrue(all(self.console.values[name] == 0 for name in original))
+        self.assertEqual(self.controller._healthbar_restore, original)
 
     def test_old_same_file_never_satisfies_inactive_boundary(self):
         self.never_inactive = True

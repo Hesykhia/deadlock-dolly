@@ -51,7 +51,13 @@ constexpr char kUpdatedEngineHash[] =
     "301d042c7443090241d7b83244747bf8a32916f61df60aea5d8a1799f432ef8d";
 constexpr char kSeptemberEngineHash[] =
     "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4";
-constexpr char kUnlockerHash[] = "d4d45e95d8caa7c3622118816877482b432d178c1631573f835c58e2fde28c5d";
+constexpr char kBuild6726EngineHash[] =
+    "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26";
+constexpr char kScene6726Hash[] =
+    "026a6e953e6bf1f2fdbcf8388ba5f6868d830ad54216dcf4518df136be50fc5a";
+constexpr char kSound6726Hash[] =
+    "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
+constexpr char kUnlockerHash[] = "5a4629e4de5bc82e007d5c6879cc2adc691bcbb8a65889f9e70b085e25865edd";
 // Reviewed scenesystem.dll for the player layer capture. Any other build keeps
 // the capture disabled instead of patching unverified producer code; re-review
 // this hash in the same turn as a game update.
@@ -59,7 +65,8 @@ constexpr char kPlayerCaptureScenesystemHash[] =
     "e480a7f28ae073dd4a83833bfee8db44bfff22f097147f2f697a109b2ea2de4b";
 constexpr char kSeptemberScenesystemHash[] =
     "3ece2e69f0f779e9bb05f1bd52b524df7adc5da262ddf9766ea71d1b01ce248d";
-constexpr char kSoundSystemHash[] = "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
+constexpr char kSoundSystemHash[] =
+    "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr char kSeptemberSoundSystemHash[] =
     "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281";
 constexpr std::uintptr_t kDemoGlobal = 0x61b618, kDemoTable = 0x535730, kEngineTable = 0x540128;
@@ -67,12 +74,14 @@ struct EngineLayout {
     std::uintptr_t demo_global, demo_table, engine_table;
     std::uintptr_t playing, active, paused, seeking, tick, filename;
 };
-constexpr EngineLayout kLegacyEngineLayout{
-    kDemoGlobal, kDemoTable, kEngineTable, 0x2ec00, 0x7bf30, 0x368d0, 0x2a240, 0x36910, 0x7bf80};
+constexpr EngineLayout kLegacyEngineLayout{kDemoGlobal, kDemoTable, kEngineTable, 0x2ec00, 0x7bf30,
+                                           0x368d0,     0x2a240,    0x36910,      0x7bf80};
 // September 29: CDemoPlayer fields and CEngineClient slots moved. Call the
 // reviewed accessors rather than carrying the old object offsets forward.
-constexpr EngineLayout kSeptemberEngineLayout{
-    0x5b9270, 0x4d7f48, 0x4e2848, 0x2d6b0, 0x733e0, 0x34fc0, 0x28c60, 0x35000, 0x73430};
+constexpr EngineLayout kSeptemberEngineLayout{0x5b9270, 0x4d7f48, 0x4e2848, 0x2d6b0, 0x733e0,
+                                              0x34fc0,  0x28c60,  0x35000,  0x73430};
+constexpr EngineLayout kEngine6726Layout{0x5b92b0, 0x4d7e88, 0x4e2790, 0x2d590, 0x732c0,
+                                         0x34ea0,  0x28b40,  0x34ee0,  0x73310};
 EngineLayout gEngineLayout = kLegacyEngineLayout;
 // Identical across every reviewed client build; the exact-hash path re-checks it.
 constexpr unsigned char kSetupPrologue[] = {
@@ -557,7 +566,8 @@ static bool read_demo(DemoState& result) noexcept {
     if (!result.playing)
         return true;
     if (!read_value(gClient + gCompat.engine_client, engine_client) ||
-        !read_value(engine_client, engine_table) || engine_table != gEngine + gEngineLayout.engine_table)
+        !read_value(engine_client, engine_table) ||
+        engine_table != gEngine + gEngineLayout.engine_table)
         return false;
     auto active = reinterpret_cast<bool(__fastcall*)(void*)>(gEngine + gEngineLayout.active);
     if (!active(reinterpret_cast<void*>(engine_client))) {
@@ -568,8 +578,8 @@ static bool read_demo(DemoState& result) noexcept {
         reinterpret_cast<void*>(demo));
     result.seeking = reinterpret_cast<bool(__fastcall*)(void*)>(gEngine + gEngineLayout.seeking)(
         reinterpret_cast<void*>(demo));
-    result.tick =
-        reinterpret_cast<int(__fastcall*)(void*)>(gEngine + gEngineLayout.tick)(reinterpret_cast<void*>(demo));
+    result.tick = reinterpret_cast<int(__fastcall*)(void*)>(gEngine + gEngineLayout.tick)(
+        reinterpret_cast<void*>(demo));
     auto name = reinterpret_cast<const char*(__fastcall*)(void*)>(gEngine + gEngineLayout.filename)(
         reinterpret_cast<void*>(engine_client));
     if (!name)
@@ -862,7 +872,8 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     if (!gCameraCache.basis)
         unsupported_reason = "the camera basis helper was not resolved";
     else if (!view_ok)
-        unsupported_reason = "view fields (origin/angles/fov/aspect/flags/viewport) were unreadable";
+        unsupported_reason =
+            "view fields (origin/angles/fov/aspect/flags/viewport) were unreadable";
     else if (!pose_valid(original))
         unsupported_reason = "the rendered camera pose is not finite";
     else if (!std::isfinite(original_fov))
@@ -937,9 +948,11 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         const auto picker_editor = editor_snapshot();
         double picker_fov = original_fov;
         if (c.flags & kAspect)
-            picker_fov = 360 / 3.14159265358979323846 *
-                         std::atan(std::tan(original_fov * 3.14159265358979323846 / 360) *
-                                   manual_pose[6] / original_aspect);
+            picker_fov =
+                360 / 3.14159265358979323846 *
+                std::atan(std::tan((lens_pinned ? pinned_fov : original_fov) *
+                                   3.14159265358979323846 / 360) *
+                          manual_pose[6] / (lens_pinned ? pinned_aspect : original_aspect));
         std::array<double, 6> picker_offsets{};
         bool picker_attached_preview = false;
         std::copy(std::begin(preview_config.offset), std::end(preview_config.offset),
@@ -1082,7 +1095,8 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         if (c.flags & kAspect) {
             float value = float(fov), aspect = float(manual_pose[6]);
             std::memcpy(reinterpret_cast<void*>(view + 0x498), &value, 4);
-            std::memcpy(reinterpret_cast<void*>(view + gCameraCache.view_layout.aspect), &aspect, 4);
+            std::memcpy(reinterpret_cast<void*>(view + gCameraCache.view_layout.aspect), &aspect,
+                        4);
         }
         for (int i = 0; i < 7; ++i)
             status.applied_pose[i] = manual_pose[i];
@@ -1148,7 +1162,7 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
                            confetti_height, confetti_despawn, confetti_preset, confetti_intensity);
         player_capture::set_hidden_handles(0, 0, 5);
         if (c.mode == std::uint32_t(Mode::Play)) {
-            video::publish_path_replay_time(true, phase);
+            video::publish_path_replay_time(true, phase, completed);
             player_capture::publish_replay_time(phase);
         }
         finish(completed ? State::Completed
@@ -1157,7 +1171,8 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         return;
     }
     CameraPose applied{};
-    if (!command->path->evaluate(phase, applied) || !pose_valid(applied)) {
+    double authored_lens = 0;
+    if (!command->path->evaluate(phase, applied, &authored_lens) || !pose_valid(applied)) {
         fault = 16;
         finish(State::Fault, fault, "Native path returned an invalid camera.");
         return;
@@ -1257,6 +1272,13 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
         applied = blend_attach_poses(applied, destination, blend_weight);
     }
     player_capture::set_hidden_handles(hidden_current, hidden_arriving, 5);
+    if (authored_lens > 0) {
+        // Captured lens metadata survives replay restarts and game-camera
+        // changes. Keep it for subsequent manual editing of this view too.
+        pinned_aspect = 1.0;
+        pinned_fov = 360 / 3.14159265358979323846 * std::atan(authored_lens);
+        lens_pinned = true;
+    }
     if (!lens_pinned) {
         pinned_fov = original_fov > 1.0 ? original_fov : 90.0;
         pinned_aspect = original_aspect > 0.01 ? original_aspect : 16.0 / 9.0;
@@ -1304,7 +1326,7 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
     confetti::on_frame(demo.time, demo.playing, demo.seeking, &confetti_camera, confetti_enabled,
                        confetti_height, confetti_despawn, confetti_preset, confetti_intensity);
     if (c.mode == std::uint32_t(Mode::Play)) {
-        video::publish_path_replay_time(true, phase);
+        video::publish_path_replay_time(true, phase, completed);
         player_capture::publish_replay_time(phase);
     }
     finish(completed ? State::Completed
@@ -1352,8 +1374,9 @@ static DWORD WINAPI worker(void*) {
                 break;
             Sleep(20);
         }
+        const bool engine6726 = module_matches(engine, kBuild6726EngineHash, 0x906000);
         const bool september_engine = module_matches(engine, kSeptemberEngineHash, 0x906000);
-        if (!september_engine && !module_matches(engine, kEngineHash, 0x969000) &&
+        if (!engine6726 && !september_engine && !module_matches(engine, kEngineHash, 0x969000) &&
             !module_matches(engine, kUpdatedEngineHash, 0x969000)) {
             startup_status(
                 State::Unsupported, 21,
@@ -1362,7 +1385,9 @@ static DWORD WINAPI worker(void*) {
         }
         gClient = reinterpret_cast<std::uintptr_t>(client);
         gEngine = reinterpret_cast<std::uintptr_t>(engine);
-        gEngineLayout = september_engine ? kSeptemberEngineLayout : kLegacyEngineLayout;
+        gEngineLayout = engine6726         ? kEngine6726Layout
+                        : september_engine ? kSeptemberEngineLayout
+                                           : kLegacyEngineLayout;
         gCompat = resolve_client_profile(client, true);
         if (!gCompat.resolved) {
             startup_status(
@@ -1378,9 +1403,9 @@ static DWORD WINAPI worker(void*) {
                 "The tier0 cvar interface does not match this native build. Use Console camera mode.");
             return 0;
         }
-        gCameraCache = camera_view::resolve(client, gClient + gCompat.setup,
-                                           gCompat.camera_layout_revision,
-                                           gCompat.view_setup_delegate ? gClient + gCompat.view_setup_delegate : 0);
+        gCameraCache = camera_view::resolve(
+            client, gClient + gCompat.setup, gCompat.camera_layout_revision,
+            gCompat.view_setup_delegate ? gClient + gCompat.view_setup_delegate : 0);
         if (!gCameraCache.basis) {
             startup_status(
                 State::Unsupported, 37,
@@ -1411,8 +1436,9 @@ static DWORD WINAPI worker(void*) {
         }
         // Collect shader metadata during hideout/replay loading, not only after
         if (!install_follow_anchor(client)) {
-            startup_status(State::Unsupported, 48,
-                           "The Follow camera blend could not be verified; no camera ownership was enabled.");
+            startup_status(
+                State::Unsupported, 48,
+                "The Follow camera blend could not be verified; no camera ownership was enabled.");
             return 0;
         }
         // Collect shader metadata during hideout/replay loading, not only after
@@ -1425,17 +1451,23 @@ static DWORD WINAPI worker(void*) {
             return 0;
         }
         const auto scene_module = GetModuleHandleW(L"scenesystem.dll");
-        const bool september_scene = module_matches(scene_module, kSeptemberScenesystemHash, 0x9c6000);
+        const bool scene6726 = module_matches(scene_module, kScene6726Hash, 0x9c6000);
+        const bool september_scene =
+            module_matches(scene_module, kSeptemberScenesystemHash, 0x9c6000);
         // Scene records reference renderer-owned wrappers; require the reviewed
         // pair before selecting the wrapper member (legacy +0x60, build 6712 +0x70).
         const auto renderer_module = GetModuleHandleW(L"rendersystemdx11.dll");
-        const auto& renderer_layout = kRendererDiagnosticLayouts[september_scene ? 1 : 0];
-        const bool scene_renderer_pair = module_matches(renderer_module, renderer_layout.hash,
-                                                        renderer_layout.image_size);
+        const auto& renderer_layout = kRendererDiagnosticLayouts[scene6726         ? 2
+                                                                 : september_scene ? 1
+                                                                                   : 0];
+        const bool scene_renderer_pair =
+            module_matches(renderer_module, renderer_layout.hash, renderer_layout.image_size);
         player_capture::configure(reinterpret_cast<std::uintptr_t>(scene_module),
-                                  scene_renderer_pair && (september_scene || (scene_module != nullptr &&
-                                      hash_file(module_path(scene_module)) == kPlayerCaptureScenesystemHash)),
-                                  september_scene);
+                                  scene_renderer_pair && (scene6726 || september_scene ||
+                                                          (scene_module != nullptr &&
+                                                           hash_file(module_path(scene_module)) ==
+                                                               kPlayerCaptureScenesystemHash)),
+                                  september_scene || scene6726, scene6726);
         gHeartbeatTime = now_seconds();
         HeartbeatMonitor heartbeat_monitor(gMemory, gEditor);
         if (MH_EnableHook(reinterpret_cast<void*>(gClient + gCompat.setup)) != MH_OK) {
@@ -1448,8 +1480,10 @@ static DWORD WINAPI worker(void*) {
         editor_install_input_hooks();
         install_overlay_hooks();
         auto sound = GetModuleHandleW(L"soundsystem.dll");
-        sound_capture_install(sound, module_matches(sound, kSoundSystemHash, 0x678000) ||
-                                     module_matches(sound, kSeptemberSoundSystemHash, 0x6bf000));
+        sound_capture_install(sound,
+                              module_matches(sound, kSoundSystemHash, 0x678000) ||
+                                  module_matches(sound, kSeptemberSoundSystemHash, 0x6bf000) ||
+                                  module_matches(sound, kSound6726Hash, 0x6bf000));
         // Hook and original trampoline remain resident until process exit. Losing
         // the editor only releases ownership, avoiding code-unload races in a view.
         std::shared_ptr<const NativeShot> shot;
@@ -1479,8 +1513,10 @@ static DWORD WINAPI worker(void*) {
                 const auto module = GetModuleHandleW(L"soundsystem.dll");
                 if (module && module != sound) {
                     sound = module;
-                    sound_capture_install(module, module_matches(module, kSoundSystemHash, 0x678000) ||
-                                                  module_matches(module, kSeptemberSoundSystemHash, 0x6bf000));
+                    sound_capture_install(
+                        module, module_matches(module, kSoundSystemHash, 0x678000) ||
+                                    module_matches(module, kSeptemberSoundSystemHash, 0x6bf000) ||
+                                    module_matches(module, kSound6726Hash, 0x6bf000));
                 }
             }
             if (diagnostic_now >= next_renderer_probe) {

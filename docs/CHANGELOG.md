@@ -1,5 +1,109 @@
 # Changes
 
+## 0.6.0 alpha — In-game camera editing, Undo/Redo and current Deadlock support
+
+**0.6.0-alpha**
+
+- **Edit and recover cameras in-game.** *Before:* managing saved cameras meant returning to the desktop, and accidental edits were harder to recover. *After:* select, double-click to view, delete, Undo and Redo from Dolly's in-game camera list, with shared desktop history.
+- **Keep the framing you captured.** *Before:* a custom lens could change after replay recovery even when camera coordinates matched. *After:* new captures retain lens metadata through playback, save/reopen and shot history.
+- **Updated replay and camera controls.** *Before:* recent game updates could leave player lists empty or block a Follow-to-Bone handoff. *After:* reviewed build 6726 support restores the tested player lists and lets paused Follow transfer directly into Bone Picker.
+- **Cleaner views and complete recordings.** *Before:* health-bar controls could be unavailable, repeated replay-clock values could create capture gaps, and adding audio could lose the final frame. *After:* updated health controls, corrected real-time frame admission and video-preserving audio muxing address those cases.
+
+### Camera editing and history
+
+The CAMERA tab now includes a selectable list of saved cameras. A single click
+selects for editing without moving the view; a double-click jumps to that camera.
+Delete removes only the selected camera. Undo brings it back, and Redo reapplies
+the deletion. Desktop and in-game editing share shot history, including camera,
+lens, attachment and effect data. New edits invalidate the redo branch; save/reopen
+and dirty-state behavior are covered by regression checks.
+
+Use Ctrl+Z to undo and Ctrl+Y or Ctrl+Shift+Z to redo while Dolly's panel is open.
+History is for shot edits, not replay transport or external game configuration.
+Playback, recording and active picker operations retain their editing guards.
+
+### Framing, Follow and Bone cameras
+
+Captured views now store lens information instead of relying on whatever lens
+the game chooses after a replay restart. That information follows the shot through
+preview, path interpolation, save/reopen and Undo/Redo. Existing shots remain
+loadable, but an older custom-lens shot may need recapture to gain this metadata.
+
+The recent Game Follow workflow remains in its own FOLLOW tab: choose a hero,
+follow their aim, and adjust distance, shoulder and height. Right-click resets
+the sliders, and the HUD option controls whether the native game UI is visible.
+Follow and Bone are separate modes. Paused Follow can now hand directly into
+Bone Picker without requiring Restore rig first. These changes build on the
+Follow motion and HUD work shipped in the preceding releases.
+
+Regular camera paths still hold their final view on completion. Explicit F9 or
+Stop / restore uses the spectator handoff. Stop retains the selected slow replay
+speed, and error dialogs once again request the standard Windows error sound.
+
+### Deadlock updates, local demos and restoration
+
+Reviewed native and Python compatibility profiles cover Deadlock build 6726
+(Steam build 25639407). Unknown builds remain blocked. Automatic startup retains
+the normal hideout, unlocker, preload and replay-camera handoff checks.
+
+Player discovery was updated for the tested local `tv_record` replay, restoring
+the Follow and Bone player lists. The editing session uses the reviewed editing
+configuration while preserving the user's original `gameinfo.gi` byte-for-byte.
+Separate video settings and autoexec files are not blanket-reset.
+
+Read-only module verification now handles Windows' documented transient module
+snapshot error with a bounded retry. Other failures still stop verification and
+report the Windows error code. HUD restoration continues to require a verified
+handoff rather than exposing an unsafe player panel.
+
+### Look controls and particles
+
+The floating health-bar toggle uses the current health-panel controls and restores
+the saved values. The tilted hero health/ability panel remains a separate HUD
+concern. Look-control readbacks and rollback handling were strengthened.
+
+All eight particle presets and the tested quality-setting combinations looked
+normal locally. Native DOF, Citadel DOF, Native DOF with Confetti and final effect
+disable were visually checked. The reported black/purple checkerboard was not
+reproduced on the affected user's exact installation or GPU; this release does
+not claim a universal particle-material fix or reset users' graphics presets.
+
+Glow remains available, but enabling it does not force outlines when the game
+does not consider them eligible. Its visual effect was inconclusive in the
+comparison scene and is not presented as a verified visual improvement.
+
+### Video, audio and export fixes
+
+Real-time capture no longer rejects an otherwise valid rendered frame solely
+because the replay clock repeats. Fixed-step capture, backward-time rejection
+and completed-path endpoint handling keep their separate safeguards. Genuine
+missed timing slots are still counted; the fix does not invent replacement frames.
+
+Adding game audio no longer uses a shortest-stream cutoff that could remove
+the last video frame. Audio coverage checks still reject incomplete source audio.
+The final three-second Color/audio test retained all 180 frames, reported zero
+missed slots, preserved identical video pixels and timestamps through muxing,
+and was visually accepted as smooth with aligned sound.
+
+Color, World, Depth, Effects and Players were checked with bounded two-frame
+takes. Players coverage and alpha output were inspected. These short checks do
+not certify long recordings, every hero combination, every GPU or 4K performance.
+Fixed-step bundled audio remains unsupported; use real-time audio recording and
+export silent fixed-step layers separately.
+
+### Validation and upgrade notes
+
+The candidate passed 1,628 Python tests (16 skipped), 25 native tests, a relocated
+portable-app startup check, and updater installation/rollback checks. Clean test
+sessions restored original runtime/configuration state. The README, user-guide
+introduction and quick-start documents now describe the current workflows.
+
+Download the Windows x64 ZIP, extract the entire package and launch Dolly.exe.
+Keep `_internal` beside it. Preserve shots and pending recovery backups when
+upgrading. This remains an alpha for local replay editing; keep `-insecure` in
+Deadlock's launch options while using Dolly. The repeated intro during shot
+preparation stays visible until a true skip has been verified.
+
 ## 0.5.46 alpha — Automatic take validation and a complete source export
 
 - Finished layered exports are validated automatically: Dolly checks the take

@@ -17,18 +17,18 @@ class FollowTargetTests(unittest.TestCase):
         controller, pawn, hero_controller = 0x30000, 0x40000, 0x70000
         put(controller + 0x3ef, 1, '<B')
         put(pawn + 0x3ef, 1, '<B')
-        for vtable, slot, getter in ((0x2601268, 0xac8, 0x529da0),
-                                    (0x260dc30, 0x4e0, 0x15c79b0),
-                                    (0x260dc30, 0xac8, 0x584f60),
-                                    (0x2683968, 0x4e8, 0x70e3b0)):
+        for vtable, slot, getter in ((0x26041f8, 0xac8, 0x529c70),
+                                    (0x2610c60, 0x4e0, 0x15cac20),
+                                    (0x2610c60, 0xac8, 0x584f40),
+                                    (0x2686c08, 0x4e8, 0x710760)):
             put(m.base + vtable + slot, m.base + getter)
         put(target + 0x51c, 0x18003, '<I')
         identity = chunk + 0x70 * 3
         put(identity, hero_controller)
         put(identity + 0x10, 0x18003, '<I')
         put(hero_controller + 0x10, identity)
-        put(hero_controller, m.base + 0x2683968)
-        put(hero_controller + 0x908, m.base + 0x2683938)
+        put(hero_controller, m.base + 0x2686c08)
+        put(hero_controller + 0x908, m.base + 0x2686bd8)
         code = patch('dolly.follow_target._image_bytes', side_effect=lambda data, rva, size: b'\x90' * size)
         code.start()
         self.addCleanup(code.stop)
@@ -51,8 +51,8 @@ class FollowTargetTests(unittest.TestCase):
                     'recycled': (target + 0x51c, 0x20003, '<I'),
                     'receiver': (hero_controller + 0x908, 0, '<Q'),
                     'base_constructor_type': (hero_controller + 0x908, m.base + 0x267c5f8, '<Q'),
-                    'controller_type': (hero_controller, m.base + 0x2601268, '<Q'),
-                    'predicate': (m.base + 0x2683968 + 0x4e8, m.base + 0x584f60, '<Q'),
+                    'controller_type': (hero_controller, m.base + 0x26041f8, '<Q'),
+                    'predicate': (m.base + 0x2686c08 + 0x4e8, m.base + 0x584f40, '<Q'),
                 }[invalid]
                 blocks[address] = struct.pack(fmt, value)
                 with self.assertRaises(PreloadError):
@@ -87,7 +87,7 @@ class FollowTargetTests(unittest.TestCase):
 
     def test_selection_still_requires_local_observer_identity(self):
         m, blocks, *_ = self.fixture()
-        blocks[0x40000] = struct.pack('<Q', m.base + 0x260dc30)
+        blocks[0x40000] = struct.pack('<Q', m.base + 0x2610c60)
         with self.assertRaises(PreloadError):
             m.sample_selection_context()
 
@@ -127,21 +127,21 @@ class FollowTargetTests(unittest.TestCase):
         def put(address, value, fmt='<Q'):
             blocks[address] = struct.pack(fmt, value)
         system, chunk, controller, pawn, services, target = range(0x10000, 0x70000, 0x10000)
-        put(m.base + 0x33e37c8, system)
+        put(m.base + 0x33e5d58, system)
         put(system, chunk)
-        put(m.base + 0x3b7c0f0, controller)
-        put(controller, m.base + 0x2683968)
+        put(m.base + 0x3b7dba8, controller)
+        put(controller, m.base + 0x2686c08)
         put(controller + 0x6bc, 0x8001, '<I')
-        for handle, instance, vt in ((0x8001, pawn, 0x2601268), (0x10002, target, 0x260dc30)):
+        for handle, instance, vt in ((0x8001, pawn, 0x26041f8), (0x10002, target, 0x2610c60)):
             identity = chunk + 0x70 * (handle & 0x1ff)
             put(identity, instance)
             put(identity + 0x10, handle, '<I')
             put(instance + 0x10, identity)
             put(instance, m.base + vt)
         put(pawn + 0xe40, services)
-        put(services, m.base + 0x26843b0)
-        put(m.base + 0x26843b0 + 0xf0, m.base + 0x860a40)
-        put(m.base + 0x26843b0 + 0x100, m.base + 0x860a50)
+        put(services, m.base + 0x2687650)
+        put(m.base + 0x2687650 + 0xf0, m.base + 0x862f30)
+        put(m.base + 0x2687650 + 0x100, m.base + 0x862f40)
         put(services + 0x48, 2, '<B')
         put(services + 0x4c, 0x10002, '<I')
         m.memory = Mock()
@@ -152,6 +152,24 @@ class FollowTargetTests(unittest.TestCase):
         m, *_ = self.fixture()
         self.assertEqual(m.sample_target(), {'handle': 0x10002, 'entity_index': 2, 'mode': 2})
         self.assertEqual(m._owned.call_count, 2)
+
+    def test_hotfix_base_observer_type_and_getters(self):
+        m, blocks, _, services, _ = self.fixture()
+        table = m.base + 0x2a1c4e8
+        blocks[services] = struct.pack('<Q', table)
+        blocks[table + 0xf0] = struct.pack('<Q', m.base + 0x862f30)
+        blocks[table + 0x100] = struct.pack('<Q', m.base + 0x862f40)
+        self.assertEqual(m.sample_target()['handle'], 0x10002)
+        # The prior build's nearby table must never satisfy this exact type gate.
+        blocks[services] = struct.pack('<Q', m.base + 0x2a191c8)
+        with self.assertRaisesRegex(PreloadError, 'object type differs'):
+            m.sample_target()
+
+    def test_prior_build_observer_getter_refused(self):
+        m, blocks, *_ = self.fixture()
+        blocks[m.base + 0x2687650 + 0xf0] = struct.pack('<Q', m.base + 0x860a40)
+        with self.assertRaisesRegex(PreloadError, 'getters differ'):
+            m.sample_target()
 
     def test_recycled_handle_and_backpointer_refused(self):
         for backpointer in (False, True):
@@ -165,7 +183,7 @@ class FollowTargetTests(unittest.TestCase):
         for wrong_mode in (False, True):
             m, blocks, _, services, target = self.fixture()
             blocks[services + 0x48 if wrong_mode else target] = (
-                b'\x01' if wrong_mode else struct.pack('<Q', m.base + 0x2601268))
+                b'\x01' if wrong_mode else struct.pack('<Q', m.base + 0x26041f8))
             with self.assertRaises(PreloadError):
                 m.sample_target()
 

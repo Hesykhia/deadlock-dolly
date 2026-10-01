@@ -37,7 +37,7 @@ private:
     const std::uint8_t* cursor_;
 };
 
-bool finite_pose(const CameraPose& pose) noexcept {
+template <std::size_t N> bool finite_pose(const std::array<double, N>& pose) noexcept {
     for (double value : pose)
         if (!std::isfinite(value))
             return false;
@@ -62,19 +62,24 @@ bool NativePath::load(const void* data, std::size_t bytes, std::string& error) {
     const auto count = reader.u32();
     const auto channels = reader.u32();
     const auto reserved = reader.u32();
-    if (version != 1 || channels != 7 || reserved != 0)
+    if (!((version == 1 && channels == 7) || (version == 2 && channels == 8)) || reserved != 0)
         return fail("Native path version, channel count, or reserved field is invalid");
-    if (count >= max_camera_keys || bytes != header_bytes + std::size_t(count) * segment_bytes)
+    const auto header_size = version == 2 ? lens_header_bytes : header_bytes;
+    const auto segment_size = version == 2 ? lens_segment_bytes : segment_bytes;
+    if (count >= max_camera_keys || bytes != header_size + std::size_t(count) * segment_size)
         return fail("Native path segment count does not match its byte length");
 
     NativePath candidate;
     candidate.duration_ = reader.number();
     candidate.first_time_ = reader.number();
     candidate.last_time_ = reader.number();
-    for (double& value : candidate.first_)
-        value = reader.number();
-    for (double& value : candidate.last_)
-        value = reader.number();
+    for (unsigned i = 0; i < channels; ++i)
+        candidate.first_[i] = reader.number();
+    for (unsigned i = 0; i < channels; ++i)
+        candidate.last_[i] = reader.number();
+    if (version == 2 && (candidate.first_[7] < .001 || candidate.first_[7] > 100 ||
+                         candidate.last_[7] < .001 || candidate.last_[7] > 100))
+        return fail("Native path lens is outside its supported range");
     if (!std::isfinite(candidate.duration_) || !std::isfinite(candidate.first_time_) ||
         !std::isfinite(candidate.last_time_) || candidate.first_time_ < 0 ||
         candidate.last_time_ < candidate.first_time_ ||
@@ -87,7 +92,7 @@ bool NativePath::load(const void* data, std::size_t bytes, std::string& error) {
 
     try {
         candidate.segments_.reserve(count);
-        CameraPose previous = candidate.first_;
+        auto previous = candidate.first_;
         double previous_time = candidate.first_time_;
         for (std::uint32_t index = 0; index < count; ++index) {
             Segment segment;
@@ -111,6 +116,10 @@ bool NativePath::load(const void* data, std::size_t bytes, std::string& error) {
                     channel.left != previous[channel_index])
                     return fail(
                         "Native path channel has invalid coefficients or disconnected endpoints");
+                if (channel_index == 7 &&
+                    (channel.flags != 1 || channel.left < .001 || channel.left > 100 ||
+                     channel.right < .001 || channel.right > 100))
+                    return fail("Native path lens coefficients are invalid");
                 previous[channel_index] = channel.right;
             }
             candidate.segments_.push_back(segment);
@@ -126,15 +135,19 @@ bool NativePath::load(const void* data, std::size_t bytes, std::string& error) {
     return true;
 }
 
-bool NativePath::evaluate(double shot_seconds, CameraPose& out) const noexcept {
+bool NativePath::evaluate(double shot_seconds, CameraPose& out, double* lens_scale) const noexcept {
     if (!loaded_ || !std::isfinite(shot_seconds))
         return false;
     if (shot_seconds <= first_time_ || segments_.empty()) {
-        out = first_;
+        std::copy_n(first_.begin(), out.size(), out.begin());
+        if (lens_scale)
+            *lens_scale = first_[7];
         return true;
     }
     if (shot_seconds >= last_time_) {
-        out = last_;
+        std::copy_n(last_.begin(), out.size(), out.begin());
+        if (lens_scale)
+            *lens_scale = last_[7];
         return true;
     }
     // bisect_right on segment begin times makes a step channel switch at
@@ -151,7 +164,7 @@ bool NativePath::evaluate(double shot_seconds, CameraPose& out) const noexcept {
     const double span = segment.end - segment.begin;
     const double u = (shot_seconds - segment.begin) / span;
     const double u2 = u * u, u3 = u * u * u;
-    CameraPose result{};
+    std::array<double, 8> result{};
     for (std::size_t i = 0; i < result.size(); ++i) {
         const Channel& channel = segment.channels[i];
         double value = channel.left;
@@ -172,7 +185,9 @@ bool NativePath::evaluate(double shot_seconds, CameraPose& out) const noexcept {
             return false;
         result[i] = value;
     }
-    out = result;
+    std::copy_n(result.begin(), out.size(), out.begin());
+    if (lens_scale)
+        *lens_scale = result[7];
     return true;
 }
 

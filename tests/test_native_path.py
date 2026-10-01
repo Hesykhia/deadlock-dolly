@@ -19,6 +19,30 @@ def camera(time, x=0, y=0, z=0, pitch=0, yaw=0, roll=0, aspect=16 / 9):
 
 
 class NativeCompilerTests(unittest.TestCase):
+    def test_captured_lens_survives_save_and_compilation(self):
+        from dolly.native_path import LENS_HEADER
+        shot = Project(keyframes=[camera(0), camera(1)])
+        shot.keyframes[0].lens_scale = .75
+        shot.keyframes[1].lens_scale = math.tan(math.radians(50)) * .75
+        saved = shot.to_dict()
+        self.assertEqual(saved['version'], 9)
+        reopened = Project.from_dict(saved)
+        self.assertEqual(reopened, shot)
+        self.assertAlmostEqual(reopened.evaluate(.5)['lens_scale'],
+                               sum(k.lens_scale for k in shot.keyframes) / 2)
+        data = compile_project(reopened)
+        header = LENS_HEADER.unpack_from(data)
+        self.assertEqual(header[:5], (b'DLYPATH\0', 2, 1, 8, 0))
+        self.assertEqual((header[15], header[23]), (.75, shot.keyframes[1].lens_scale))
+        self.assertEqual(len(data), 176 + 336)
+
+    def test_invalid_captured_lens_is_rejected(self):
+        for value in (0, -1, math.nan, math.inf, 101, True):
+            shot = Project(keyframes=[camera(0)])
+            shot.keyframes[0].lens_scale = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                compile_project(shot)
+
     def test_format_and_track_duration(self):
         shot = Project(keyframes=[camera(1, x=10), camera(3, x=30)],
                        tracks=[CvarTrack("r_dof", [TrackKey(8, 1)])])

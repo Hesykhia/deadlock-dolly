@@ -39,11 +39,11 @@ void change_number(std::vector<unsigned char>& data, std::size_t offset, double 
         data.at(offset + i) = encoded[i];
 }
 std::vector<unsigned char> packet(unsigned cameras = 3, unsigned samples = 2048,
-                                  unsigned markers = 64, bool step = false) {
+                                  unsigned markers = 64, bool step = false, bool lens = false) {
     std::vector<unsigned char> blob{'D', 'L', 'Y', 'P', 'A', 'T', 'H', 0};
-    u32(blob, 1);
+    u32(blob, lens ? 2 : 1);
     u32(blob, cameras - 1);
-    u32(blob, 7);
+    u32(blob, lens ? 8 : 7);
     u32(blob, 0);
     number(blob, cameras - 1);
     number(blob, 0);
@@ -53,8 +53,12 @@ std::vector<unsigned char> packet(unsigned cameras = 3, unsigned samples = 2048,
     };
     for (auto v : pose(0))
         number(blob, v);
+    if (lens)
+        number(blob, .9);
     for (auto v : pose(cameras - 1))
         number(blob, v);
+    if (lens)
+        number(blob, .9);
     for (unsigned i = 0; i + 1 < cameras; ++i) {
         number(blob, i);
         number(blob, i + 1);
@@ -63,6 +67,14 @@ std::vector<unsigned char> packet(unsigned cameras = 3, unsigned samples = 2048,
             u32(blob, c >= 3 ? 1 : 0);
             number(blob, pose(i)[c]);
             number(blob, pose(i + 1)[c]);
+            number(blob, 0);
+            number(blob, 0);
+        }
+        if (lens) {
+            u32(blob, 1);
+            u32(blob, 1);
+            number(blob, .9);
+            number(blob, .9);
             number(blob, 0);
             number(blob, 0);
         }
@@ -139,6 +151,18 @@ void test_projection() {
 }
 void self_test() {
     test_projection();
+    for (bool step : {false, true}) {
+        auto lens_bytes = packet(3, 2048, 64, step, true);
+        dolly::VisualizationPath lens_path;
+        std::string lens_error;
+        require(lens_path.load(lens_bytes.data(), lens_bytes.size(), lens_error),
+                "Captured-lens viewer packet rejected");
+        require(lens_path.points().front()[0] == 100 && lens_path.points().back()[0] == 120 &&
+                    lens_path.cameras()[1].pose[0] == 110,
+                "Captured-lens guide positions changed");
+        require(bool(lens_path.breaks()[32]) == step && bool(lens_path.breaks()[64]) == step,
+                "Captured-lens step continuity changed");
+    }
     auto bytes = packet();
     std::string error;
     dolly::VisualizationPath path;

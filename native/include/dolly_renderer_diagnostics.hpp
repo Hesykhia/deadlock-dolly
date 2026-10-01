@@ -17,14 +17,16 @@ struct RendererDiagnosticLayout {
     std::uintptr_t table_begin, table_end;
 };
 inline constexpr RendererDiagnosticLayout kRendererDiagnosticLayouts[] = {
-    {"386bdc4adfc8b8a0db67520b98b391f872a214e07077cc17a02f10bf94e3b2d8",
-     0x4d6000, 0x6aa18aa8, 0x430010, 0x492410, 0x201c8, 0x1edd8, 0x3f79f0,
-     0x1e6000, 0x425a40},
-    {kRendererDiagnosticsHash, kRendererDiagnosticsImageSize, 0x6abb2e1e,
-     0x436580, 0x498980, 0x1288, 0xfb8, 0x3fdb40, 0x1ec000, 0x42c1e4},
+    {"386bdc4adfc8b8a0db67520b98b391f872a214e07077cc17a02f10bf94e3b2d8", 0x4d6000, 0x6aa18aa8,
+     0x430010, 0x492410, 0x201c8, 0x1edd8, 0x3f79f0, 0x1e6000, 0x425a40},
+    {kRendererDiagnosticsHash, kRendererDiagnosticsImageSize, 0x6abb2e1e, 0x436580, 0x498980,
+     0x1288, 0xfb8, 0x3fdb40, 0x1ec000, 0x42c1e4},
+    {"d0b561df9ca1f02e8e78999e7828a03cd20b95d53de0d95215993e58efe0b59c", 0x4b7000, 0x6abd8832,
+     0x436580, 0x498980, 0x1288, 0xfb8, 0x3fdb40, 0x1ec000, 0x42c204},
 };
-inline const RendererDiagnosticLayout* renderer_diagnostic_layout(
-    const char* hash, std::uint32_t image_size, std::uint32_t timestamp) noexcept {
+inline const RendererDiagnosticLayout*
+renderer_diagnostic_layout(const char* hash, std::uint32_t image_size,
+                           std::uint32_t timestamp) noexcept {
     if (!hash)
         return nullptr;
     for (const auto& candidate : kRendererDiagnosticLayouts)

@@ -112,7 +112,7 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
 // takes use it so every take starts at the same authored frame.
 bool path_replay_time(double& seconds) noexcept;
 // Bridge-side publication of that clock (called from the native view hook).
-void publish_path_replay_time(bool playing, double phase) noexcept;
+void publish_path_replay_time(bool playing, double phase, bool completed = false) noexcept;
 // Call at a serialized render/resize boundary before releasing the device.
 // Stops an active recording and releases only recorder-owned GPU resources.
 void reset_resources() noexcept;

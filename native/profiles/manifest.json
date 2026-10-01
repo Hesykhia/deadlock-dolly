@@ -1,14 +1,14 @@
 {
   "manifest_format": 1,
   "native_abi": 4,
-  "generated_utc": "2026-09-29",
+  "generated_utc": "2026-09-30",
   "generator": "tools/generate_profile.py",
-  "reviewed_client_utc": "2026-09-29",
+  "reviewed_client_utc": "2026-09-30",
   "modules": {
     "citadel/bin/win64/client.dll": {
       "role": "client",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790722255,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790806362,
       "accepted": [
         "c7d068857c617c9c41d2c501865a94d93c52f3081864623ae23146e495f3021b",
         "769bf1e74afd67ab0aa02fa94c0c7eb3c133991d32c43e099289210511551a2b",
@@ -19,67 +19,75 @@
         "d1ee16fc5615c3569f25f76d9bcfb364f3f570c642671aaff35ce71356221e26",
         "cb831d124403ee2f3afa54981e69d8acf71251ba1129d0733757251f74a157c2",
         "bc0dae383a2cd65dc1616515cdffa6c947fd057e5590edf0f5a01bd953ec19c9",
-        "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc"
+        "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc",
+        "14a1f187b4dbe0801c805cfb4050dff495601867b1f0c7a21889d47c633a4bf3",
+        "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e"
       ],
       "feature_pins": {
         "automatic preload": [
-          "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc"
+          "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e"
         ]
       }
     },
     "bin/win64/engine2.dll": {
       "role": "engine",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790652946,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790806171,
       "accepted": [
         "887201acec33837fdb18d73c04f8e0894971d26eebafe992a28a12fada118afb",
         "301d042c7443090241d7b83244747bf8a32916f61df60aea5d8a1799f432ef8d",
-        "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4"
+        "5349c2731489931aa37bbb3af9ba1cce7e2d8724bcb6c1a1b5b01db751839ee4",
+        "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26"
       ]
     },
     "bin/win64/tier0.dll": {
       "role": "tier0",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790651376,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790802071,
       "accepted": [
         "b4300eb0abfe73e1e877516ab6b8bdd1a1bdb4ffc47c7515a349d0623b852f69",
         "b3192eac3cb8c54ac3f9c7aaf7c725ddfcc2dc46d99ba13d16177b6ebf736ebc",
-        "493bf3ca610bac0eec1369d19aa67f4c279c6ae1c8f1243b3bad0974c6a8db82"
+        "493bf3ca610bac0eec1369d19aa67f4c279c6ae1c8f1243b3bad0974c6a8db82",
+        "6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332"
       ]
     },
     "bin/win64/scenesystem.dll": {
       "role": "scenesystem",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790651845,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790806143,
       "accepted": [
         "e480a7f28ae073dd4a83833bfee8db44bfff22f097147f2f697a109b2ea2de4b",
-        "3ece2e69f0f779e9bb05f1bd52b524df7adc5da262ddf9766ea71d1b01ce248d"
+        "3ece2e69f0f779e9bb05f1bd52b524df7adc5da262ddf9766ea71d1b01ce248d",
+        "026a6e953e6bf1f2fdbcf8388ba5f6868d830ad54216dcf4518df136be50fc5a"
       ]
     },
     "bin/win64/soundsystem.dll": {
       "role": "soundsystem",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790651904,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790806097,
       "accepted": [
         "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0",
-        "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281"
+        "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281",
+        "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c"
       ]
     },
     "bin/win64/resourcesystem.dll": {
       "role": "resourcesystem",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790651536,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790790800,
       "accepted": [
-        "1eb0193b3098f0941377abe1fce5579c4d61bcc29c4ab099da894a3edab80095"
+        "1eb0193b3098f0941377abe1fce5579c4d61bcc29c4ab099da894a3edab80095",
+        "86d09bc988ab3609d43473c3fdc07246bd8958e7f8fc50af4bbba4ffe05a3da0"
       ]
     },
     "bin/win64/rendersystemdx11.dll": {
       "role": "rendersystemdx11",
-      "reviewed_utc": "2026-09-29",
-      "latest_timestamp": 1790651934,
+      "reviewed_utc": "2026-09-30",
+      "latest_timestamp": 1790806066,
       "accepted": [
         "386bdc4adfc8b8a0db67520b98b391f872a214e07077cc17a02f10bf94e3b2d8",
-        "00ee98d8f2b87b4a8b81ce185549b863f1c9b61e40000f81f6fcfc46a8c18c37"
+        "00ee98d8f2b87b4a8b81ce185549b863f1c9b61e40000f81f6fcfc46a8c18c37",
+        "d0b561df9ca1f02e8e78999e7828a03cd20b95d53de0d95215993e58efe0b59c"
       ]
     }
   },
@@ -97,6 +105,10 @@
     "deadlock-2026-09-29-complete.json",
     "scenesystem-2026-09-29.json",
     "soundsystem-2026-09-29.json",
-    "deadlock-2026-09-29-hotfix-complete.json"
+    "deadlock-2026-09-29-hotfix-complete.json",
+    "deadlock-2026-09-30-complete.json",
+    "deadlock-2026-09-30-6726-complete.json",
+    "scenesystem-2026-09-30-6726.json",
+    "soundsystem-2026-09-30-6726.json"
   ]
 }

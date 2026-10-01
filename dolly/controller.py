@@ -72,6 +72,7 @@ NATIVE_PAUSE_TIMEOUT = 8.0
 # restored exactly on re-enable; bar glow stays owned by toggle_citadel_glow.
 HEALTHBAR_SWITCH_CVARS = ("citadel_healthbars_enabled", "citadel_unit_status_use_new")
 HEALTHBAR_SWITCH_ON = {"citadel_healthbars_enabled": 1.0, "citadel_unit_status_use_new": 1.0}
+HEALTHBAR_SCALE_CVARS = ("citadel_unit_status_min_distance_scale", "citadel_unit_status_max_distance_scale")
 OWN_HEALTH_HUD = "citadel_hud_hide_own_health"
 
 
@@ -249,6 +250,8 @@ class Controller:
         self._playback_restore = {}
         self._layer_hidden = None
         self._healthbar_restore = {}
+        self._healthbars_hidden = False
+        self._look_restore = {}
         self._glow_disabled = False
         self._playback_details = None
         self._playback_metrics = {}
@@ -528,6 +531,8 @@ class Controller:
             self._game_ui_restore.clear()
             self._game_hero_restore = None
             self._healthbar_restore.clear()
+            self._healthbars_hidden = False
+            self._look_restore.clear()
             self._console_open = None
             self._native_last_status = {}
             self._native_handoff_details = {}
@@ -1114,6 +1119,8 @@ class Controller:
                 raise RuntimeError("Replay changed while confirming the recovered paused view.")
             self._probe_result = dict(previous_probe, demo=checked, native_camera=paused)
             self._replay_recovery.update(stage="ready", initial_update=ready, paused_tick=checked["tick"])
+            if self._healthbars_hidden:
+                self._write_look_values({name: 0 for name in self._healthbar_restore})
             if self._glow_disabled:
                 # Reloading the replay restores the game's default glow. A take
                 # must keep the user's choice, so re-assert it before playback.
@@ -1605,7 +1612,8 @@ class Controller:
         self._request("demo_pause")
         current = self._wait_paused_native_view(bridge, before["frame_count"])
         field = "applied_pose" if self._native_active else "original_pose"
-        return {"pose": list(current[field]), "tick": int(current["tick"]), "paused": True}
+        return {"pose": list(current[field]), "tick": int(current["tick"]), "paused": True,
+                "horizontal_fov": current.get("applied_fov" if self._native_active else "original_fov")}
 
     def capture_native_snapshot(self, snapshot, time=0.0):
         """Keep the input event's pose/tick even if its worker runs a little later."""
@@ -1626,6 +1634,11 @@ class Controller:
                 raise ValueError("Shot time must be a finite, nonnegative number.")
             if not ASPECT_MIN <= pose["aspect_ratio"] <= ASPECT_MAX:
                 raise ValueError("Native camera framing is outside the supported aspect range.")
+            horizontal_fov = snapshot.get("horizontal_fov")
+            if horizontal_fov is not None:
+                if (isinstance(horizontal_fov, bool) or not isinstance(horizontal_fov, (float, int))
+                        or not math.isfinite(horizontal_fov) or not 1 < horizontal_fov < 179):
+                    raise ValueError("Native camera capture has an invalid rendered lens.")
             bridge = self._native_bridge()
             if bridge is None:
                 raise RuntimeError("The native camera session is no longer available.")
@@ -1649,6 +1662,8 @@ class Controller:
             if (snapshot["paused"] and int(current["tick"]) != tick) or int(current["tick"]) < tick:
                 raise RuntimeError("The replay moved after this camera capture. Capture the current view again.")
             frame = Keyframe(time=shot_time, **pose)
+            if horizontal_fov is not None:
+                frame.lens_scale = math.tan(math.radians(horizontal_fov / 2)) / frame.aspect_ratio
             if self._native_manual:
                 if not self.status().get("paused_flight"):
                     # A hold/Stop path released manual movement; a capture
@@ -1731,6 +1746,8 @@ class Controller:
 
     def _validate_project(self, project):
         project.validate()
+        if any(k.lens_scale is not None for k in project.keyframes) and self._native_bridge() is None:
+            raise ValueError("This shot contains a captured lens and requires the Native camera backend.")
         if not project.keyframes:
             raise ValueError("Add at least one camera keyframe.")
         for key in project.keyframes:
@@ -2276,6 +2293,8 @@ class Controller:
             # A private constant camera replaces only the runtime preview. The
             # user's saved camera positions/times remain in their project.
             preview.keyframes = [Keyframe(time=shot_time, **pose)]
+            if current.get("applied_fov") is not None:
+                preview.keyframes[0].lens_scale = math.tan(math.radians(current["applied_fov"] / 2)) / pose["aspect_ratio"]
             self._snapshot(project)
             try:
                 bridge.prepare(preview, shot_time, 1.0, True, self._demo.name)
@@ -2763,23 +2782,68 @@ class Controller:
         self._require_probe()
         self._require_demo()
 
-    def _apply_citadel_glow(self):
+    def _write_look_values(self, values):
+        """Require readable controls and verify the entire visual setting group."""
+        original = {name: self._console_cvar(name) for name in values}
+        if any(value is None for value in original.values()):
+            raise RuntimeError("This Deadlock build does not expose all required Look controls. "
+                               "No settings were changed.")
+        try:
+            for name, value in values.items():
+                self._request(f"{name} {numeric(value)}")
+            if any(self._console_cvar(name) != value for name, value in values.items()):
+                raise RuntimeError("Deadlock did not accept the requested Look settings.")
+        except Exception:
+            for name, value in original.items():
+                try:
+                    self._request(f"{name} {numeric(value)}", allow_error=True)
+                    if self._console_cvar(name) == value:
+                        continue
+                except Exception:
+                    LOG.exception("Could not restore Look control %s", name)
+                self._look_restore.setdefault(name, value)
+            raise
+
+    def _restore_look_values(self):
+        """Retry an incomplete Look rollback without camera-track validation."""
+        for name, value in list(self._look_restore.items()):
+            try:
+                self._request(f"{name} {numeric(value)}", allow_error=True)
+                if self._console_cvar(name) == value:
+                    del self._look_restore[name]
+            except Exception:
+                LOG.exception("Could not restore Look control %s", name)
+        if self._look_restore:
+            return "Some Look settings could not be restored; use Stop / restore to retry."
+        return None
+
+    def _apply_citadel_glow(self, disabled=None):
         """Write the remembered glow choice; used by the toggle and recovery."""
-        state = 1 if self._glow_disabled else 0
-        for name in ("citadel_boss_glow_disabled", "citadel_player_glow_disabled",
-                     "citadel_trooper_glow_disabled"):
-            self._request(f"{name} {state}", allow_error=True)
-        self._request(f"r_citadel_glow_health_bars {0 if self._glow_disabled else 1}",
-                      allow_error=True)
+        state = int(self._glow_disabled if disabled is None else disabled)
+        values = {name: state for name in ("citadel_boss_glow_disabled", "citadel_player_glow_disabled",
+                                           "citadel_trooper_glow_disabled")}
+        values["r_citadel_glow_health_bars"] = 1 - state
+        self._write_look_values(values)
 
     def toggle_citadel_glow(self):
         """Flip the Citadel glow set and keep the choice across replay resets."""
         with self._op_lock:
             self._require_quiet_session("toggling glow")
-            self._glow_disabled = self._console_cvar("citadel_boss_glow_disabled") != 1
-            self._apply_citadel_glow()
+            disabled = self._console_cvar("citadel_boss_glow_disabled") != 1
+            self._apply_citadel_glow(disabled)
+            self._glow_disabled = disabled
             self._message("Citadel glow disabled." if self._glow_disabled
                           else "Citadel glow enabled.")
+
+    def _restore_healthbar_values(self):
+        values = dict(self._healthbar_restore)
+        for name, value in values.items():
+            self._request(f"{name} {numeric(value)}", allow_error=True)
+        for name, expected in values.items():
+            if self._console_cvar(name) != expected:
+                raise RuntimeError(f"The game did not restore {name}. Saved health-bar settings remain pending; retry.")
+        self._healthbar_restore.clear()
+        self._healthbars_hidden = False
 
     def toggle_healthbars(self):
         """Hide or restore the health bars.
@@ -2791,54 +2855,58 @@ class Controller:
         with self._op_lock:
             self._require_quiet_session("toggling health bars")
             if self._healthbar_restore:
-                values = dict(self._healthbar_restore)
-                for name, value in values.items():
-                    self._request(f"{name} {numeric(value)}", allow_error=True)
-                for name, expected in values.items():
-                    current = self._console_cvar(name)
-                    if current is not None and current != expected:
-                        raise RuntimeError(
-                            f"The game did not restore {name}. Health-bar state is unchanged; retry.")
-                self._healthbar_restore.clear()
+                self._restore_healthbar_values()
                 self._message("Health bars restored.")
                 return
-            if self._console_cvar("citadel_healthbars_enabled") == 0:
+            scales = {name: self._console_cvar(name) for name in HEALTHBAR_SCALE_CVARS}
+            if all(value is not None and value >= 0 for value in scales.values()):
+                if all(value == 0 for value in scales.values()):
+                    self._message("Floating health bars are already hidden by the game's settings.")
+                    return
+                # Build6723's live-tested panel scale controls hide existing
+                # bars without destroying their renderer. Keep exact originals.
+                self._healthbar_restore = scales
+                self._write_look_values({name: 0 for name in scales})
+                self._healthbars_hidden = True
+                self._message("Floating health bars hidden. The game HUD option controls the hero health panel.")
+                return
+            snapshot = {name: self._console_cvar(name) for name in HEALTHBAR_SWITCH_CVARS}
+            if any(value is None for value in snapshot.values()):
+                raise RuntimeError(
+                    "This Deadlock build does not expose the supported health-bar switches. "
+                    "The health-bar toggle is unavailable; no settings were changed.")
+            if snapshot["citadel_healthbars_enabled"] == 0:
                 # Already hidden outside Dolly; turn the switches back on.
+                self._healthbar_restore = snapshot
                 applied = []
                 for name, value in HEALTHBAR_SWITCH_ON.items():
                     self._request(f"{name} {numeric(value)}", allow_error=True)
                     if self._console_cvar(name) == value:
                         applied.append(name)
                 if len(applied) != len(HEALTHBAR_SWITCH_ON):
-                    raise RuntimeError("This game build did not accept the health-bar switches.")
+                    raise RuntimeError("This game build did not accept the health-bar switches. "
+                                       "Press again to restore the saved settings.")
+                self._healthbar_restore.clear()
                 self._message("Health bars enabled.")
                 return
-            snapshot = {}
-            for name in HEALTHBAR_SWITCH_CVARS:
-                value = self._console_cvar(name)
-                snapshot[name] = value if value is not None else HEALTHBAR_SWITCH_ON[name]
+            self._healthbar_restore = snapshot
             applied = []
             for name in HEALTHBAR_SWITCH_CVARS:
                 self._request(f"{name} 0", allow_error=True)
                 if self._console_cvar(name) == 0.0:
                     applied.append(name)
-            if not applied:
+            if len(applied) != len(HEALTHBAR_SWITCH_CVARS):
                 raise RuntimeError(
-                    "This game build did not accept the health-bar switches. Nothing changed.")
-            self._healthbar_restore = snapshot
-            if len(applied) == len(HEALTHBAR_SWITCH_CVARS):
-                self._message("Health bars hidden.")
-            else:
-                unavailable = ", ".join(name for name in HEALTHBAR_SWITCH_CVARS
-                                         if name not in applied)
-                self._message("Health bars hidden. This build did not report: " + unavailable + ".")
+                    "This game build did not accept the health-bar switches. "
+                    "Press again to restore the saved settings.")
+            self._message("Health bars hidden.")
 
     def near_player_opacity_fix(self):
         """Force full opacity on the near-player camera fades."""
         with self._op_lock:
             self._require_quiet_session("fixing near-player opacity")
-            self._request("citadel_camera_fade_viewed_near_opacity 1", allow_error=True)
-            self._request("citadel_camera_fade_other_near_opacity 1", allow_error=True)
+            self._write_look_values({"citadel_camera_fade_viewed_near_opacity": 1,
+                                     "citadel_camera_fade_other_near_opacity": 1})
             self._message("Near-player fade opacity forced to full.")
 
     def set_playback_speed(self, speed):
@@ -2846,8 +2914,8 @@ class Controller:
 
         While paused the value applies on the next resume; while playing the
         replay slows or speeds up immediately. The native camera path follows
-        replay time, so an authored shot scales with it. Stop / restore still
-        returns a Dolly-owned speed to 1x.
+        replay time, so an authored shot scales with it. Editing Stop preserves
+        the chosen speed; final session cleanup returns a Dolly-owned speed to 1x.
         """
         with self._op_lock:
             if isinstance(speed, bool) or not isinstance(speed, (int, float)):
@@ -4026,7 +4094,7 @@ class Controller:
         try:
             self._require_demo(require_tick=False)
             # Preserve the active speed, including console hotkey changes.
-            # Only explicit Stop / restore returns a Dolly-owned speed to 1x.
+            # Final session cleanup resets speed; editing Stop preserves it.
             self._request("demo_pause")
         except Exception as exc:
             LOG.info("Could not pause replay during playback cleanup: %s", exc)
@@ -4263,7 +4331,7 @@ class Controller:
             self._request("demo_pause")
         self._message(restoration_error or "Paused. The current camera and lens values are held.", playing=False)
 
-    def stop(self, *, preserve_layers=False):
+    def stop(self, *, preserve_layers=False, preserve_speed=False):
         self._halt(native_action="release")
         bridge = self._native_bridge()
         if bridge is not None and callable(getattr(bridge, "editor_status", None)) and self._alive():
@@ -4279,22 +4347,24 @@ class Controller:
         self._invalidate_paused_camera()
         restoration_error = self._restore_playback_settings()
         ui_error = self._restore_game_ui_settings()
-        restoration_error = " ".join(part for part in (restoration_error, ui_error) if part) or None
-        if (self._restore or self._demo_speed_changed) and self._console and self._console.is_connected and self._alive():
+        look_error = self._restore_look_values() if self._look_restore else None
+        restoration_error = " ".join(part for part in (restoration_error, ui_error, look_error) if part) or None
+        if (self._restore or (self._demo_speed_changed and not preserve_speed)) and self._console and self._console.is_connected and self._alive():
             try:
                 self._require_demo(require_tick=False)
                 commands = []
                 for name, value in sorted(self._restore.items()):
                     validate_cvar_name(name)
                     commands.append(name + " " + format_cvar_value(validate_cvar_value(name, value)))
-                if self._demo_speed_changed:
-                    # demo_timescale is a command, not a readable cvar. Stop
-                    # explicitly returns speed to 1x rather than guessing a
-                    # prior speed. Playback cleanup and Pause preserve it.
+                if self._demo_speed_changed and not preserve_speed:
+                    # The editing Stop action keeps the current chosen speed.
+                    # Retain ownership so final session cleanup can still reset
+                    # this command, which has no readable previous value.
                     commands.append("demo_timescale 1")
                 self._request("; ".join(commands))
                 self._restore.clear()
-                self._demo_speed_changed = False
+                if not preserve_speed:
+                    self._demo_speed_changed = False
             except Exception as exc:
                 self._message("Could not restore all cvars: " + str(exc))
                 return
@@ -4609,6 +4679,8 @@ class Controller:
         close_media = getattr(bridge, "_close_media", None)
         if callable(close_media):
             close_media()
+        if self._healthbar_restore and self._console and self._console.is_connected and self._alive():
+            self._restore_healthbar_values()
         self.stop()
         self.clear_export_resolution()
         if self._console:
@@ -4682,6 +4754,9 @@ class Controller:
                   "aspect_capture": dict(self._aspect_capture), "probe": self._probe_result,
                   "recent_console_responses": self._last_output,
                   "pending_cvar_restoration": self._restore,
+                  "pending_look_restoration": dict(self._look_restore),
+                  "healthbar_originals": dict(self._healthbar_restore),
+                  "floating_healthbars_hidden": self._healthbars_hidden,
                   "pending_playback_restoration": dict(self._playback_restore),
                   "pending_game_ui_restoration": dict(self._game_ui_restore),
                   "pending_matte_restoration": dict(getattr(self, "_matte_cvar_restore", None) or {}),

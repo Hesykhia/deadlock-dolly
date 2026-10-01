@@ -1,5 +1,6 @@
 """Render/console lag and replay-playing capture regressions."""
 from collections import deque
+import math
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +23,21 @@ class DelayedViewBridge(FlightBridge):
 
 
 class NativeCaptureTimingTests(unittest.TestCase):
+    def test_capture_preserves_rendered_lens_separately_from_aspect(self):
+        snapshot = {"pose": [11, 22, 33, 4, 5, 0, 2.15], "tick": 100,
+                    "paused": True, "horizontal_fov": 120.0}
+        key, _ = self.controller.capture_native_snapshot(snapshot)
+        self.assertEqual(key.aspect_ratio, 2.15)
+        self.assertAlmostEqual(2 * math.degrees(math.atan(key.lens_scale * key.aspect_ratio)), 120)
+
+    def test_invalid_capture_lens_is_rejected_before_pausing(self):
+        for value in (True, float('nan'), 0, 180):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'rendered lens'):
+                    self.controller.capture_native_snapshot({"pose": self.bridge.pose,
+                        "tick": 100, "paused": False, "horizontal_fov": value})
+        self.assertNotIn('demo_pause', self.console.events)
+
     def setUp(self):
         self.controller, self.console, self.bridge = configured_controller()
 

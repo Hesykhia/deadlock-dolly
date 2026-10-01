@@ -41,6 +41,35 @@ EXTRA_ACTIONS += ("set_confetti_enabled", "set_confetti_spawn_height",
 EXTRA_ACTIONS += ("open_bone_picker", "cancel_bone_picker", "finish_bone_picker")
 EXTRA_ACTIONS += ("start_game_follow", "stop_game_follow")
 EXTRA_ACTIONS += ("set_replay_hud",)
+EXTRA_ACTIONS += ("select_camera", "view_camera", "delete_camera", "undo_shot", "redo_shot", "camera_page")
+
+CAMERA_LIST_OFFSET = 2 * 1024 * 1024 + 23360
+CAMERA_LIST_COUNT = 32
+CAMERA_LIST_HEADER = struct.Struct("<8s8I")
+CAMERA_LIST_ROW = struct.Struct("<3d2I")
+CAMERA_LIST_BYTES = CAMERA_LIST_HEADER.size + CAMERA_LIST_COUNT * CAMERA_LIST_ROW.size
+
+
+def pack_camera_list(sequence, project, revision, first=0, *, can_undo=False, can_redo=False):
+    revision = _uint(revision, 'camera list revision')
+    first = _uint(first, 'camera list page')
+    total = len(project.keyframes)
+    if not revision or first % CAMERA_LIST_COUNT or first > max(0, total - 1):
+        raise ValueError('Invalid camera list page or revision')
+    keys = project.keyframes[first:first + CAMERA_LIST_COUNT]
+    flags = int(bool(can_undo)) | int(bool(can_redo)) << 1
+    data = bytearray(CAMERA_LIST_BYTES)
+    CAMERA_LIST_HEADER.pack_into(data, 0, b'DLYCAMS1', _uint(sequence, 'sequence'),
+                                 1, revision, total, first, len(keys), flags, 0)
+    for index, key in enumerate(keys):
+        if (not all(math.isfinite(v) for v in (key.time, key.aspect_ratio, key.roll))
+                or key.time < 0 or not .5 <= key.aspect_ratio <= 4
+                or key.source not in ('free', 'attach')
+                or index and key.time <= keys[index - 1].time):
+            raise ValueError('Invalid camera list row')
+        CAMERA_LIST_ROW.pack_into(data, CAMERA_LIST_HEADER.size + index * CAMERA_LIST_ROW.size,
+                                  key.time, key.aspect_ratio, key.roll, int(key.source == 'attach'), 0)
+    return bytes(data)
 
 DOF_OFFSET = 2 * 1024 * 1024 + 3712
 DOF_CONFIG = struct.Struct("<8s4I11d")

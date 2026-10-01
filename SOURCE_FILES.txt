@@ -440,3 +440,12 @@ native/tests/follow_anchor_tests.cpp
 third_party/cvar_unlocker/unlocker-build-6722.patch
 native/profiles/scenesystem-2026-09-29.json
 native/profiles/soundsystem-2026-09-29.json
+
+native/profiles/deadlock-2026-09-30-complete.json
+third_party/cvar_unlocker/unlocker-build-6723.patch
+dolly/shot_history.py
+tests/test_shot_history.py
+native/profiles/deadlock-2026-09-30-6726-complete.json
+native/profiles/scenesystem-2026-09-30-6726.json
+native/profiles/soundsystem-2026-09-30-6726.json
+third_party/cvar_unlocker/unlocker-build-6726.patch

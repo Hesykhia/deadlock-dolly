@@ -121,6 +121,17 @@ def show_error(parent, title, message, version: str = __version__) -> None:
         pass
 
 
+def _play_error_sound():
+    """Use the Windows error cue, respecting the user's sound scheme."""
+    try:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.MessageBeep.argtypes = [ctypes.c_uint]
+        user32.MessageBeep.restype = ctypes.c_int
+        user32.MessageBeep(0x10)  # MB_ICONHAND / SystemHand; asynchronous.
+    except (OSError, AttributeError):
+        pass  # An unavailable sound device must not prevent the error dialog.
+
+
 def _font_and_metrics(user32, gdi32, window):
     metrics = _NONCLIENTMETRICSW()
     metrics.cbSize = ctypes.sizeof(_NONCLIENTMETRICSW)
@@ -376,6 +387,7 @@ def _run_native_dialog(owner, title: str, message: str, details: str) -> bool:
         user32.EnableWindow(owner, False)
     try:
         user32.ShowWindow(window, _SW_SHOW)
+        _play_error_sound()
         user32.SetForegroundWindow(window)
         user32.SetFocus(ok_button)
         message_struct = wintypes.MSG()

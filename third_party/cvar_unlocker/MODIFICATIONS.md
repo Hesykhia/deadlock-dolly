@@ -14,6 +14,13 @@ already invalidated, producing an access violation on normal game exit.
 
 ## Changes
 
+- `unlocker-build-6723.patch` (apply after the 6722 patch): adds the exact
+  September30 server hash and reviewed secondary configuration interface.
+  Connect/Disconnect retain their this-8 thunk ABI and the tick method still
+  returns a float. Unknown module identities remain refused. The current
+  tier0 imports, offline ABI and lifecycle tests pass; build6723 live startup
+  and replay/shutdown acceptance are pending.
+
 - `unlocker-build-6722.patch` (apply after the 6712 patch): retain the exact
   ICvar adapter and add the reviewed hotfix server hash/config vtable tuple.
   Version6722 preserves the Connect/Disconnect this-8 thunk ABI and float tick
@@ -62,7 +69,8 @@ provenance.
 
 Apply `unlocker-shutdown.patch` to the pinned upstream source and
 `sdk-disconnect.patch` to its pinned SDK first, then apply
-`unlocker-build-6712.patch` at the source root. The latter includes `CMakeLists.txt`
+`unlocker-build-6712.patch` at the source root. Then apply `unlocker-build-6722.patch` and `unlocker-build-6723.patch` in order.
+The 6712 patch includes `CMakeLists.txt`
 and offline tests. With the SDK at `sdk/`:
 
 ```text
@@ -85,3 +93,5 @@ offline results.
 ## License
 
 The upstream MIT license and copyright notice are preserved in `LICENSE.md`.
+
+- `unlocker-build-6726.patch` follows6723. Adds the exact6726 tier0/server pair and secondary interface tuple. Unknown or mixed6726 pairs fail closed; existing reviewed builds retain their paths.

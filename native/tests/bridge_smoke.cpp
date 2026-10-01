@@ -85,10 +85,12 @@ void gameplay_effect_filter_checks(const GameplayEffectsProfile& profile) {
         return gameplay_effect_weight(reinterpret_cast<void*>(row), from);
     };
     close_to(weight(damage.address(), caller), 0, "Damage leaks into Dolly camera");
-    close_to(weight(death.address() + profile.row_size, caller), 0, "Death leaks into Dolly camera");
+    close_to(weight(death.address() + profile.row_size, caller), 0,
+             "Death leaks into Dolly camera");
     close_to(weight(blinded.address(), caller), .75, "Unrelated game effect was filtered");
     close_to(weight(damage.address() + 1, caller), .75, "Misaligned event was accepted");
-    close_to(weight(damage.address() + 2 * profile.row_size, caller), .75, "Past-end event was accepted");
+    close_to(weight(damage.address() + 2 * profile.row_size, caller), .75,
+             "Past-end event was accepted");
     const auto other_stride = profile.row_size == 32 ? 36 : 32;
     close_to(weight(damage.address() + other_stride, caller), .75,
              "Another build's event stride was accepted");
@@ -460,10 +462,14 @@ void updated_camera_cache_decoder() {
         const auto delta = std::int32_t(std::int64_t(target) - (start + operand + 4));
         std::memcpy(code.data() + operand, &delta, 4);
     };
-    displacement(3, data + 64); displacement(18, data + 48);
-    displacement(25, data + 32); displacement(37, text + 32);
-    displacement(58, data); displacement(70, data + 8);
-    displacement(86, data + 16); displacement(98, data + 24);
+    displacement(3, data + 64);
+    displacement(18, data + 48);
+    displacement(25, data + 32);
+    displacement(37, text + 32);
+    displacement(58, data);
+    displacement(70, data + 8);
+    displacement(86, data + 16);
+    displacement(98, data + 24);
     const auto resolve = [&] {
         return decode_updated(code.data(), code.size(), start, producer.data(), producer.size(),
                               data, 1024, text, 1024);
@@ -481,8 +487,9 @@ void updated_camera_cache_decoder() {
     displacement(37, text + 1010);
     require(!resolve().basis, "Updated cache accepted helper outside executable bounds");
     displacement(37, text + 32);
-    require(!decode_updated(code.data(), code.size(), start, producer.data(), producer.size(),
-                            data, 75, text, 1024).basis,
+    require(!decode_updated(code.data(), code.size(), start, producer.data(), producer.size(), data,
+                            75, text, 1024)
+                 .basis,
             "Updated cache accepted truncated data");
     std::memcpy(code.data() + 0x100, code.data(), sizeof(kUpdatedCachePattern));
     require(!resolve().basis, "Updated cache accepted ambiguous wrapper cache stores");
@@ -616,9 +623,11 @@ struct Fixture {
         const float xyz[3] = {10, 20, 30}, angles[3] = {1, 2, 3};
         std::memcpy(reinterpret_cast<void*>(camera + 0x4a0), xyz, sizeof(xyz));
         std::memcpy(reinterpret_cast<void*>(camera + 0x4b8), angles, sizeof(angles));
-        for (auto offset : {gCameraCache.view_layout.auxiliary_origin, gCameraCache.view_layout.extra_origin})
+        for (auto offset :
+             {gCameraCache.view_layout.auxiliary_origin, gCameraCache.view_layout.extra_origin})
             std::memcpy(reinterpret_cast<void*>(camera + offset), xyz, sizeof(xyz));
-        std::memcpy(reinterpret_cast<void*>(camera + gCameraCache.view_layout.auxiliary_angles), angles, sizeof(angles));
+        std::memcpy(reinterpret_cast<void*>(camera + gCameraCache.view_layout.auxiliary_angles),
+                    angles, sizeof(angles));
         std::memcpy(reinterpret_cast<void*>(gCameraCache.origin), xyz, sizeof(xyz));
         std::memcpy(reinterpret_cast<void*>(gCameraCache.angles), angles, sizeof(angles));
         for (auto address : {gCameraCache.forward, gCameraCache.right, gCameraCache.up}) {
@@ -707,10 +716,13 @@ struct Fixture {
             for (unsigned i = 0; i < 3; ++i) {
                 const auto xyz = reinterpret_cast<const float*>(camera + 0x4a0)[i];
                 const auto angle = reinterpret_cast<const float*>(camera + 0x4b8)[i];
-                for (auto address : {camera + gCameraCache.view_layout.auxiliary_origin, camera + gCameraCache.view_layout.extra_origin, gCameraCache.origin})
+                for (auto address :
+                     {camera + gCameraCache.view_layout.auxiliary_origin,
+                      camera + gCameraCache.view_layout.extra_origin, gCameraCache.origin})
                     close_to(reinterpret_cast<const float*>(address)[i], xyz,
                              "Camera left a player-anchored secondary/cached origin");
-                for (auto address : {camera + gCameraCache.view_layout.auxiliary_angles, gCameraCache.angles})
+                for (auto address :
+                     {camera + gCameraCache.view_layout.auxiliary_angles, gCameraCache.angles})
                     close_to(reinterpret_cast<const float*>(address)[i], angle,
                              "Camera left stale secondary/cached angles");
                 close_to(reinterpret_cast<const float*>(gCameraCache.forward)[i], angle + 10,
@@ -720,8 +732,8 @@ struct Fixture {
                 close_to(reinterpret_cast<const float*>(gCameraCache.up)[i], angle + 30,
                          "Up cache was not derived from authored angles");
             }
-            require(*reinterpret_cast<const unsigned char*>(camera + gCameraCache.view_layout.flags) ==
-                        (projection_flags & ~4u),
+            require(*reinterpret_cast<const unsigned char*>(
+                        camera + gCameraCache.view_layout.flags) == (projection_flags & ~4u),
                     "Camera did not preserve other view flags while selecting its main view");
         }
         return value;
@@ -732,7 +744,8 @@ struct Fixture {
         float xyz[3]{}, angles[3]{}, fov = 0, aspect = 0;
         require(read_memory(camera + 0x4a0, xyz, sizeof(xyz)) &&
                     read_memory(camera + 0x4b8, angles, sizeof(angles)) &&
-                    read_value(camera + 0x498, fov) && read_value(camera + gCameraCache.view_layout.aspect, aspect),
+                    read_value(camera + 0x498, fov) &&
+                    read_value(camera + gCameraCache.view_layout.aspect, aspect),
                 "Cannot read synthetic view");
         for (int i = 0; i < 3; ++i) {
             close_to(xyz[i], double((i + 1) * 10), "Released camera overwrote original position");
@@ -741,10 +754,13 @@ struct Fixture {
         close_to(fov, original_fov, "Released camera overwrote FOV");
         close_to(aspect, original_aspect, "Released camera overwrote aspect");
         for (unsigned i = 0; i < 3; ++i) {
-            for (auto address : {camera + gCameraCache.view_layout.auxiliary_origin, camera + gCameraCache.view_layout.extra_origin, gCameraCache.origin})
+            for (auto address :
+                 {camera + gCameraCache.view_layout.auxiliary_origin,
+                  camera + gCameraCache.view_layout.extra_origin, gCameraCache.origin})
                 close_to(reinterpret_cast<const float*>(address)[i], (i + 1) * 10,
                          "Inactive camera overwrote the game's secondary origin");
-            for (auto address : {camera + gCameraCache.view_layout.auxiliary_angles, gCameraCache.angles})
+            for (auto address :
+                 {camera + gCameraCache.view_layout.auxiliary_angles, gCameraCache.angles})
                 close_to(reinterpret_cast<const float*>(address)[i], i + 1,
                          "Inactive camera overwrote the game's cached angles");
             for (auto address : {gCameraCache.forward, gCameraCache.right, gCameraCache.up})
@@ -760,7 +776,8 @@ struct Fixture {
         float xyz[3]{}, angles[3]{}, fov = 0, aspect = 0;
         require(read_memory(camera + 0x4a0, xyz, sizeof(xyz)) &&
                     read_memory(camera + 0x4b8, angles, sizeof(angles)) &&
-                    read_value(camera + 0x498, fov) && read_value(camera + gCameraCache.view_layout.aspect, aspect),
+                    read_value(camera + 0x498, fov) &&
+                    read_value(camera + gCameraCache.view_layout.aspect, aspect),
                 "Cannot read applied synthetic view");
         for (int i = 0; i < 3; ++i) {
             close_to(xyz[i], expected[i], "Native callback did not write path XYZ");
@@ -1339,6 +1356,27 @@ void editor_framing_checks() {
         require(editor_enqueue(EditorAction::AttachPreview, 1) &&
                     editor_enqueue(EditorAction::AttachSnap, 0),
                 "Attach preview or snap was rejected by the action range");
+        const auto saved_follow = std::atomic_load(&dolly::gFollowConfig);
+        auto active_follow = std::make_shared<EditorFollowConfig>();
+        active_follow->flags = 3;
+        std::atomic_store(&dolly::gFollowConfig,
+                          std::shared_ptr<const EditorFollowConfig>(active_follow));
+        editor_update_view(true, true, false, pose);
+        require(editor_enqueue(EditorAction::OpenBonePicker, 0) &&
+                    editor_enqueue(EditorAction::AttachPreview, 1),
+                "Paused Follow cannot request the normal bone-camera handoff");
+        require(!editor_enqueue(EditorAction::AttachSnap, 0),
+                "Follow must not snap offsets without native camera ownership");
+        editor_update_view(true, false, false, pose);
+        require(!editor_enqueue(EditorAction::OpenBonePicker, 0) &&
+                    !editor_enqueue(EditorAction::AttachPreview, 1),
+                "Playing Follow bypassed the paused handoff gate");
+        std::atomic_store(&dolly::gFollowConfig, saved_follow);
+        editor_update_view(true, true, false, pose);
+        require(!editor_enqueue(EditorAction::OpenBonePicker, 0) &&
+                    !editor_enqueue(EditorAction::AttachPreview, 1),
+                "Idle camera acquired a Follow-only handoff exception");
+        editor_update_view(true, true, true, pose);
         auto saved_roster = std::atomic_load(&dolly::gRoster);
         auto roster = std::make_shared<EditorRoster>();
         roster->count = 1;
@@ -1865,8 +1903,12 @@ void run() {
         std::atomic_store(&dolly::gRoster, std::shared_ptr<const EditorRoster>(roster));
         EditorFollowConfig follow{};
         std::memcpy(follow.magic, "DLYFOLL1", 8);
-        follow.sequence = 2; follow.abi = 1; follow.flags = 1;
-        follow.distance = 200; follow.shoulder = 40; follow.height = 20;
+        follow.sequence = 2;
+        follow.abi = 1;
+        follow.flags = 1;
+        follow.distance = 200;
+        follow.shoulder = 40;
+        follow.height = 20;
         std::memcpy(f.mapping.data() + kEditorFollowOffset, &follow, sizeof(follow));
         editor_worker_tick(f.mapping.data(), true);
         require(editor_snapshot().follow_available && editor_snapshot().follow_distance == 200,
@@ -1888,7 +1930,8 @@ void run() {
                 "Verified Follow request failed to queue");
         require(dolly::gEvents[serial % kEditorEventCount].action == 86,
                 "Follow action differs from Python");
-        follow.sequence = 4; follow.distance = 401;
+        follow.sequence = 4;
+        follow.distance = 401;
         std::memcpy(f.mapping.data() + kEditorFollowOffset, &follow, sizeof(follow));
         editor_worker_tick(f.mapping.data(), true);
         require(editor_snapshot().follow_distance == 200,
@@ -2074,8 +2117,8 @@ int main(int argc, char** argv) {
             const auto setup = std::stoull(argv[3], nullptr, 16);
             const unsigned revision = argc == 6 ? unsigned(std::stoul(argv[4])) : 0;
             const auto delegate = argc == 6 ? base + std::stoull(argv[5], nullptr, 16) : 0;
-            const auto result = camera_view::resolve(static_cast<HMODULE>(image), base + setup,
-                                                     revision, delegate);
+            const auto result =
+                camera_view::resolve(static_cast<HMODULE>(image), base + setup, revision, delegate);
             if (result.basis)
                 std::printf(
                     "Camera layout verified: origin=%llx angles=%llx forward=%llx right=%llx up=%llx basis=%llx\n",

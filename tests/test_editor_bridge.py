@@ -8,6 +8,44 @@ from dolly.editor_actions import default_action_bindings, EditorBinding
 
 
 class EditorBridgeTests(unittest.TestCase):
+    def test_invalid_camera_rows_leave_the_last_complete_list_untouched(self):
+        from dolly.path import Project, Keyframe
+        project = Project(keyframes=[Keyframe(0, 1, 2, 3, 4, 5, 6),
+                                    Keyframe(2, 1, 2, 3, 4, 5, 6)])
+        self.bridge.configure_editor_cameras(project, 7)
+        published = bytes(self.memory)
+        for field, invalid in (('time', 0), ('time', float('nan')),
+                               ('aspect_ratio', 0), ('roll', float('inf')),
+                               ('source', 'unknown')):
+            with self.subTest(field=field, value=invalid):
+                key = project.keyframes[1]
+                original = getattr(key, field)
+                setattr(key, field, invalid)
+                with self.assertRaises(ValueError):
+                    self.bridge.configure_editor_cameras(project, 8)
+                self.assertEqual(bytes(self.memory), published)
+                setattr(key, field, original)
+
+    def test_camera_page_is_bounded_atomic_and_does_not_overlap_other_blocks(self):
+        from dolly.path import Project, Keyframe
+        project = Project(keyframes=[Keyframe(i, 1, 2, 3, 4, 5, 6) for i in range(40)])
+        before = bytes(self.memory)
+        self.bridge.configure_editor_cameras(project, 7, 32, can_undo=True)
+        header = w.CAMERA_LIST_HEADER.unpack_from(self.memory, w.CAMERA_LIST_OFFSET)
+        self.assertEqual(header, (b'DLYCAMS1', 2, 1, 7, 40, 32, 8, 1, 0))
+        row = w.CAMERA_LIST_ROW.unpack_from(self.memory, w.CAMERA_LIST_OFFSET + w.CAMERA_LIST_HEADER.size)
+        self.assertEqual(row, (32, project.keyframes[32].aspect_ratio, 6, 0, 0))
+        self.assertEqual(bytes(self.memory[:w.CAMERA_LIST_OFFSET]), before[:w.CAMERA_LIST_OFFSET])
+        end = w.CAMERA_LIST_OFFSET + w.CAMERA_LIST_BYTES
+        self.assertLessEqual(end, len(self.memory))
+        self.assertGreaterEqual(w.CAMERA_LIST_OFFSET, nb.FOLLOW_ANCHOR_DIAGNOSTICS_OFFSET + nb.FOLLOW_ANCHOR_DIAGNOSTICS.size)
+        self.assertEqual(bytes(self.memory[end:]), before[end:])
+        published = bytes(self.memory)
+        for revision, page in ((0, 0), (7, 33), (7, 64), (7, -1)):
+            with self.assertRaises(ValueError):
+                self.bridge.configure_editor_cameras(project, revision, page)
+            self.assertEqual(bytes(self.memory), published)
+
     def test_follow_settings_publish_without_touching_other_blocks(self):
         from dolly.follow_camera import FollowSettings
         before = bytes(self.memory)

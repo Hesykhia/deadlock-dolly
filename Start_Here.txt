@@ -1,4 +1,9 @@
-DEADLOCK DOLLY 0.5.39 ALPHA — SOURCE PACKAGE
+SOURCE USERS: run Launch_Dolly.bat or python -m dolly with Python 3.10+ and
+Tcl/Tk. Native features require the included Windows helper. Optional audio and
+build workflows need their documented dependencies. See docs/BUILDING.md.
+The instructions below also describe the separate portable Windows package.
+
+DEADLOCK DOLLY 0.6.0 ALPHA — WINDOWS PORTABLE
 
 A camera-path editor for local Deadlock replays.
 
@@ -7,49 +12,37 @@ Native mode loads a user-mode DLL for camera rendering and in-game controls.
 It does not install a kernel driver.
 
 KEEP -insecure IN DEADLOCK'S LAUNCH OPTIONS WHILE USING DOLLY.
-Dolly refuses to launch or connect unless it started the game process itself,
-and it always adds -dev -insecure -console to that process. The launch-option
-setting protects the brief window before gameinfo.gi is restored: if Deadlock
-is started outside Dolly while a session is open, exit that game first.
-Close the editing session before launching Deadlock normally.
-
-This source package includes the Windows native helper. Run Launch_Dolly.bat
-or python -m dolly with Python 3.10+ and Tcl/Tk. Windows EXE builds are covered
-in docs/BUILDING.md. The Windows portable ZIP includes Python and opens through
-Dolly.exe; keep its _internal folder beside it.
+The launcher also adds -dev -insecure -console to its editing session.
+Close that session before launching Deadlock normally.
 
 
 GETTING STARTED
 
-1. Open Steam, sign in, and close any running Deadlock game. Use DirectX 11.
-2. Open Dolly. On Home, choose Deadlock's executable and a local, extracted
-   .dem replay. Replays lists demos from the selected replay folder.
-3. Click Open replay in Dolly, then WAIT FOR DOLLY TO LOAD THE HIDEOUT AND DEMO.
-   Dolly advances the initial screen and verifies map/shader preload completion
-   before automatically opening your paused replay. Do not manually load a demo
-   or navigate the game's menus during startup.
-4. Move to the first view and press Ctrl+Alt+K. Advance the replay, frame the
-   next view and capture again. The In-game capture switch is on Home beside
-   Play replay; set its shortcut in Settings > Controls & keybinds. F8 opens
-   capture, saved views and playback.
-5. On the desktop Cameras tab, edit framing, camera bank and arrival times.
-   Replay timing is selected by default and uses the replay tick at capture.
-   Timed shot is optional for placing multiple views at one paused moment.
-6. Click Play shot or press F5. Dolly returns to the shot's start, applies the
-   camera and supported DOF settings, then plays the replay and path together.
+1. Extract the whole Windows ZIP and open Dolly.exe. Keep _internal beside it.
+   Python and the native helper are included.
+2. Open Steam, sign in, and close any running Deadlock game. Use DirectX 11.
+3. In Library, choose a local, extracted .dem replay. Launch setup contains
+   the game executable and camera driver; saved paths are in Settings.
+4. Click Open replay in Dolly, then WAIT FOR DOLLY TO LOAD THE HIDEOUT AND DEMO.
+   Dolly advances the initial screen, prepares the hideout and waits for verified
+   map/shader preload completion before automatically opening your paused replay.
+   Do not manually load a demo or navigate the game's menus during startup.
+5. Move to a view and press Ctrl+Alt+K. Advance the replay and capture the next view.
+   The In-game capture switch is on Library beside Open replay in Dolly; set the
+   shortcut in Settings > Controls & keybinds. F8 opens the in-game panel.
+6. Enable Full editor for desktop Cameras, Effects and the shot timeline.
+   Save shots from Library or the File menu. F8 has CAMERA / FOLLOW / BONE PICKER / LOOK / EXPORT tabs.
+7. Click Play shot or press F5 to play the replay and camera path together.
    Hide HUD controls HUD visibility during playback; it returns afterward.
-7. Save the shot from the desktop File menu. Effects contains the depth-of-field
-   preset and camera-variable tracks. More > Coordinates / timing on Cameras
-   opens the advanced camera settings.
 
 
 DEFAULT CONTROLS
 
-Ctrl+Alt+K     Capture camera; the first capture starts the shot
+Ctrl+Alt+K     Capture camera
 Ctrl+Alt+R     Replace selected camera
 P             Pause/resume replay
 F5 / F6       Play path / Stop and restore
-PageUp/Down   Previous/next saved camera
+PageUp/Down   Previous/next saved camera at the current replay moment
 Comma/Period  Seek backward/forward one second
 F7            Open/close console
 F8            Toggle Dolly panel
@@ -61,9 +54,9 @@ Mouse/arrows  Look around
 Shift/Alt     Move faster/slower
 Q/E           Camera roll
 
-Keybinds saves keyboard and Mouse4/Mouse5 assignments, movement speed and mouse
-sensitivity. F7 is reserved for the console. Settings are stored in
-%APPDATA%/DeadlockDolly/settings.json and survive program-folder updates.
+Settings > Controls & keybinds saves keyboard and Mouse4/Mouse5 assignments, movement speed and mouse
+sensitivity. F7 is reserved for the console. Settings survive updates in
+%APPDATA%/DeadlockDolly/settings.json.
 
 The console receives normal typing without moving the camera or triggering
 Dolly shortcuts. F7 or Escape closes it and returns to the previous UI.
@@ -72,37 +65,15 @@ From Deadlock's replay UI, F8 returns to the panel and F9 returns to flight.
 Returning hides both the replay controls and character HUD. F9 shows them again.
 Release held movement keys after switching windows before pressing them again.
 
-
-CAMERAS, FRAMING AND PLAYBACK
-
-Native capture uses the displayed camera position, rotation and framing.
 Capture also works while the replay is playing and leaves it paused.
 The in-game capture key saves the rendered view and tick at the keypress.
 Desktop capture waits for a paused rendered view before saving its tick.
 
-Previous/next and saved-view preview change the camera at the CURRENT paused
-replay moment. They do not seek to that camera's arrival time. F10 continues
-flight from the displayed view.
-
-Framing uses r_aspectratio. Normal starts at 16:9 (about 1.77778). Select a
-camera and drag its point in FRAMING CURVE, or enter Aspect ratio and click
-Update camera. Preview applies the selected view. Smooth, Linear and Step
-framing curves are available. These values are ratios, not FOV degrees.
-
-Timed shot allows several camera captures at one paused replay moment.
-Replay timing assigns arrival times from replay ticks. The first capture sets
-the shot's start tick. Ticks/second defaults to 64 and is also used for seeking.
-Replace selected changes a camera's pose at its existing arrival time.
-
-Speed changes the replay and camera together: a four-second shot at 0.1x takes
-about forty real seconds. Frozen preview moves along the path while the scene
-stays paused. Stop / restore releases the camera and restores its settings;
-the game's spectator view may be elsewhere.
-
-Supported native DOF curves run at the same rendered-view phase as the camera.
-The fourteen supported controls are listed in docs/SUPPORTED_CAMERA_CVARS.md. Updates / s
-sets the monitoring rate in Native mode. Playback smoothing applies only to
-Console (legacy).
+Replay timing is the default: advance the replay between captures to set their
+arrival times. Timed shot can space multiple views at one paused tick. Framing
+uses aspect ratios, with 16:9 as Normal. Frozen preview plays the camera path
+while the scene stays paused. Stop / restore returns to the game's camera,
+which may be elsewhere, and restores camera settings.
 
 
 RECORDED DEMOS
@@ -134,62 +105,65 @@ turn off the direct range override. + Citadel DOF keeps the existing preset.
 Vector shots save as project format 3 and require this or a newer version;
 existing scalar-only shots keep format 2.
 
-Supported commands and examples: docs/SUPPORTED_CAMERA_CVARS.md
-Machine-readable list: docs/SUPPORTED_CAMERA_CVARS.json
+Supported commands and examples: Supported_Camera_Cvars.md
+Machine-readable list: Supported_Camera_Cvars.json
 
 
 VIDEO AND RESHADE
 
-Full guide: docs/VIDEO_AND_RESHADE.md
+Full guide: Video_and_ReShade.md
 
 Choose a new MP4 filename, 30/60/120 FPS and bitrate on the desktop Export tab.
 Return to the game and use F8 > Record video, then Play shot or F5.
 F8 > Finish recording saves the MP4. Recording continues through camera handoffs and desktop controls. Wait for finalization before closing Deadlock.
 
 Capture uses the current even-sized SDR game resolution, up to 3840 x 2160.
-It records in real time without audio. Missed capture slots are counted; lower
+Real-time recording supports optional game-only audio. Fixed-step bundled audio
+is not supported; use silent fixed-step layer exports separately. Missed capture slots are counted; lower
 resolution, shader cost or export FPS if the game/encoder cannot keep up.
 Dolly controls and guides are excluded. The game HUD follows playback settings.
 
 ReShade 6.8.0/API 20 with full add-on support is a separate download. Extract ReShade64.dll from the official full
-add-on setup EXE with 7-Zip into a folder outside the game. Select it on Export
-and enable it. F11 opens its own menu; change the shortcut in Keybinds.
+add-on setup EXE with 7-Zip into a folder outside the game. Select it in Settings > ReShade
+and enable it. F11 opens its own menu; change the shortcut in Settings > Controls & keybinds.
 A single-sample SDR swapchain and manual runtime functions are required. Add shader/texture search
-paths and presets through ReShade. Color effects are supported, and Dolly
-publishes the verified scene depth to ReShade so depth-based effects such as
-MXAO can use it. Native Dolly DOF still works.
+paths and presets through ReShade. Color effects and verified scene depth for compatible depth-based effects are
+supported. Native Dolly DOF is also available.
 
 ReShade config: %APPDATA%\DeadlockDolly\ReShade\ReShade.ini
 The runtime path is remembered. Disable affects this session; Forget clears
 the saved path for future launches. No graphics loader is installed beside
 Deadlock. The loaded DLL remains resident until the editing game exits.
 
-COMPATIBILITY
+COMPATIBILITY AND UPDATES
+
+0.6.0-alpha supports reviewed Deadlock build 6726. Camera-list selection,
+double-click view, Delete and shared Undo/Redo are available in-game. The tabs
+are CAMERA, FOLLOW, BONE PICKER, LOOK and EXPORT. In the panel, Ctrl+Z undoes
+shot edits; Ctrl+Y or Ctrl+Shift+Z redoes them. History does not rewind the replay.
+
+FOLLOW selects a hero and follows their aim with adjustable distance, shoulder
+and height. Right-click sliders to reset them; choose whether to show the game
+HUD. Paused Follow can transfer directly to Bone Picker. Regular paths hold
+their last view on completion; F9 or Stop / restore explicitly hands back control.
+
+New captures preserve their lens through reloads and playback. Older custom-lens
+shots may need recapture. Floating health bars and the hero health/ability HUD
+are separate controls. Glow depends on the game's eligibility rules.
+
+Real-time recording preserves repeated replay-clock frames and adding audio
+preserves the final video frame. Actual missed slots remain visible in diagnostics.
+Short bounded layer/audio and packaged-app checks passed; this does not certify
+long/4K exports or every GPU. The repeated intro remains visible during seeking.
 
 Native mode supports reviewed client.dll, engine2.dll and tier0.dll builds.
-A Deadlock update can require a Dolly update. Home > Troubleshooting contains
-the manual startup controls and Console (legacy) driver.
+A Deadlock update can require a Dolly update. Settings > Troubleshooting & recovery > Startup controls contains
+the Console (legacy) driver and manual startup controls.
 
-0.5.24 is an alpha. Camera editing now includes rotation curves, attachment
-and in-between shot seeking, alongside the existing replay safeguards. The 0.5.x line adds
-the compatibility scanner, real-time and fixed-step recording, the paired depth
-master, isolated layer takes, ReShade with a bundled shader library and depth
-publication, the Citadel DOF and glow controls, the live replay speed control,
-in-folder update staging, and the startup update check. Earlier renderer
-slowdowns do not have a confirmed general fix. Audio, expanded in-game curves
-and arbitrary output resizing remain planned.
-Technical details and validation results are in docs/internal/VALIDATION.md.
-
-
-UPDATING AND RECOVERY
-
-Close Deadlock and Dolly before updating. If the old installation has a pending
-gameinfo recovery, use its Recover_Game_Config.bat first. Keep saved shots and
-logs, including any recovery backup. Use the complete new package; 0.5.24 uses
-camera ABI 3 and editor ABI 2 and its native helper must match the editor.
-
-After an interrupted launch, close Deadlock and use File > Recover game
-configuration or Recover_Game_Config.bat. The portable app also supports:
+Close Deadlock and Dolly before updating. Keep saved shots and logs, including
+pending recovery backups. Use the complete new portable folder; _internal must
+match Dolly.exe. After an interrupted launch, close Deadlock and use
+File > Recover game configuration, or run:
   Dolly.exe --recover
 
 
@@ -216,5 +190,20 @@ https://github.com/cravvnn/deadlock-dolly/issues
 
 Include the Dolly version, the action that failed and the Export diagnostics
 ZIP. If Dolly does not open, include logs/Dolly_startup.log and logs/Dolly.log
-when available. The full controls and troubleshooting guide is in
-docs/USER_GUIDE.md.
+when available. Logs and recovery journals stay in the Dolly folder.
+
+Full guide: https://github.com/cravvnn/deadlock-dolly/blob/main/docs/USER_GUIDE.md
+Component notices are in LICENSE.txt and _internal/third_party.
+
+
+APPLICATION UPDATES
+
+Open Dolly.exe: its startup window checks the published GitHub Latest release.
+Use Open Dolly to skip a slow check. The updater is built into Dolly.exe. Automatic updates
+wait for saved work and a closed game. Settings > Updates has manual checking
+and an automatic-update switch. Shots, settings and external tool paths stay.
+Update files live in a .dolly-update-* folder inside the Dolly folder and are
+removed automatically after a successful update. After an interrupted update,
+close Deadlock and reopen Dolly.exe to recover. Keep the .dolly-update-* folder
+and the _internal folder while a recovery is pending. Update details:
+https://github.com/cravvnn/deadlock-dolly/blob/main/docs/internal/UPDATING.md

@@ -1,10 +1,11 @@
 """Audio export runtime selection, independent of a running game."""
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from dolly.clip_audio import _ffmpeg, _sample_window
+from dolly.clip_audio import _ffmpeg, _mux, _sample_window
 
 
 class AudioWindowTests(unittest.TestCase):
@@ -48,3 +49,31 @@ class AudioRuntimeTests(unittest.TestCase):
                 patch('dolly.video_export.bundled_ffmpeg_path', return_value=None), \
                 patch('dolly.clip_audio.shutil.which', return_value='custom/ffmpeg.exe'):
             self.assertEqual(_ffmpeg(), Path('custom/ffmpeg.exe'))
+
+
+class AudioMuxFrameTests(unittest.TestCase):
+    def test_audio_rounding_does_not_remove_last_video_frame(self):
+        # Exercise the shipped muxer and decode both files; a command-string
+        # assertion would not catch packet loss at the end of the container.
+        from dolly.video_export import bundled_ffmpeg_path
+        ffmpeg = bundled_ffmpeg_path()
+        if ffmpeg is None:
+            self.skipTest("Bundled FFmpeg is unavailable")
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "video.mp4"
+            audio = Path(folder) / "audio.wav"
+            def run(*args):
+                return subprocess.run(
+                    [str(ffmpeg), "-hide_banner", "-loglevel", "error", *args],
+                    check=True, capture_output=True).stdout
+            run("-f", "lavfi", "-i", "testsrc2=size=64x64:rate=60",
+                "-frames:v", "60", "-c:v", "mpeg4", "-bf", "0", str(video))
+            run("-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+                "-t", "0.999", "-ac", "2", str(audio))
+            def decoded_frames():
+                data = run("-i", str(video), "-map", "0:v:0", "-f", "framemd5", "-")
+                return [line for line in data.splitlines() if not line.startswith(b"#")]
+            before = decoded_frames()
+            self.assertEqual(len(before), 60)
+            _mux(video, [audio], ffmpeg)
+            self.assertEqual(decoded_frames(), before)

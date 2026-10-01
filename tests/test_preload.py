@@ -236,3 +236,34 @@ class PreloadTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ModuleSnapshotTests(unittest.TestCase):
+    def test_transient_loader_change_retries_then_returns_owned_snapshot(self):
+        api = Mock()
+        api.CreateToolhelp32Snapshot.side_effect = [preload.wintypes.HANDLE(-1).value, 123]
+        with patch.object(preload.ctypes, 'get_last_error', return_value=24, create=True), \
+                patch.object(preload.time, 'sleep') as wait:
+            self.assertEqual(preload._module_snapshot(api, 77), 123)
+        self.assertEqual(api.CreateToolhelp32Snapshot.call_count, 2)
+        wait.assert_called_once_with(.02)
+
+    def test_nontransient_failure_is_not_retried(self):
+        api = Mock()
+        api.CreateToolhelp32Snapshot.return_value = preload.wintypes.HANDLE(-1).value
+        with patch.object(preload.ctypes, 'get_last_error', return_value=5, create=True), \
+                patch.object(preload.time, 'sleep') as wait:
+            with self.assertRaisesRegex(preload.PreloadError, 'Windows error 5'):
+                preload._module_snapshot(api, 77)
+        self.assertEqual(api.CreateToolhelp32Snapshot.call_count, 1)
+        wait.assert_not_called()
+
+    def test_retry_budget_exhaustion_fails_closed(self):
+        api = Mock()
+        api.CreateToolhelp32Snapshot.return_value = preload.wintypes.HANDLE(-1).value
+        with patch.object(preload.ctypes, 'get_last_error', return_value=24, create=True), \
+                patch.object(preload.time, 'sleep') as wait:
+            with self.assertRaisesRegex(preload.PreloadError, 'Windows error 24'):
+                preload._module_snapshot(api, 77)
+        self.assertEqual(api.CreateToolhelp32Snapshot.call_count, 8)
+        self.assertEqual(wait.call_count, 7)

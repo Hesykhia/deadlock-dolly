@@ -68,7 +68,10 @@ def _mux(video: Path, audios: list[Path], ffmpeg: Path) -> None:
         command += ["-map", "0:v:0"]
         for index in range(len(audios)):
             command += ["-map", f"{index + 1}:a:0"]
-        command += ["-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest", str(target)]
+        # Tracks have already been cropped to the capture window. Do not use
+        # -shortest: audio/container rounding can otherwise discard the final
+        # video packet even when the audio is only a fraction of a frame short.
+        command += ["-c:v", "copy", "-c:a", "aac", "-b:a", "256k", str(target)]
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode:
             raise RuntimeError("FFmpeg could not add clip audio: " + result.stderr[-1000:])

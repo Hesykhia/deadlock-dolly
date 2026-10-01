@@ -47,6 +47,8 @@ class SoundProfileTests(unittest.TestCase):
             ("scenesystem.dll", "kPlayerCaptureScenesystemHash", bridge),
             ("soundsystem.dll", "kSoundSystemHash", bridge),
             ("soundsystem.dll", "kSeptemberSoundSystemHash", bridge),
+            ("soundsystem.dll", "kSound6726Hash", bridge),
+            ("scenesystem.dll", "kScene6726Hash", bridge),
             ("scenesystem.dll", "kSeptemberScenesystemHash", bridge),
             ("rendersystemdx11.dll", "kRendererDiagnosticsHash",
              (ROOT / "native/include/dolly_renderer_diagnostics.hpp").read_text()),
@@ -56,8 +58,9 @@ class SoundProfileTests(unittest.TestCase):
         sound = json.loads(PROFILE.read_text())
         legacy = json.loads(LEGACY_PROFILE.read_text())
         self.assertCountEqual(modules["bin/win64/soundsystem.dll"]["accepted"],
-                              [legacy["sha256"], sound["sha256"]])
-        self.assertEqual(modules["bin/win64/resourcesystem.dll"]["accepted"], [preload.RESOURCE_SHA256])
+                              [json.loads(p.read_text())["sha256"]
+                               for p in (ROOT / "native/profiles").glob("soundsystem-*.json")])
+        self.assertIn(preload.RESOURCE_SHA256, modules["bin/win64/resourcesystem.dll"]["accepted"])
         client = modules["citadel/bin/win64/client.dll"]
         self.assertIn(preload.CLIENT_SHA256, client["accepted"])
         self.assertEqual(client["feature_pins"]["automatic preload"], [preload.CLIENT_SHA256])

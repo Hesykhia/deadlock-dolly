@@ -15,7 +15,7 @@ class FollowCapabilityTests(unittest.TestCase):
         header = bytearray(0x5c)
         struct.pack_into('<Q', header, 0, 0x900100)
         struct.pack_into('<Q', header, 0x30, 0x80000)
-        blocks[monitor.base + 0x3bdf698] = struct.pack('<QQ', 7, 0x900000)
+        blocks[monitor.base + 0x3be1b98] = struct.pack('<QQ', 7, 0x900000)
         blocks[0x900000] = header
         blocks[0x900100] = OWN_HEALTH_HUD.encode() + b'\0'
         for rva, size in OWN_HEALTH_SPANS:
@@ -51,7 +51,7 @@ class FollowCapabilityTests(unittest.TestCase):
         monitor.base = 0x180000000
         monitor._owned = Mock()
         refs = {PREFIX + name: (rva, 7) for name, rva in REFS.items()}
-        refs.update({ENABLED: (0x35f7180, 0), FOLLOW_AIM: (0x35f6eb0, 0)})
+        refs.update({ENABLED: (0x35f98f0, 0), FOLLOW_AIM: (0x35f9628, 0)})
         blocks, headers = {}, {}
         for i, (name, (rva, value_type)) in enumerate(refs.items()):
             data = 0x200000 + i * 0x1000

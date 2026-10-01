@@ -23,7 +23,8 @@ def open_picker(app):
     if key.source != "attach" or not isinstance(key.attach, AttachKey):
         raise ValueError("Choose an attached player before opening Bone Picker.")
     status = bridge.editor_status()
-    if not status.get("ready") or not status.get("flight_active"):
+    from_follow = getattr(app.controller, "_follow_active", False) is True
+    if not status.get("ready") or (not status.get("flight_active") and not from_follow):
         raise ValueError("Enter the Native camera editor before opening Bone Picker.")
     context = dict(index=index, key=deepcopy(key), bridge=bridge,
                    preview=bool(getattr(app, "preview_attach", False)),
@@ -32,6 +33,8 @@ def open_picker(app):
     def start():
         if app.controller._recorder_active():
             raise ValueError("Finish recording before opening Bone Picker.")
+        if from_follow:
+            app.controller.enter_native_flight(owner="panel")
         if context["resume"]:
             app.controller.toggle_replay()
         bridge.configure_editor(owner="panel")
@@ -138,6 +141,11 @@ def start_attached_view(app, mutate):
     rate = app._resolve_replay_tick_rate(candidate, adopt=True)
 
     def capture():
+        # Follow owns the game's camera rather than native flight. Transfer
+        # ownership through the normal restoration gate before capturing the
+        # first bone camera, so opening its picker has an active native view.
+        if getattr(app.controller, "_follow_active", False) is True:
+            app.controller.enter_native_flight(owner="panel")
         key = app.controller.capture_at_replay(None, rate)
         tick = app.controller.status().get("tick")
         if tick is None:

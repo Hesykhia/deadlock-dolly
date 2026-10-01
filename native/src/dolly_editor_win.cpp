@@ -27,6 +27,7 @@ std::shared_ptr<const EditorConfig> gConfig;
 std::shared_ptr<const EditorDofConfig> gDofConfig;
 std::shared_ptr<const EditorCitadelDofConfig> gCitadelDofConfig;
 std::shared_ptr<const EditorFollowConfig> gFollowConfig;
+std::shared_ptr<const EditorCameraList> gCameraList;
 std::shared_ptr<const EditorAttachConfig> gAttachConfig;
 std::shared_ptr<const EditorRoster> gRoster;
 std::shared_ptr<const EditorBones> gBones;
@@ -617,6 +618,13 @@ bool editor_follow_config(EditorFollowConfig& out) noexcept {
     out = *follow;
     return true;
 }
+bool editor_camera_list(EditorCameraList& out) noexcept {
+    auto list = std::atomic_load(&gCameraList);
+    if (!list || !gConnected.load())
+        return false;
+    out = *list;
+    return true;
+}
 bool editor_roster_snapshot(EditorRoster& out) noexcept {
     auto roster = std::atomic_load(&gRoster);
     if (!roster || !gConnected.load())
@@ -637,12 +645,24 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
     if (action == EditorAction::ReShade)
         return configured() && !gReShadeDeferred.load() &&
                reshade_request_overlay(!reshade_overlay_open());
-    if (!std::isfinite(value) ||
-        std::uint32_t(action) > std::uint32_t(EditorAction::SetReplayHud))
+    if (!std::isfinite(value) || std::uint32_t(action) > std::uint32_t(EditorAction::CameraPage))
         return false;
     auto state = editor_snapshot();
     if (!state.enabled)
         return false;
+    const bool camera_action =
+        action >= EditorAction::SelectCamera && action <= EditorAction::CameraPage;
+    if (camera_action) {
+        EditorCameraList list{};
+        if (!pose_override || !state.ready || !state.paused || state.busy || state.playing ||
+            state.attach_preview || state.owner != EditorOwner::Panel ||
+            !editor_camera_list(list) || list.total != state.camera_count ||
+            !valid_editor_camera_action(list, action, value, (*pose_override)[0]))
+            return false;
+        for (double component : *pose_override)
+            if (!std::isfinite(component))
+                return false;
+    }
     // While inspecting, only recovery/ownership and picker actions may escape
     // to Python. In particular no capture, seek or recording of this view.
     if (state.bone_picker && action != EditorAction::CancelBonePicker &&
@@ -651,8 +671,9 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
         action != EditorAction::Stop)
         return false;
     if (action == EditorAction::OpenBonePicker &&
-        (!state.attach_selected || !state.ready || !state.manual_active || !state.paused ||
-         state.busy || state.playing || state.owner != EditorOwner::Panel || value != 0))
+        (!state.attach_selected || !state.ready || (!state.manual_active && !state.follow_active) ||
+         !state.paused || state.busy || state.playing || state.owner != EditorOwner::Panel ||
+         value != 0))
         return false;
     if (action == EditorAction::CancelBonePicker && (!state.bone_picker || value != 0))
         return false;
@@ -672,7 +693,8 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
             !pose_override || value < 0 || value > 400)
             return false;
         for (double component : *pose_override)
-            if (!std::isfinite(component)) return false;
+            if (!std::isfinite(component))
+                return false;
         if (std::abs((*pose_override)[0]) > 150 || std::abs((*pose_override)[1]) > 150)
             return false;
         EditorRoster roster{};
@@ -725,7 +747,9 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
         return false;
     if (action == EditorAction::AttachPreview && value != 0 && value != 1)
         return false;
-    if (action == EditorAction::AttachPreview && (!state.attach_selected || !state.manual_active))
+    if (action == EditorAction::AttachPreview &&
+        (!state.attach_selected ||
+         (!state.manual_active && !(state.follow_active && state.paused))))
         return false;
     if (action == EditorAction::AttachSnap && value != 0)
         return false;
@@ -779,7 +803,7 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
                 return false;
     } else if (pose_override && action != EditorAction::SetAttachOffsets &&
                action != EditorAction::SetAttachBone && action != EditorAction::FinishBonePicker &&
-               action != EditorAction::StartGameFollow)
+               action != EditorAction::StartGameFollow && !camera_action)
         return false;
     if (action == EditorAction::SetSpeed) {
         if (value < 1 || value > 10000)
@@ -814,6 +838,8 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
     event.sequence = sequence;
     event.action = std::uint32_t(action);
     event.value = value;
+    if (action == EditorAction::Capture || action == EditorAction::Replace)
+        event.value = state.horizontal_fov;
     for (unsigned i = 0; i < 7; ++i)
         event.pose[i] = pose_override ? (*pose_override)[i] : state.pose[i];
     event.tick = state.tick;
@@ -1162,6 +1188,23 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
                 }
             }
         }
+        auto cameras_source = memory + kEditorCameraListOffset;
+        auto cameras_sequence = reinterpret_cast<volatile LONG*>(cameras_source + 8);
+        const auto cameras_first = InterlockedCompareExchange(cameras_sequence, 0, 0);
+        const auto cameras_previous = std::atomic_load(&gCameraList);
+        if (!(cameras_first & 1) &&
+            (!cameras_previous || cameras_previous->sequence != std::uint32_t(cameras_first))) {
+            EditorCameraList list{};
+            std::memcpy(&list, cameras_source, sizeof(list));
+            MemoryBarrier();
+            if (cameras_first == InterlockedCompareExchange(cameras_sequence, 0, 0) &&
+                valid_editor_camera_list(list)) {
+                try {
+                    std::atomic_store(&gCameraList, std::make_shared<const EditorCameraList>(list));
+                } catch (...) {
+                }
+            }
+        }
         auto follow_source = memory + kEditorFollowOffset;
         auto follow_sequence = reinterpret_cast<volatile LONG*>(follow_source + 8);
         const auto follow_first = InterlockedCompareExchange(follow_sequence, 0, 0);
@@ -1173,13 +1216,15 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
             MemoryBarrier();
             if (follow_first == InterlockedCompareExchange(follow_sequence, 0, 0) &&
                 std::memcmp(follow.magic, "DLYFOLL1", 8) == 0 && follow.abi == 1 &&
-                !(follow.flags & ~15u) && !follow.reserved &&
-                std::isfinite(follow.distance) && follow.distance >= 0 && follow.distance <= 400 &&
-                std::isfinite(follow.shoulder) && std::abs(follow.shoulder) <= 150 &&
-                std::isfinite(follow.height) && std::abs(follow.height) <= 150) {
+                !(follow.flags & ~15u) && !follow.reserved && std::isfinite(follow.distance) &&
+                follow.distance >= 0 && follow.distance <= 400 && std::isfinite(follow.shoulder) &&
+                std::abs(follow.shoulder) <= 150 && std::isfinite(follow.height) &&
+                std::abs(follow.height) <= 150) {
                 try {
-                    std::atomic_store(&gFollowConfig, std::make_shared<const EditorFollowConfig>(follow));
-                } catch (...) {}
+                    std::atomic_store(&gFollowConfig,
+                                      std::make_shared<const EditorFollowConfig>(follow));
+                } catch (...) {
+                }
             }
         }
         auto attach_source = memory + kEditorAttachOffset;
@@ -1347,6 +1392,7 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
         std::atomic_store(&gDofConfig, std::shared_ptr<const EditorDofConfig>{});
         std::atomic_store(&gCitadelDofConfig, std::shared_ptr<const EditorCitadelDofConfig>{});
         std::atomic_store(&gFollowConfig, std::shared_ptr<const EditorFollowConfig>{});
+        std::atomic_store(&gCameraList, std::shared_ptr<const EditorCameraList>{});
         std::atomic_store(&gAttachConfig, std::shared_ptr<const EditorAttachConfig>{});
         std::atomic_store(&gRoster, std::shared_ptr<const EditorRoster>{});
         std::atomic_store(&gBones, std::shared_ptr<const EditorBones>{});

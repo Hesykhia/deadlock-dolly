@@ -928,6 +928,8 @@ class ControllerTests(unittest.TestCase):
         self.assertNotIn("cl_destroy_ragdolls", self.console.requests)
 
     def test_citadel_glow_toggle_reads_and_flips_the_group(self):
+        self.console.values.update({"citadel_player_glow_disabled": 0,
+            "citadel_trooper_glow_disabled": 0, "r_citadel_glow_health_bars": 1})
         self.console.values["citadel_boss_glow_disabled"] = 0.0
         self.controller.toggle_citadel_glow()
         for name in ("citadel_boss_glow_disabled", "citadel_player_glow_disabled",
@@ -964,6 +966,42 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.controller._healthbar_restore, {})
         self.assertFalse(self.console.camera_writes)
 
+    def test_current_healthbar_scales_hide_restore_and_disconnect_exactly(self):
+        original = {'citadel_unit_status_min_distance_scale': .35,
+                    'citadel_unit_status_max_distance_scale': 1.25}
+        self.console.values.update(original)
+        self.controller.toggle_healthbars()
+        self.assertTrue(self.controller._healthbars_hidden)
+        self.assertTrue(all(self.console.values[name] == 0 for name in original))
+        self.controller.stop()
+        self.assertTrue(self.controller._healthbars_hidden)  # scene choice spans shots
+        self.controller.toggle_healthbars()
+        self.assertFalse(self.controller._healthbars_hidden)
+        self.assertEqual({name:self.console.values[name] for name in original}, original)
+        self.controller.toggle_healthbars()
+        self.controller.disconnect()
+        self.assertEqual({name:self.console.values[name] for name in original}, original)
+        self.assertEqual(self.controller._healthbar_restore, {})
+
+    def test_externally_hidden_current_healthbars_do_not_invent_restore_values(self):
+        self.console.values.update({'citadel_unit_status_min_distance_scale': 0,
+                                    'citadel_unit_status_max_distance_scale': 0})
+        self.controller.toggle_healthbars()
+        self.assertFalse(self.controller._healthbars_hidden)
+        self.assertEqual(self.controller._healthbar_restore, {})
+        self.assertFalse(any('distance_scale ' in item for item in self.console.operations))
+
+    def test_rejected_health_scale_hide_does_not_claim_hidden(self):
+        original = {'citadel_unit_status_min_distance_scale': .2,
+                    'citadel_unit_status_max_distance_scale': 1}
+        self.console.values.update(original)
+        self.console.fail_commands.add('citadel_unit_status_max_distance_scale 0')
+        with self.assertRaises(RuntimeError):
+            self.controller.toggle_healthbars()
+        self.assertFalse(self.controller._healthbars_hidden)
+        self.assertEqual({name:self.console.values[name] for name in original}, original)
+        self.assertEqual(self.controller._healthbar_restore, original)
+
     def test_healthbar_toggle_never_writes_the_hang_prone_master_switches(self):
         self.console.values.update({
             "citadel_healthbars_enabled": 1.0,
@@ -995,6 +1033,27 @@ class ControllerTests(unittest.TestCase):
             self.controller.toggle_healthbars()
         self.assertEqual(self.controller._healthbar_restore, {})
         self.assertFalse(self.console.camera_writes)
+        self.assertFalse(any(command.startswith(("citadel_healthbars_enabled ",
+                                                 "citadel_unit_status_use_new "))
+                             for command in self.console.operations))
+
+    def test_missing_health_switch_does_not_modify_the_other_switch(self):
+        self.console.values['citadel_healthbars_enabled'] = 1.0
+        with self.assertRaisesRegex(RuntimeError, 'no settings were changed'):
+            self.controller.toggle_healthbars()
+        self.assertEqual(self.console.values['citadel_healthbars_enabled'], 1.0)
+        self.assertFalse(any(command.startswith(("citadel_healthbars_enabled ",
+                                                 "citadel_unit_status_use_new "))
+                             for command in self.console.operations))
+        self.assertEqual(self.controller._healthbar_restore, {})
+
+    def test_unreadable_health_restore_retains_originals_for_retry(self):
+        expected = {'citadel_healthbars_enabled': 1.0, 'citadel_unit_status_use_new': 0.0}
+        self.controller._healthbar_restore = dict(expected)
+        with patch.object(self.controller, '_console_cvar', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'did not restore'):
+                self.controller.toggle_healthbars()
+        self.assertEqual(self.controller._healthbar_restore, expected)
 
     def test_live_playback_speed_applies_timescale_and_stop_resets_it(self):
         self.controller.set_playback_speed(.25)
@@ -1002,6 +1061,25 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(self.controller._demo_speed_changed)
         self.controller.stop()
         self.assertEqual(self.console.values["demo_timescale"], 1)
+
+    def test_editing_stop_keeps_slow_speed_and_final_cleanup_still_restores_it(self):
+        self.controller.set_playback_speed(.1)
+        self.controller.stop(preserve_speed=True)
+        self.assertEqual(self.console.values["demo_timescale"], .1)
+        self.assertTrue(self.controller._demo_speed_changed)
+        self.controller.stop()
+        self.assertEqual(self.console.values["demo_timescale"], 1)
+        self.assertFalse(self.controller._demo_speed_changed)
+
+    def test_editing_stop_restores_owned_cvars_without_resetting_slow_speed(self):
+        self.controller.set_playback_speed(.25)
+        self.controller._restore['r_drawviewmodel'] = 1
+        self.console.values['r_drawviewmodel'] = 0
+        self.controller.stop(preserve_speed=True)
+        self.assertEqual(self.console.values['r_drawviewmodel'], 1)
+        self.assertEqual(self.console.values['demo_timescale'], .25)
+        self.assertEqual(self.controller._restore, {})
+        self.assertTrue(self.controller._demo_speed_changed)
 
     def test_live_playback_speed_refuses_a_running_console_shot(self):
         self.controller._playback_details = {"camera_backend": "console", "speed": 1.0}
@@ -1017,10 +1095,42 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.console.values["demo_timescale"], .5)
 
     def test_near_player_opacity_fix_forces_full_opacity(self):
+        self.console.values.update({"citadel_camera_fade_viewed_near_opacity": .4,
+                                    "citadel_camera_fade_other_near_opacity": .4})
         self.controller.near_player_opacity_fix()
         self.assertIn("citadel_camera_fade_viewed_near_opacity 1", self.console.requests)
         self.assertIn("citadel_camera_fade_other_near_opacity 1", self.console.requests)
         self.assertFalse(self.console.camera_writes)
+
+    def test_missing_look_control_does_not_partially_write(self):
+        self.console.values['citadel_camera_fade_viewed_near_opacity'] = .4
+        with self.assertRaisesRegex(RuntimeError, 'No settings were changed'):
+            self.controller.near_player_opacity_fix()
+        self.assertEqual(self.console.values['citadel_camera_fade_viewed_near_opacity'], .4)
+        self.assertFalse(any('opacity ' in command for command in self.console.requests))
+
+    def test_rejected_look_group_rolls_back_accepted_values(self):
+        self.console.values.update({'citadel_camera_fade_viewed_near_opacity': .4,
+                                    'citadel_camera_fade_other_near_opacity': .3})
+        self.console.fail_commands.add('citadel_camera_fade_other_near_opacity 1')
+        with self.assertRaises(Exception):
+            self.controller.near_player_opacity_fix()
+        self.assertEqual(self.console.values['citadel_camera_fade_viewed_near_opacity'], .4)
+        self.assertEqual(self.console.values['citadel_camera_fade_other_near_opacity'], .3)
+
+    def test_stop_retries_failed_look_rollback_separately_from_camera_tracks(self):
+        self.console.values.update({'citadel_camera_fade_viewed_near_opacity': .4,
+                                    'citadel_camera_fade_other_near_opacity': .3})
+        self.console.fail_commands.update({'citadel_camera_fade_other_near_opacity 1',
+                                          'citadel_camera_fade_viewed_near_opacity 0.4'})
+        with self.assertRaises(RuntimeError):
+            self.controller.near_player_opacity_fix()
+        self.assertEqual(self.controller._look_restore, {'citadel_camera_fade_viewed_near_opacity': .4})
+        self.assertEqual(self.controller._restore, {})
+        self.console.fail_commands.clear()
+        self.controller.stop()
+        self.assertEqual(self.controller._look_restore, {})
+        self.assertEqual(self.console.values['citadel_camera_fade_viewed_near_opacity'], .4)
 
     def _run_with_clock(self, project, *, limit=4, speed=1, frozen=False):
         clock = FakeClock()

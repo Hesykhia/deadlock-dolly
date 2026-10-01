@@ -21,6 +21,89 @@ class Value:
 
 
 class EditorSessionTests(unittest.TestCase):
+    def test_follow_attach_preview_waits_for_successful_camera_handoff(self):
+        from unittest.mock import patch
+        self.controller._follow_active = True
+        self.app.preview_attach = False
+        with patch.object(session, 'configure') as configure:
+            session.dispatch(self.app, {'action': 'attach_preview', 'value': 1}, self.bridge)
+            work = self.app._submit.call_args.args
+            self.assertFalse(self.app.preview_attach)
+            configure.assert_not_called()
+            result = work[1]()
+            self.controller.enter_native_flight.assert_called_once_with(owner='panel')
+            work[2](result)
+            self.assertTrue(self.app.preview_attach)
+            configure.assert_called_once_with(self.app)
+
+    def test_failed_follow_handoff_does_not_enable_attach_preview(self):
+        self.controller._follow_active = True
+        self.controller.enter_native_flight.side_effect = RuntimeError('handoff failed')
+        self.app.preview_attach = False
+        session.dispatch(self.app, {'action': 'attach_preview', 'value': 1}, self.bridge)
+        with self.assertRaisesRegex(RuntimeError, 'handoff failed'):
+            self.app._submit.call_args.args[1]()
+        self.assertFalse(self.app.preview_attach)
+
+    def test_editing_stop_preserves_speed_through_the_native_panel(self):
+        self.assertTrue(session.dispatch(self.app, {'action': 'stop', 'value': 0}, self.bridge))
+        self.app._submit.call_args.args[1]()
+        self.controller.stop.assert_called_once_with(preserve_speed=True)
+
+    def camera_list_app(self):
+        from dolly.shot_history import ShotHistory
+        self.app.project = Project(keyframes=[Keyframe(0, 1, 2, 3, 4, 5, 6),
+                                               Keyframe(2, 7, 8, 9, 10, 11, 12)])
+        self.app.shot_history = ShotHistory(self.app.project)
+        self.app.camera_tree = Mock()
+        self.app._select_key = Mock()
+        self.app._snapshot = Mock(return_value=self.app.project)
+        self.app._shot_edit_ready = Mock(return_value=True)
+        self.app._delete_key = Mock()
+        self.app.undo_shot, self.app.redo_shot = Mock(), Mock()
+
+    def test_camera_click_selects_without_moving_replay_or_camera(self):
+        self.camera_list_app()
+        session.dispatch(self.app, {'action': 'select_camera', 'value': 1,
+                                   'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        self.app.camera_tree.selection_set.assert_called_with('1')
+        self.app._select_key.assert_called_once()
+        self.app._submit.assert_not_called()
+
+    def test_view_camera_uses_paused_view_and_delete_never_moves_it(self):
+        for action in ('view_camera', 'delete_camera'):
+            with self.subTest(action=action):
+                self.camera_list_app()
+                self.app._submit.reset_mock()
+                session.dispatch(self.app, {'action': action, 'value': 1,
+                                           'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+                if action == 'view_camera':
+                    self.app._submit.call_args.args[1]()
+                    self.controller.select_paused_camera.assert_called_with(self.app.project, 2)
+                else:
+                    self.app._delete_key.assert_called_once()
+                    self.app._submit.assert_not_called()
+
+    def test_stale_camera_action_cannot_delete_a_different_project_camera(self):
+        self.camera_list_app()
+        revision = self.app.shot_history.revision
+        self.app.project.name = 'New edit'
+        self.app.shot_history.record(self.app.project)
+        for action in ('select_camera', 'view_camera', 'delete_camera', 'undo_shot', 'redo_shot', 'camera_page'):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'camera list changed'):
+                session.dispatch(self.app, {'action': action, 'value': 0,
+                                           'pose': (revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        self.app._delete_key.assert_not_called()
+        self.app._submit.assert_not_called()
+
+    def test_native_history_actions_use_the_shared_editor_history(self):
+        self.camera_list_app()
+        for action in ('undo_shot', 'redo_shot'):
+            session.dispatch(self.app, {'action': action, 'value': 0,
+                                       'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        self.app.undo_shot.assert_called_once()
+        self.app.redo_shot.assert_called_once()
+
     def test_follow_event_preserves_full_model_identity(self):
         player = {'handle': 0x10002, 'entity_index': 2, 'model': 0xfedcba9876543210,
                   'model_path': 'models/heroes/frank/frank.vmdl'}
@@ -444,6 +527,18 @@ class EditorSessionTests(unittest.TestCase):
         self.bridge.editor_status.return_value = {"events": []}
         session.poll(self.app)
         self.app._capture_view.assert_called_once()
+
+    def test_capture_and_replace_forward_the_input_frame_lens(self):
+        for action in ('capture', 'replace'):
+            with self.subTest(action=action):
+                self.app._capture_view.reset_mock()
+                event = {'action': action, 'value': 115.6,
+                         'pose': [1, 2, 3, 4, 5, 6, 16/9], 'tick': 64, 'paused': True}
+                session.dispatch(self.app, event, self.bridge)
+                snapshot = self.app._capture_view.call_args.kwargs['native_snapshot']
+                self.assertEqual(snapshot['horizontal_fov'], 115.6)
+                self.assertEqual(snapshot['pose'], event['pose'])
+                self.assertNotIn('horizontal_fov', event)
 
     def test_console_and_game_ui_use_desired_state_not_delayed_toggle(self):
         for action, method in (("console", self.controller.toggle_console),

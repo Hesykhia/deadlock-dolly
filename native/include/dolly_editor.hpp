@@ -1,6 +1,9 @@
 #pragma once
 #include <cstdint>
 #include <array>
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include "dolly_path.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -112,7 +115,13 @@ enum class EditorAction : std::uint32_t {
     FinishBonePicker,
     StartGameFollow,
     StopGameFollow,
-    SetReplayHud
+    SetReplayHud,
+    SelectCamera,
+    ViewCamera,
+    DeleteCamera,
+    UndoShot,
+    RedoShot,
+    CameraPage
 };
 static_assert(static_cast<std::uint32_t>(EditorAction::ResetCameraPath) == 77,
               "Stable camera reset action ID");
@@ -275,6 +284,51 @@ struct EditorFollowConfig {
     std::uint32_t sequence, abi, flags, reserved;
     double distance, shoulder, height;
 };
+constexpr std::size_t kEditorCameraListOffset = 2 * 1024 * 1024 + 23360;
+constexpr std::size_t kEditorCameraListCount = 32;
+struct EditorCameraRow {
+    double time, aspect, roll;
+    std::uint32_t source, reserved;
+};
+struct EditorCameraList {
+    char magic[8];
+    std::uint32_t sequence, abi, revision, total, first, count, flags, reserved;
+    EditorCameraRow rows[kEditorCameraListCount];
+};
+static_assert(sizeof(EditorCameraList) == 1064, "Python camera list layout");
+static_assert(kEditorCameraListOffset + sizeof(EditorCameraList) <= 2 * 1024 * 1024 + 24576,
+              "Camera list fits existing shared mapping");
+static_assert(static_cast<std::uint32_t>(EditorAction::SelectCamera) == 89,
+              "Stable camera list action ID");
+inline bool valid_editor_camera_list(const EditorCameraList& list) noexcept {
+    if (std::memcmp(list.magic, "DLYCAMS1", 8) || list.abi != 1 || !list.revision ||
+        list.reserved || (list.flags & ~3u) || list.count > kEditorCameraListCount ||
+        list.first % kEditorCameraListCount || list.first > list.total ||
+        (list.total && list.first == list.total) ||
+        list.count != std::min<std::uint32_t>(list.total - list.first, kEditorCameraListCount))
+        return false;
+    for (std::uint32_t i = 0; i < list.count; ++i) {
+        const auto& row = list.rows[i];
+        if (!std::isfinite(row.time) || row.time < 0 || !std::isfinite(row.aspect) ||
+            row.aspect < .5 || row.aspect > 4 || !std::isfinite(row.roll) || row.source > 1 ||
+            row.reserved || (i && row.time <= list.rows[i - 1].time))
+            return false;
+    }
+    return true;
+}
+inline bool valid_editor_camera_action(const EditorCameraList& list, EditorAction action,
+                                       double value, double revision) noexcept {
+    if (!std::isfinite(value) || value != std::floor(value) || revision != list.revision)
+        return false;
+    if (action == EditorAction::UndoShot || action == EditorAction::RedoShot)
+        return value == 0 && (list.flags & (action == EditorAction::UndoShot ? 1u : 2u));
+    if (action == EditorAction::CameraPage)
+        return value >= 0 && value < list.total &&
+               std::fmod(value, double(kEditorCameraListCount)) == 0;
+    return (action == EditorAction::SelectCamera || action == EditorAction::ViewCamera ||
+            action == EditorAction::DeleteCamera) &&
+           value >= list.first && value < list.first + list.count;
+}
 #pragma pack(pop)
 static_assert(sizeof(EditorFollowConfig) == 48, "Python Follow config layout");
 static_assert(kEditorFollowOffset + sizeof(EditorFollowConfig) <= 2 * 1024 * 1024 + 24576,
@@ -349,7 +403,8 @@ struct EditorSnapshot {
     double citadel_dof_sensor = 1.0, citadel_dof_focus = 200.0;
     bool confetti_enabled = false, confetti_despawn_on_ground = false;
     double confetti_spawn_height = 250.0;
-    bool follow_available = false, follow_active = false, follow_pending = false, replay_show_hud = false;
+    bool follow_available = false, follow_active = false, follow_pending = false,
+         replay_show_hud = false;
     double follow_distance = 135, follow_shoulder = 34, follow_height = 0;
     bool attach_available = false, attach_selected = false, attach_hide = true;
     bool attach_auto_clearance = false;
@@ -367,6 +422,7 @@ EditorBinding editor_binding_snapshot(EditorAction action) noexcept;
 // Published attach-camera schema offsets; false while no valid block arrived.
 bool editor_attach_config(EditorAttachConfig& out) noexcept;
 bool editor_follow_config(EditorFollowConfig& out) noexcept;
+bool editor_camera_list(EditorCameraList& out) noexcept;
 bool editor_bones_snapshot(EditorBones& out) noexcept;
 // Latest native player roster; false while no valid block arrived.
 bool editor_roster_snapshot(EditorRoster& out) noexcept;

@@ -13,6 +13,7 @@ import hashlib
 import os
 from pathlib import Path
 import struct
+import time
 
 
 class PreloadError(RuntimeError):
@@ -23,23 +24,23 @@ class _ReviewedBuildMismatch(PreloadError):
     """A successful read disagreed with the reviewed build; never retried away."""
 
 
-CLIENT_SHA256 = "44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc"
-RESOURCE_SHA256 = "1eb0193b3098f0941377abe1fce5579c4d61bcc29c4ab099da894a3edab80095"
-MANAGER = 0x31456e0
-MANAGER_VTABLE = 0x2623068
-RESOURCE_GLOBAL = 0x3d7fe30
+CLIENT_SHA256 = "07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e"
+RESOURCE_SHA256 = "86d09bc988ab3609d43473c3fdc07246bd8958e7f8fc50af4bbba4ffe05a3da0"
+MANAGER = 0x31487b0
+MANAGER_VTABLE = 0x26246a8
+RESOURCE_GLOBAL = 0x3d823b0
 RESOURCE_VTABLE = 0x6bc58
 RESOURCE_QUERY = 0x1c860
-INTRO_GLOBAL = 0x3bdf908
-INTRO_VTABLE = 0x2aa93b0
+INTRO_GLOBAL = 0x3be1e08
+INTRO_VTABLE = 0x2aac838
 
-# Build 6722: status observes two lifecycle flags and consumes the finished
+# Build 6726: status observes two lifecycle flags and consumes the finished
 # job handle itself. Check the producer/callback as well as the UI predicate.
 CLIENT_CODE_SPANS = (
-    (0x5ec930, 8), (0x5f5bd0, 0x7e), (0x1cb88e0, 0x10a),
-    (0x5ddb7e, 0x33), (0x5f8f70, 10), (0x5d2420, 0x4b),
-    (0x1a82ba5, 0x65), (0x1aa00f0, 0xe6),
-    (0x1ac61c0, 0x1cc), (0x1aaea60, 0x42), (0x1a8ba40, 0x22a),
+    (0x5ec920, 8), (0x5f5bc0, 0x7e), (0x1cbbfb0, 0x10a),
+    (0x5ddb6e, 0x33), (0x5f8f60, 10), (0x5d19b0, 0x4b),
+    (0x1a85ef5, 0x65), (0x1aa35a0, 0xe6),
+    (0x1ac9830, 0x1cc), (0x1ab1f10, 0x42), (0x1a8edd0, 0x22a),
 )
 
 
@@ -112,6 +113,20 @@ class _Module(ctypes.Structure):
                 ('name', wintypes.WCHAR * 256), ('path', wintypes.WCHAR * 260)]
 
 
+def _module_snapshot(api, pid):
+    # Windows documents ERROR_BAD_LENGTH when the module list changes during
+    # enumeration. Retry only that transient result, with a bounded wait.
+    for attempt in range(8):
+        snapshot = api.CreateToolhelp32Snapshot(0x8 | 0x10, pid)
+        if snapshot != wintypes.HANDLE(-1).value:
+            return snapshot
+        error = ctypes.get_last_error()
+        if error != 24 or attempt == 7:
+            raise PreloadError(f'Cannot verify loaded preload modules (Windows error {error}).')
+        time.sleep(.02)
+    raise AssertionError('Unreachable snapshot retry state')
+
+
 class _Memory:
     def __init__(self, session, executable):
         if os.name != 'nt' or ctypes.sizeof(ctypes.c_void_p) != 8:
@@ -144,9 +159,7 @@ class _Memory:
                     or Path(path.value).resolve() != executable or not session.running):
                 raise PreloadError('Preload process identity differs from the launched game.')
             self.modules = {}
-            snapshot = api.CreateToolhelp32Snapshot(0x8 | 0x10, session.pid)
-            if snapshot == wintypes.HANDLE(-1).value:
-                raise PreloadError('Cannot verify loaded preload modules.')
+            snapshot = _module_snapshot(api, session.pid)
             try:
                 entry = _Module()
                 entry.size = ctypes.sizeof(entry)

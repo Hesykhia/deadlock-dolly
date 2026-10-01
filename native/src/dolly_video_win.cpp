@@ -118,6 +118,7 @@ struct Session {
     std::wstring depth_directory, depth_video_path;
     ShotRange shot;
     ShotClockTrace shot_clock;
+    CaptureTrace capture_trace;
     depth::Sequence depth_output; // Touched only by the encoder thread.
     std::wstring ffmpeg;
     // Published once by the render callback before configured=true.
@@ -210,6 +211,7 @@ RenderResources gpu;
 // The recorder pairs frames with the native authored path directly instead of
 // the editor config round trip, which keeps separate layer takes aligned.
 std::atomic<bool> gPathPlaying{false};
+std::atomic<bool> gPathCompleted{false};
 std::atomic<double> gPathPhase{0};
 
 std::uint64_t now_qpc() noexcept {
@@ -292,6 +294,18 @@ bool write_shot_sidecar(const Session& s) noexcept {
         std::fprintf(file, "%s\n    {\"frame\": %llu, \"phase\": %.9f, \"source\": \"%s\"}",
                      i ? "," : "", static_cast<unsigned long long>(sample.frame), sample.phase,
                      sample.native ? "native" : "editor");
+    }
+    std::fprintf(file, "\n  ],\n  \"capture_qpc_frequency\": %llu,\n  \"capture_samples\": [",
+                 static_cast<unsigned long long>(s.frequency));
+    for (std::size_t i = 0; i < s.capture_trace.size; ++i) {
+        const auto& t = s.capture_trace.samples[i];
+        std::fprintf(file,
+                     "%s\n    {\"entry\": %llu, \"readback\": %llu, \"end\": %llu, "
+                     "\"phase\": %.9f, \"pending\": %u, \"outcome\": %u, \"missed\": %llu}",
+                     i ? "," : "", static_cast<unsigned long long>(t.entry),
+                     static_cast<unsigned long long>(t.readback),
+                     static_cast<unsigned long long>(t.end), t.phase, t.pending,
+                     static_cast<unsigned>(t.outcome), static_cast<unsigned long long>(t.missed));
     }
     std::fprintf(file, "\n  ]\n}\n");
     std::fclose(file);
@@ -1398,7 +1412,8 @@ bool wants_shot_only() noexcept {
     }
     return cached.shot_only.load(std::memory_order_acquire);
 }
-void publish_path_replay_time(bool playing, double phase) noexcept {
+void publish_path_replay_time(bool playing, double phase, bool completed) noexcept {
+    gPathCompleted.store(completed, std::memory_order_relaxed);
     if (playing && std::isfinite(phase)) {
         gPathPhase.store(phase, std::memory_order_relaxed);
         gPathPlaying.store(true, std::memory_order_release);
@@ -1434,6 +1449,7 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
         return;
     }
     auto& s = *session;
+    const auto capture_entry = s.max_frames ? now_qpc() : 0;
     s.capture_calls.fetch_add(1, std::memory_order_relaxed);
     apply_deferred_stop(s);
     if (gpu.owner != session) {
@@ -1477,6 +1493,15 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
         s.capture_not_ready.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    auto* timing = s.capture_trace.begin(s.max_frames != 0, replay_time, capture_entry,
+                                         static_cast<unsigned>(gpu.submitted - gpu.drained));
+    struct TimingScope {
+        CaptureTrace::Sample* sample;
+        ~TimingScope() {
+            if (sample)
+                sample->end = now_qpc();
+        }
+    } timing_scope{timing};
     // Map only already-submitted copies, never the copy issued this Present.
     // In real time DO_NOT_WAIT makes a busy GPU a skipped opportunity, not a
     // render stall. In fixed-step export the producer instead applies
@@ -1584,6 +1609,8 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
     }
     if (s.stopping.load(std::memory_order_acquire))
         return;
+    if (timing)
+        timing->readback = now_qpc();
     // Count admissions, not asynchronously written frames. Drain previous
     // copies above, but never enqueue color OR depth beyond the same hard cap.
     if (!frame_admission_open(s.capture_submitted.load(std::memory_order_relaxed), s.max_frames)) {
@@ -1618,8 +1645,12 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
         // The authored path clamps at its end. Dropping repeated clamped
         // frames keeps the color, depth and layer takes the same length.
         const auto previous = s.shot_last_replay.load(std::memory_order_relaxed);
-        if (!capture_phase_advances(previous, replay_time))
+        if (!capture_video_phase(previous, replay_time, s.fixed_step, native_clock,
+                                 gPathCompleted.load(std::memory_order_relaxed))) {
+            if (timing)
+                timing->outcome = CaptureTrace::repeated_phase;
             return;
+        }
         s.shot_last_replay.store(replay_time, std::memory_order_relaxed);
     }
 
@@ -1632,12 +1663,19 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
         std::uint64_t zero = 0;
         s.first_qpc.compare_exchange_strong(zero, now, std::memory_order_release);
     } else {
-        if (!gpu.cadence.sample(now, pts, missed))
+        if (!gpu.cadence.sample(now, pts, missed)) {
+            if (timing)
+                timing->outcome = CaptureTrace::cadence_wait;
             return;
+        }
         s.first_qpc.store(gpu.cadence.start, std::memory_order_release);
     }
+    if (timing)
+        timing->missed = missed;
     s.dropped.fetch_add(missed, std::memory_order_relaxed);
     if (gpu.submitted - gpu.drained >= kSlots) {
+        if (timing)
+            timing->outcome = CaptureTrace::queue_full;
         if (s.depth_enabled && s.fixed_step) {
             fail(s, HRESULT_FROM_WIN32(ERROR_TIMEOUT),
                  L"Paired depth export could not keep up within the capture wait budget.");
@@ -1715,6 +1753,8 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
     } else {
         context->CopyResource(slot.staging.p, backbuffer.p);
     }
+    if (timing)
+        timing->outcome = CaptureTrace::admitted;
     slot.stamp = {replay_time, native_clock};
     slot.pts = pts;
     ++gpu.submitted;
