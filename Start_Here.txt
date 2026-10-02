@@ -139,13 +139,14 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
-0.6.5-alpha supports reviewed Deadlock build 6731. Returning to the game with
-F9 no longer stops on a saved-hero or health-panel handoff that the stock game
-view cannot verify; the health panel stays safely hidden until a valid hero
-view exists. Camera-list selection, double-click view, Delete and shared
-Undo/Redo are available in-game. The tabs are CAMERA, FOLLOW, BONE PICKER,
-LOOK and EXPORT. In the panel, Ctrl+Z undoes shot edits; Ctrl+Y or
-Ctrl+Shift+Z redoes them. History does not rewind the replay.
+0.6.6-alpha supports reviewed Deadlock build 6731. Particle effects such as
+confetti render on this build again. Returning to the game with F9 keeps the
+replay timeline, HUD and cursor available even when the stock health-panel view
+cannot be verified; the health panel stays safely hidden until a valid view
+exists. Camera-list selection, double-click view, Delete and shared Undo/Redo
+are available in-game. The tabs are CAMERA, FOLLOW, BONE PICKER, LOOK and
+EXPORT. In the panel, Ctrl+Z undoes shot edits; Ctrl+Y or Ctrl+Shift+Z redoes
+them. History does not rewind the replay.
 
 Saved camera markers keep a steady anchored size and a consistent shape at any
 framing or aspect, including while previewing camera paths. If Deadlock never

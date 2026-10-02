@@ -1,5 +1,12 @@
 # Changes
 
+## 0.6.6 alpha — particle effects return and the F9 handoff keeps the replay UI
+
+**0.6.6-alpha**
+
+- **Particle effects show again on the current Deadlock build.** *Before:* effects like confetti could stop appearing after Deadlock updated to build 6731. *After:* they render normally again.
+- **F9 keeps the replay controls available when the health display cannot be verified.** *Before:* pressing F9 could leave you without the replay timeline, HUD or cursor when the game view could not be checked. *After:* the replay UI and cursor return so you can pick a hero, and only the health display that cannot be verified stays safely hidden until it can be shown.
+
 ## 0.6.5 alpha — F9 stays reliable when the game view cannot be verified
 
 **0.6.5-alpha**
