@@ -29,9 +29,9 @@ inline bool september_6742 = false;
 inline void configure_client(HMODULE client) {
     configured_client = client;
     september_6742 = module_matches(
-        client, "255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657", 0x40fa000);
+        client, "255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657", 0x4150000);
     september_6739 = module_matches(
-        client, "9979035a0157de0243019c27ad36e3f7ac89b4bb2cfc769dca867f084fcce613", 0x40fa000);
+        client, "9979035a0157de0243019c27ad36e3f7ac89b4bb2cfc769dca867f084fcce613", 0x4150000);
     september_6731 = module_matches(
         client, "cb244664a4b42057b02788bc95be489140fbba587266fdb40c5faf7d4d0784e3", 0x40fa000);
     september_6730 = module_matches(

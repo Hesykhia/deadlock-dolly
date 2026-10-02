@@ -112,6 +112,11 @@ class FollowControllerTests(unittest.TestCase):
         self.c.start_game_follow(FollowSettings(distance=200, shoulder=40, height=15))
         self.assertTrue(self.c._follow_active)
         self.assertFalse(self.c._native_active)
+        # The replay menu and cursor stay hidden while Follow owns the stock rig.
+        self.assertFalse(self.c._game_ui_visible)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0.)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1.)
+        self.assertEqual(self.console.values['hud_free_cursor'], 0.)
         app = SimpleNamespace(controller=self.c, busy=False,
                               _submit=lambda _label, function: function())
         with patch.object(self.c, 'enter_native_flight') as flight:

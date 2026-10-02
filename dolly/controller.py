@@ -1243,6 +1243,10 @@ class Controller:
                 monitor.sample()
                 monitor.sample_selection_context()
                 self.toggle_game_ui(True)  # Restores any old rig before releasing the pose writer.
+                # Programmatic hero selection must not flash the replay UI:
+                # release the pose writer, then hide the game HUD/cursor while
+                # keeping the stock camera context that Follow needs.
+                self._hide_game_ui()
                 current_player()
                 self._suppress_own_health_hud()
                 self._request('spec_target ' + str(player['entity_index']))
@@ -1296,7 +1300,8 @@ class Controller:
             bridge = self._native_bridge()
             if self._recorder_active() or bridge is None or not bridge.status().get("paused"):
                 raise RuntimeError("Pause the selected replay and finish recording before Game Follow.")
-            if not self._game_ui_visible or self._native_active or self._native_manual:
+            if ((not self._game_ui_visible and not self._follow_active)
+                    or self._native_active or self._native_manual):
                 raise RuntimeError("Press F9 and select a hero before starting Game Follow.")
             mode = read_cvar_value("citadel_spectator_mode", self._request("citadel_spectator_mode"))
             if mode not in (2, 3):
@@ -1327,6 +1332,11 @@ class Controller:
                 raise RuntimeError("Wait for the selected hero's normal camera before updating Game Follow.")
             try:
                 self._follow_transaction.apply(settings)
+                # The stock rig now owns the camera. Hide the replay HUD/cursor
+                # before the editor panel opens so the F8 panel never overlaps
+                # the game's replay menu, and F9 toggles from a known state.
+                self._hide_game_ui()
+                self._game_ui_visible = False
                 self.open_pov_panel()
                 self._follow_active = True
                 self._follow_settings = settings

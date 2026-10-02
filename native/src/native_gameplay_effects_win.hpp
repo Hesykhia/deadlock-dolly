@@ -125,7 +125,7 @@ constexpr GameplayEffectsProfile kGameplayEffectsProfiles[] = {
     // Build 6739: controller and render loop relocated together; the six
     // event vectors and 36-byte rows are unchanged.
     {"9979035a0157de0243019c27ad36e3f7ac89b4bb2cfc769dca867f084fcce613",
-     0x40fa000,
+     0x4150000,
      0x31a15a0,
      0x8629a0,
      0x875c05,
@@ -140,7 +140,7 @@ constexpr GameplayEffectsProfile kGameplayEffectsProfiles[] = {
     // Build 6742: the October 2 hotfix is a pure relocation of 6739; the
     // controller, render loop and reviewed bytes are unchanged.
     {"255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657",
-     0x40fa000,
+     0x4150000,
      0x31a15a0,
      0x8629a0,
      0x875c05,

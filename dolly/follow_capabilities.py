@@ -47,7 +47,7 @@ class FollowCapabilityMonitor(ReplayCameraMonitor):
             if not module or module[1] != tier0_path.resolve():
                 raise PreloadError('Game Follow tier0 module path differs from the reviewed installation.')
             for base, data, spans, image_size in (
-                    (self.base, client_data, CLIENT_SPANS, 0x40fa000),
+                    (self.base, client_data, CLIENT_SPANS, 0x4150000),
                     (module[0], tier0_data, TIER0_SPANS, 0x401000)):
                 pe_offset = struct.unpack_from('<I', data, 0x3c)[0]
                 size_address = pe_offset + 24 + 56
