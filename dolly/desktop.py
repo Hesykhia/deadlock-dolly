@@ -118,7 +118,12 @@ def bundle_self_test(report_path: Path) -> int:
         report.update(passed=False, error=traceback.format_exc())
     finally:
         if root is not None:
-            root.destroy()
+            try:
+                root.destroy()
+            except Exception:
+                # The window can already be gone when a user closes the smoke
+                # window early; the report above still records the outcome.
+                pass
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

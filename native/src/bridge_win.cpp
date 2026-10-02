@@ -55,11 +55,13 @@ constexpr char kBuild6726EngineHash[] =
     "6374c9c1381d78b26b880cfeb6da5f73e0e22a502af3ef58982b6d9328d55b26";
 constexpr char kBuild6728EngineHash[] =
     "8b846736ddbd833fcc85c943dccc7b7fe3cd13eeef772d1ca375c2961f51a53e";
+constexpr char kBuild6739EngineHash[] =
+    "0782caed3e1c476389fe2a27a0713d47567a5237f706b151ce7cc34a05dbadc3";
 constexpr char kScene6726Hash[] =
     "026a6e953e6bf1f2fdbcf8388ba5f6868d830ad54216dcf4518df136be50fc5a";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
-constexpr char kUnlockerHash[] = "76ed1c913305f03d629c0a3214de3d075db6472f9cbd20d2a72ae55c7a860fc5";
+constexpr char kUnlockerHash[] = "bcfda8e57d612f7d172da701bd4ee2190b52ba8a841e42ba2d0ef9e1fefe29f1";
 // Reviewed scenesystem.dll for the player layer capture. Any other build keeps
 // the capture disabled instead of patching unverified producer code; re-review
 // this hash in the same turn as a game update.
@@ -1382,8 +1384,9 @@ static DWORD WINAPI worker(void*) {
         }
         const bool engine6726 = module_matches(engine, kBuild6726EngineHash, 0x906000);
         const bool engine6728 = module_matches(engine, kBuild6728EngineHash, 0x906000);
+        const bool engine6739 = module_matches(engine, kBuild6739EngineHash, 0x906000);
         const bool september_engine = module_matches(engine, kSeptemberEngineHash, 0x906000);
-        if (!engine6728 && !engine6726 && !september_engine &&
+        if (!engine6739 && !engine6728 && !engine6726 && !september_engine &&
             !module_matches(engine, kEngineHash, 0x969000) &&
             !module_matches(engine, kUpdatedEngineHash, 0x969000)) {
             startup_status(
@@ -1393,7 +1396,8 @@ static DWORD WINAPI worker(void*) {
         }
         gClient = reinterpret_cast<std::uintptr_t>(client);
         gEngine = reinterpret_cast<std::uintptr_t>(engine);
-        gEngineLayout = engine6728         ? kEngine6728Layout
+        gEngineLayout = engine6739         ? kEngine6728Layout
+                        : engine6728       ? kEngine6728Layout
                         : engine6726       ? kEngine6726Layout
                         : september_engine ? kSeptemberEngineLayout
                                            : kLegacyEngineLayout;

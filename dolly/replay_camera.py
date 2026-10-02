@@ -11,15 +11,15 @@ import struct
 
 from .preload import _Memory, _image_bytes, PreloadError
 
-CLIENT_SHA256 = 'cb244664a4b42057b02788bc95be489140fbba587266fdb40c5faf7d4d0784e3'
-MANAGER = 0x35fb4c0
-MANAGER_VTABLE = 0x2621950
-GAMEPLAY_CAMERA_VTABLE = 0x2629398
-RULES_GLOBAL = 0x3bc5538
-RULES_VTABLE = 0x265d930
-CODE_SPANS = ((0x5cf090, 0x2ad), (0x5b1c10, 0xb5), (0x17e24e0, 0x105),
-              (0x17f7520, 5), (0x17fb640, 6), (0x1ae3d00, 0x66a),
-              (0x18864a0, 0x58))
+CLIENT_SHA256 = '255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657'
+MANAGER = 0x36384b0
+MANAGER_VTABLE = 0x2649aa0
+GAMEPLAY_CAMERA_VTABLE = 0x26514f8
+RULES_GLOBAL = 0x3c17ae0
+RULES_VTABLE = 0x26859b0
+CODE_SPANS = ((0x5d1c60, 0x2ad), (0x5b4260, 0xb5), (0x1808620, 0x105),
+              (0x181d660, 5), (0x1821780, 6), (0x1b0a430, 0x66a),
+              (0x18ac5e0, 0x58))
 
 
 class ReplayCameraMonitor:

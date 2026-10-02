@@ -1,13 +1,13 @@
 # Deadlock Dolly — user guide
 
 Dolly connects its desktop editor and in-game panel to the same camera project.
-Version 0.6.6-alpha keeps support for Deadlock build 6731, renders particle
-effects such as confetti on that build again, and makes F9 bring back
-Deadlock's replay timeline reliably: even when the stock hero or health-panel
-view cannot be verified, the replay UI and cursor return with the health panel
-safely hidden, and the saved hero is retried later. The in-game camera list and
-shared Undo/Redo, captured lens settings, and the assertion-dialog and native
-depth-of-field safeguards are unchanged. Real-time game audio, fixed-step
+Version 0.6.7-alpha supports Deadlock build 6742, keeps the native camera,
+automatic replay loading, Game Follow and health verification, particles such
+as confetti, and the cvar unlocker reviewed for that build. Selecting a hero no
+longer carries their death grayscale or red damage vignette into Dolly's
+camera, and F9 still returns the replay timeline reliably. The in-game camera
+list and shared Undo/Redo, captured lens settings, and the assertion-dialog and
+native depth-of-field safeguards are unchanged. Real-time game audio, fixed-step
 silent layers and optional ReShade are available.
 
 [Video and ReShade setup](VIDEO_AND_RESHADE.md) covers output settings, F11,

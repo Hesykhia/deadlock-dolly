@@ -24,8 +24,14 @@ inline bool september_latest = false;
 inline bool september_6726 = false;
 inline bool september_6730 = false;
 inline bool september_6731 = false;
+inline bool september_6739 = false;
+inline bool september_6742 = false;
 inline void configure_client(HMODULE client) {
     configured_client = client;
+    september_6742 = module_matches(
+        client, "255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657", 0x40fa000);
+    september_6739 = module_matches(
+        client, "9979035a0157de0243019c27ad36e3f7ac89b4bb2cfc769dca867f084fcce613", 0x40fa000);
     september_6731 = module_matches(
         client, "cb244664a4b42057b02788bc95be489140fbba587266fdb40c5faf7d4d0784e3", 0x40fa000);
     september_6730 = module_matches(
@@ -39,7 +45,8 @@ inline void configure_client(HMODULE client) {
     september_client =
         module_matches(client, "bc0dae383a2cd65dc1616515cdffa6c947fd057e5590edf0f5a01bd953ec19c9",
                        0x40f4000) ||
-        september_hotfix || september_latest || september_6726 || september_6730 || september_6731;
+        september_hotfix || september_latest || september_6726 || september_6730 || september_6731 ||
+        september_6739 || september_6742;
     september_entity_code = false;
     if (!september_client)
         return;
@@ -60,8 +67,16 @@ inline void configure_client(HMODULE client) {
     const unsigned char initializer6731[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
                                              0x24, 0x28, 0x48, 0x89, 0x0d, 0x70, 0x80,
                                              0xcf, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
+    const unsigned char initializer6739[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
+                                             0x24, 0x28, 0x48, 0x89, 0x0d, 0xb0, 0x11,
+                                             0xd2, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
+    const unsigned char initializer6742[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
+                                             0x24, 0x28, 0x48, 0x89, 0x0d, 0x50, 0x11,
+                                             0xd2, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
     september_entity_code =
-        read_memory(reinterpret_cast<std::uintptr_t>(client) + (september_6731     ? 0x200a320
+        read_memory(reinterpret_cast<std::uintptr_t>(client) + (september_6742     ? 0x20318d0
+                                                                : september_6739   ? 0x2031870
+                                                                : september_6731   ? 0x200a320
                                                                 : september_6730   ? 0x2009b40
                                                                 : september_6726   ? 0x20088d0
                                                                 : september_latest ? 0x2005120
@@ -69,7 +84,9 @@ inline void configure_client(HMODULE client) {
                                                                                    : 0x20049f0),
                     actual, sizeof(actual)) &&
         std::memcmp(actual,
-                    september_6731     ? initializer6731
+                    september_6742     ? initializer6742
+                    : september_6739   ? initializer6739
+                    : september_6731   ? initializer6731
                     : september_6730   ? initializer6730
                     : september_6726   ? initializer6726
                     : september_latest ? latest_initializer
@@ -182,14 +199,18 @@ inline bool locate_entity_system(HMODULE client, std::uintptr_t& out) noexcept {
         return false;
     if (client == configured_client && september_client) {
         std::uintptr_t candidate = 0, actual_vtable = 0;
-        const std::uintptr_t reviewed_vtable = september_6731     ? 0x2a0c900
+        const std::uintptr_t reviewed_vtable = september_6742     ? 0x2a40df0
+                                               : september_6739   ? 0x2a40df0
+                                               : september_6731   ? 0x2a0c900
                                                : september_6730   ? 0x2a0c8d0
                                                : september_6726   ? 0x2a0af50
                                                : september_latest ? 0x2a07c00
                                                : september_hotfix ? 0x2a07c10
                                                                   : 0x2a07c30;
         if (!september_entity_code || vtable != base + reviewed_vtable ||
-            !read_value(base + (september_6731     ? 0x3d023a0
+            !read_value(base + (september_6742     ? 0x3d52a30
+                               : september_6739    ? 0x3d52a30
+                               : september_6731    ? 0x3d023a0
                                : september_6730    ? 0x3d023a0
                                : september_6726    ? 0x3cfeda0
                                                    : 0x3cfc7c0),

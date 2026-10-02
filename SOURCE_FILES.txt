@@ -461,3 +461,9 @@ third_party/cvar_unlocker/unlocker-build-6730.patch
 
 native/profiles/deadlock-2026-10-01-6731-complete.json
 third_party/cvar_unlocker/unlocker-build-6731.patch
+
+native/profiles/deadlock-2026-10-02-6739-complete.json
+third_party/cvar_unlocker/unlocker-build-6739.patch
+
+native/profiles/deadlock-2026-10-02-6742-complete.json
+third_party/cvar_unlocker/unlocker-build-6742.patch

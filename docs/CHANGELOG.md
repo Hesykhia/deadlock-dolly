@@ -1,5 +1,12 @@
 # Changes
 
+## 0.6.7 alpha — Deadlock build 6742 and clean damage/death effects
+
+**0.6.7-alpha**
+
+- **Support for the newest Deadlock update.** *Before:* after Deadlock updated to build 6742, Dolly refused the new build. *After:* the native camera, automatic replay loading, Game Follow and health verification, the particle engine and the cvar unlocker are reviewed and enabled for build 6742.
+- **Particles and clean damage/death effects on 6742.** *Before:* particle effects could be unavailable, and selecting a hero could carry their death grayscale and red damage vignette into Dolly's camera on the new build. *After:* effects render normally and the selected-player damage/death overlays stay out of Dolly's camera while it owns the view.
+
 ## 0.6.6 alpha — particle effects return and the F9 handoff keeps the replay UI
 
 **0.6.6-alpha**
