@@ -2627,11 +2627,11 @@ class Controller:
                 if OWN_HEALTH_HUD in self._game_ui_restore:
                     values[OWN_HEALTH_HUD] = self._game_ui_restore[OWN_HEALTH_HUD]
                 if hero_pending:
-                    values = self._defer_health_reveal(values)
+                    values = self._defer_health_reveal(values, keep_hud=True)
                     health_pending = True
                 else:
-                    values, health_pending = self._safe_health_hud_values(values)
-                    values, deferred = self._require_own_health_hud(values)
+                    values, health_pending = self._safe_health_hud_values(values, keep_hud=True)
+                    values, deferred = self._require_own_health_hud(values, keep_hud=True)
                     health_pending = health_pending or deferred
                 self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
                 self._verify_game_ui_values(values)
@@ -2824,7 +2824,7 @@ class Controller:
                 self._request(OWN_HEALTH_HUD + ' 1')
                 self._verify_game_ui_values({OWN_HEALTH_HUD: 1})
 
-    def _require_own_health_hud(self, values):
+    def _require_own_health_hud(self, values, *, keep_hud=False):
         if OWN_HEALTH_HUD in values and self._own_health_hud_value() is None:
             raise RuntimeError('Health HUD panel verification is unavailable; saved settings remain pending.')
         if (values.get(OWN_HEALTH_HUD) == 0 or
@@ -2836,7 +2836,7 @@ class Controller:
                 # Dolly's own mode handoff can transiently expose an invalid
                 # stock player context. Keep the panel hidden and retry later.
                 LOG.info('Health panel reveal deferred: %s', exc)
-                return self._defer_health_reveal(values), True
+                return self._defer_health_reveal(values, keep_hud=keep_hud), True
         return dict(values), False
 
     def _verify_health_hud_handoff(self):
@@ -2853,7 +2853,7 @@ class Controller:
             if monitor is not None:
                 monitor.close()
 
-    def _safe_health_hud_values(self, values):
+    def _safe_health_hud_values(self, values, *, keep_hud=False):
         """Keep an unsafe reveal hidden, preserving the outer original."""
         values = dict(values)
         reveal_health = values.get(OWN_HEALTH_HUD) == 0
@@ -2867,21 +2867,29 @@ class Controller:
             self._verify_health_hud_handoff()
         except (RuntimeError, ValueError, OSError) as exc:
             LOG.info('Health panel reveal deferred: %s', exc)
-            return self._defer_health_reveal(values), True
+            return self._defer_health_reveal(values, keep_hud=keep_hud), True
         return values, False
 
-    def _defer_health_reveal(self, values):
-        """Hide any requested health/HUD reveal while its original is retained."""
+    def _defer_health_reveal(self, values, *, keep_hud=False):
+        """Hide an unverifiable health reveal and retain its outer original.
+
+        ``keep_hud`` is used by the explicit F9/Stop handoff: the replay UI and
+        cursor must still return so the user can select a hero, which is what
+        makes a later verified handoff possible. Automatic playback completion
+        and preference application keep the conservative behavior and hold the
+        main HUD too, deferring its reveal to that explicit handoff.
+        """
         values = dict(values)
-        if values.get(OWN_HEALTH_HUD) == 0:
+        if OWN_HEALTH_HUD in values and values[OWN_HEALTH_HUD] == 0:
             self._game_ui_restore.setdefault(OWN_HEALTH_HUD, 0)
             values[OWN_HEALTH_HUD] = 1
-        if values.get('citadel_hud_visible') == 1:
-            self._game_ui_restore.setdefault('citadel_hud_visible', 1)
-            values['citadel_hud_visible'] = 0
-        if values.get('citadel_hide_replay_hud') == 0:
-            self._game_ui_restore.setdefault('citadel_hide_replay_hud', 0)
-            values['citadel_hide_replay_hud'] = 1
+        if not keep_hud:
+            if values.get('citadel_hud_visible') == 1:
+                self._game_ui_restore.setdefault('citadel_hud_visible', 1)
+                values['citadel_hud_visible'] = 0
+            if values.get('citadel_hide_replay_hud') == 0:
+                self._game_ui_restore.setdefault('citadel_hide_replay_hud', 0)
+                values['citadel_hide_replay_hud'] = 1
         return values
 
     def _health_panel_held(self):
@@ -2909,8 +2917,8 @@ class Controller:
             self._restore_spectator_view()
             self._restore_spectator_hero()
             requested = dict(self._game_ui_restore)
-            values, health_pending = self._safe_health_hud_values(requested)
-            values, deferred = self._require_own_health_hud(values)
+            values, health_pending = self._safe_health_hud_values(requested, keep_hud=True)
+            values, deferred = self._require_own_health_hud(values, keep_hud=True)
             health_pending = health_pending or deferred
             self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
             self._verify_game_ui_values(values)

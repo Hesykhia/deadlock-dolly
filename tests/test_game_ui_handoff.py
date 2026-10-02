@@ -87,10 +87,11 @@ class GameUiHandoffTests(unittest.TestCase):
         self.assertTrue(self.controller._game_ui_visible)
         self.assertIsNotNone(self.controller._game_hero_restore)
         self.assertEqual(self.console.values[name], 1)
-        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
-        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 1)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 0)
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
 
-    def test_transient_health_reverify_defers_instead_of_failing_f9(self):
+    def test_transient_health_reverify_defers_only_the_panel_not_the_replay_ui(self):
         name = self.health_panel()
         self.console.requests.clear()
         calls = [None, RuntimeError('Game Follow requires a selected player chase view (observer mode 4).')]
@@ -98,8 +99,9 @@ class GameUiHandoffTests(unittest.TestCase):
             self.controller.toggle_game_ui(True)
         self.assertTrue(self.controller._game_ui_visible)
         self.assertEqual(self.console.values[name], 1)
-        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
-        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 1)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 0)
+        self.assertEqual(self.console.values['hud_free_cursor'], 1)
         self.assertEqual(self.controller._game_ui_restore[name], 0)
 
     def test_saved_hero_refuses_other_demo_or_native_owner_before_command(self):
@@ -217,8 +219,9 @@ class GameUiHandoffTests(unittest.TestCase):
             self.assertEqual(self.console.values[name], 1)
             self.controller.stop()
             self.assertEqual(self.console.values[name], 1)
-            self.assertEqual(self.controller._game_ui_restore, {name: 0, 'citadel_hud_visible': 1,
-                                                               'citadel_hide_replay_hud': 0})
+            # The explicit handoff restores the original HUD/replay/cursor
+            # values, so only the unverified health panel stays pending.
+            self.assertEqual(self.controller._game_ui_restore, {name: 0})
         self.controller.stop()
         self.assertEqual(self.console.values[name], 0)
         self.assertFalse(self.controller._game_ui_restore)
