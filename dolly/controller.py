@@ -2615,12 +2615,24 @@ class Controller:
                 if restoration_error:
                     raise RuntimeError(restoration_error)
                 self._restore_spectator_view()
-                self._restore_spectator_hero()
+                hero_pending = False
+                try:
+                    self._restore_spectator_hero()
+                except (RuntimeError, ValueError, OSError) as exc:
+                    # A stock HUD context that cannot be verified must not block
+                    # the replay-UI return; keep the saved hero pending instead.
+                    LOG.warning("Saved spectator hero handoff remains pending: %s", exc)
+                    hero_pending = True
                 values = {"citadel_hud_visible": 1, "citadel_hide_replay_hud": 0, "hud_free_cursor": 1}
                 if OWN_HEALTH_HUD in self._game_ui_restore:
                     values[OWN_HEALTH_HUD] = self._game_ui_restore[OWN_HEALTH_HUD]
-                values, health_pending = self._safe_health_hud_values(values)
-                self._require_own_health_hud(values)
+                if hero_pending:
+                    values = self._defer_health_reveal(values)
+                    health_pending = True
+                else:
+                    values, health_pending = self._safe_health_hud_values(values)
+                    values, deferred = self._require_own_health_hud(values)
+                    health_pending = health_pending or deferred
                 self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
                 self._verify_game_ui_values(values)
                 self._game_ui_visible = True
@@ -2767,7 +2779,7 @@ class Controller:
         values = {"citadel_hud_visible": 0, "citadel_hide_replay_hud": 1, "hud_free_cursor": 0}
         if OWN_HEALTH_HUD in self._game_ui_restore:
             values[OWN_HEALTH_HUD] = 1
-        self._require_own_health_hud(values)
+        values, _ = self._require_own_health_hud(values)
         self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
         self._verify_game_ui_values(values)
 
@@ -2818,7 +2830,14 @@ class Controller:
         if (values.get(OWN_HEALTH_HUD) == 0 or
                 ((values.get('citadel_hud_visible') == 1 or values.get('citadel_hide_replay_hud') == 0) and
                  (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))):
-            self._verify_health_hud_handoff()
+            try:
+                self._verify_health_hud_handoff()
+            except (RuntimeError, ValueError, OSError) as exc:
+                # Dolly's own mode handoff can transiently expose an invalid
+                # stock player context. Keep the panel hidden and retry later.
+                LOG.info('Health panel reveal deferred: %s', exc)
+                return self._defer_health_reveal(values), True
+        return dict(values), False
 
     def _verify_health_hud_handoff(self):
         """Expose ability UI only after a coherent stock player handoff."""
@@ -2847,18 +2866,23 @@ class Controller:
         try:
             self._verify_health_hud_handoff()
         except (RuntimeError, ValueError, OSError) as exc:
-            if reveal_health:
-                self._game_ui_restore.setdefault(OWN_HEALTH_HUD, 0)
-                values[OWN_HEALTH_HUD] = 1
-            if reveal_hud:
-                self._game_ui_restore.setdefault('citadel_hud_visible', 1)
-                values['citadel_hud_visible'] = 0
-            if values.get('citadel_hide_replay_hud') == 0:
-                self._game_ui_restore.setdefault('citadel_hide_replay_hud', 0)
-                values['citadel_hide_replay_hud'] = 1
             LOG.info('Health panel reveal deferred: %s', exc)
-            return values, True
+            return self._defer_health_reveal(values), True
         return values, False
+
+    def _defer_health_reveal(self, values):
+        """Hide any requested health/HUD reveal while its original is retained."""
+        values = dict(values)
+        if values.get(OWN_HEALTH_HUD) == 0:
+            self._game_ui_restore.setdefault(OWN_HEALTH_HUD, 0)
+            values[OWN_HEALTH_HUD] = 1
+        if values.get('citadel_hud_visible') == 1:
+            self._game_ui_restore.setdefault('citadel_hud_visible', 1)
+            values['citadel_hud_visible'] = 0
+        if values.get('citadel_hide_replay_hud') == 0:
+            self._game_ui_restore.setdefault('citadel_hide_replay_hud', 0)
+            values['citadel_hide_replay_hud'] = 1
+        return values
 
     def _health_panel_held(self):
         """An intentional outer hide can span a guarded in-process reload."""
@@ -2886,7 +2910,8 @@ class Controller:
             self._restore_spectator_hero()
             requested = dict(self._game_ui_restore)
             values, health_pending = self._safe_health_hud_values(requested)
-            self._require_own_health_hud(values)
+            values, deferred = self._require_own_health_hud(values)
+            health_pending = health_pending or deferred
             self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
             self._verify_game_ui_values(values)
             for name in values:

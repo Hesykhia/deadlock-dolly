@@ -1,12 +1,15 @@
 # Deadlock Dolly — user guide
 
 Dolly connects its desktop editor and in-game panel to the same camera project.
-Version 0.6.4-alpha adds support for Deadlock build 6731, restores player-list
+Version 0.6.5-alpha adds support for Deadlock build 6731, restores player-list
 reading for the Bone Picker and Game Follow cameras, and makes F9 bring back
-Deadlock's replay timeline during playback. The in-game camera list and shared
-Undo/Redo, captured lens settings, and the assertion-dialog and native
-depth-of-field safeguards are unchanged. Real-time game audio, fixed-step
-silent layers and optional ReShade are available.
+Deadlock's replay timeline during playback. Returning to the game with F9 also
+stays reliable when the stock hero or health-panel handoff cannot be verified:
+the replay UI opens with the health panel safely hidden and the saved hero is
+retried later. The in-game camera list and shared Undo/Redo, captured lens
+settings, and the assertion-dialog and native depth-of-field safeguards are
+unchanged. Real-time game audio, fixed-step silent layers and optional ReShade
+are available.
 
 [Video and ReShade setup](VIDEO_AND_RESHADE.md) covers output settings, F11,
 installation and current limits. Windows/Deadlock validation is recorded in

@@ -1,5 +1,11 @@
 # Changes
 
+## 0.6.5 alpha — F9 stays reliable when the game view cannot be verified
+
+**0.6.5-alpha**
+
+- **F9 no longer stops on an unverifiable stock hero handoff.** *Before:* returning to the game with F9 could show "Saved spectator hero handoff remains pending" or a health-HUD camera error when the game's own spectator view was not a settled gameplay camera, for example while a replay target change was still settling. *After:* the replay UI and cursor return normally, the health panel stays safely hidden, and the saved hero is restored on a later handoff once a valid hero view exists. No HUD reveal is forced and original settings are retained.
+
 ## 0.6.4 alpha — Player lists, the replay timeline and the newest Deadlock update
 
 **0.6.4-alpha**

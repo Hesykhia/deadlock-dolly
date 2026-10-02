@@ -78,6 +78,30 @@ class GameUiHandoffTests(unittest.TestCase):
         self.assertEqual(self.console.values['citadel_hud_visible'], 0)
         self.assertIsNotNone(self.controller._game_hero_restore)
 
+    def test_unverifiable_saved_hero_still_opens_game_ui_with_pending_panel(self):
+        name = self.health_panel()
+        self.saved_hero()
+        with patch.object(self.controller, '_restore_spectator_hero',
+                          side_effect=RuntimeError('Health HUD requires a settled stock gameplay camera.')):
+            self.controller.toggle_game_ui(True)
+        self.assertTrue(self.controller._game_ui_visible)
+        self.assertIsNotNone(self.controller._game_hero_restore)
+        self.assertEqual(self.console.values[name], 1)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+
+    def test_transient_health_reverify_defers_instead_of_failing_f9(self):
+        name = self.health_panel()
+        self.console.requests.clear()
+        calls = [None, RuntimeError('Game Follow requires a selected player chase view (observer mode 4).')]
+        with patch.object(self.controller, '_verify_health_hud_handoff', side_effect=calls):
+            self.controller.toggle_game_ui(True)
+        self.assertTrue(self.controller._game_ui_visible)
+        self.assertEqual(self.console.values[name], 1)
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        self.assertEqual(self.console.values['citadel_hide_replay_hud'], 1)
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+
     def test_saved_hero_refuses_other_demo_or_native_owner_before_command(self):
         self.health_panel()
         self.saved_hero()
