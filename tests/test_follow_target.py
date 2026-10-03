@@ -18,7 +18,7 @@ class FollowTargetTests(unittest.TestCase):
         put(controller + 0x3ef, 1, '<B')
         put(pawn + 0x3ef, 1, '<B')
         for vtable, slot, getter in ((0x262d2b8, 0x500, 0x52c8a0),
-                                    (0x2639da0, 0x4e0, 0x15f12c0),
+                                    (0x2639da0, 0x4e0, 0x15f1320),
                                     (0x2639da0, 0xad8, 0x587ea0),
                                     (0x26b05a8, 0x4e8, 0x709c70)):
             put(m.base + vtable + slot, m.base + getter)
@@ -85,9 +85,9 @@ class FollowTargetTests(unittest.TestCase):
             m.sample_target(require_chase=False)
         self.assertEqual(error.exception.observer_mode, 4)
 
-    def test_selection_still_requires_local_observer_identity(self):
+    def test_selection_still_requires_reviewed_local_pawn(self):
         m, blocks, *_ = self.fixture()
-        blocks[0x40000] = struct.pack('<Q', m.base + 0x2639da0)
+        blocks[0x40000] = struct.pack('<Q', m.base + 0x26b0ff0)
         with self.assertRaises(PreloadError):
             m.sample_selection_context()
 
@@ -152,6 +152,28 @@ class FollowTargetTests(unittest.TestCase):
         m, *_ = self.fixture()
         self.assertEqual(m.sample_target(), {'handle': 0x10002, 'entity_index': 2, 'mode': 2})
         self.assertEqual(m._owned.call_count, 2)
+
+    def test_player_pawn_local_chain_is_accepted_for_follow(self):
+        m, blocks, *_ = self.fixture()
+        blocks[0x40000] = struct.pack('<Q', m.base + 0x2639da0)
+        self.assertEqual(m.sample_target()['handle'], 0x10002)
+
+    def test_familiar_clone_target_is_accepted_for_follow(self):
+        m, blocks, *_ = self.fixture()
+        blocks[0x60000] = struct.pack('<Q', m.base + 0x27e6900)
+        self.assertEqual(m.sample_target()['handle'], 0x10002)
+
+    def test_health_defers_when_local_pawn_is_a_player_pawn(self):
+        m, blocks, *_ = self.health_fixture()
+        blocks[0x40000] = struct.pack('<Q', m.base + 0x2639da0)
+        with self.assertRaisesRegex(PreloadError, 'reveal deferred'):
+            m.sample_health_hud_context()
+
+    def test_health_defers_when_target_is_a_familiar_clone(self):
+        m, blocks, *_ = self.health_fixture()
+        blocks[0x60000] = struct.pack('<Q', m.base + 0x27e6900)
+        with self.assertRaisesRegex(PreloadError, 'reveal deferred'):
+            m.sample_health_hud_context()
 
     def test_hotfix_base_observer_type_and_getters(self):
         m, blocks, _, services, _ = self.fixture()

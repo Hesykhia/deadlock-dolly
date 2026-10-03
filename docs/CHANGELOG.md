@@ -1,5 +1,12 @@
 # Changes
 
+## 0.6.8 alpha — Game Follow for every hero
+
+**0.6.8-alpha**
+
+- **Game Follow works for every hero again.** *Before:* starting Game Follow on some heroes (for example Chrono/Paradox or Rat King) stopped with "observer object type differs" because their selected pawn uses the reviewed familiar/clone pawn class. *After:* the whole reviewed pawn family is accepted, so Follow attaches to those heroes too.
+- **Clearer Game Follow errors.** *Before:* every object mismatch reported the same sentence. *After:* the message names the failing object (controller, pawn, services or selected player) and the observed class, so a genuine build mismatch is actionable.
+
 ## 0.6.7 alpha — Deadlock build 6742 and clean damage/death effects
 
 **0.6.7-alpha**
