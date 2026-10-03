@@ -242,6 +242,9 @@ def configure(app):
         evidence = getattr(app.controller, '_startup_evidence', {})
         identity = evidence.get('replay_camera_identity', {})
         follow_available = active and identity.get('client_sha256') == CLIENT_SHA256
+        capability_available = getattr(bridge, 'capability_available', None)
+        if follow_available and callable(capability_available):
+            follow_available = capability_available('follow')
         transaction = getattr(app.controller, '_follow_transaction', None)
         pending = bool((transaction is not None and transaction.originals)
                        or getattr(app.controller, '_follow_mode_original', None) is not None)

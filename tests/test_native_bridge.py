@@ -45,7 +45,9 @@ class NativeBridgeTests(unittest.TestCase):
                 self.assertEqual(result,{"installed":True,"target_handle":123,
                                          "scopes":50,"blends":4,"corrections":3,"rejected":1})
             else:
-                with self.assertRaises(nb.NativeBridgeError):self.bridge.status()
+                status = self.bridge.status()
+                self.assertIn('error', status['follow_anchor_diagnostics'])
+                self.assertEqual(status['applied_pose'], list(range(10, 17)))
 
     def test_pov_uses_segment_clock_without_camera_or_aspect_flags(self):
         self.after_sleep = self.respond
@@ -256,11 +258,13 @@ class NativeBridgeTests(unittest.TestCase):
         self.assertEqual(result["state_changes"], 7)
         self.assertAlmostEqual(result["max_backward_delta"], 0.031)
         self.publish_confetti_diagnostics(state=99)
-        with self.assertRaisesRegex(nb.NativeBridgeError, "invalid"):
-            self.bridge.status()
+        status = self.bridge.status()
+        self.assertIn('invalid', status['confetti_diagnostics']['error'])
+        self.assertEqual(status['applied_pose'], list(range(10, 17)))
         self.publish_confetti_diagnostics(magic=b"DLYCFT99")
-        with self.assertRaisesRegex(nb.NativeBridgeError, "editor build"):
-            self.bridge.status()
+        status = self.bridge.status()
+        self.assertIn('editor build', status['confetti_diagnostics']['error'])
+        self.assertEqual(status['applied_pose'], list(range(10, 17)))
 
     def test_view_history_is_bounded_rate_limited_and_independent_of_returned_pose(self):
         self.publish_status()

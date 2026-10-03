@@ -59,6 +59,8 @@ dolly/ui_theme.py
 dolly/hotkey.py
 dolly/launcher.py
 dolly/native_bridge.py
+dolly/native_capabilities.py
+dolly/_runtime_generated.py
 dolly/native_effects.py
 dolly/native_path.py
 dolly/navigation.py
@@ -120,6 +122,8 @@ native/src/dolly_overlay_win.cpp
 native/src/dolly_path.cpp
 native/src/dolly_player_capture.cpp
 native/src/dolly_renderer_diagnostics_win.cpp
+native/src/dolly_render_class_win.cpp
+native/include/dolly_render_class.hpp
 native/src/dolly_visualization.cpp
 native/src/dolly_visualization_runtime_win.cpp
 native/src/native_effects_win.hpp
@@ -206,6 +210,8 @@ tests/test_memory_watch.py
 tests/test_motion_clock.py
 tests/test_native_atomics.py
 tests/test_native_bridge.py
+tests/test_native_capabilities.py
+tests/test_generated_compatibility.py
 tests/test_native_capture_timing.py
 tests/test_native_controller.py
 tests/test_replay_recovery.py
@@ -437,6 +443,14 @@ tests/test_sound_profile.py
 native/profiles/deadlock-2026-09-29-complete.json
 native/profiles/deadlock-2026-09-29-hotfix-complete.json
 native/include/dolly_follow_anchor.hpp
+native/include/dolly_capabilities.hpp
+native/include/dolly_optional_hooks.hpp
+native/src/native_feature_status_win.hpp
+native/tests/capability_tests.cpp
+native/include/dolly_runtime_generated.hpp
+native/tests/reviewed_contract_tests.cpp
+native/profiles/runtime-contracts.json
+tools/generate_compatibility.py
 native/src/native_follow_anchor_win.hpp
 native/src/dolly_follow_anchor_generated.hpp
 native/tests/follow_anchor_tests.cpp

@@ -24,6 +24,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+from ._runtime_generated import ATTACH_FIELD_SPECS, VIEW_OFFSET_VALUE_OFFSETS
 
 # The same reviewed range the players layer accepts for schema offsets.
 _MIN_OFFSET, _MAX_OFFSET = 8, 0x8000
@@ -48,18 +49,7 @@ class AttachField:
 # graph links used to find the weapon node. The rest are captured for the bone
 # and roster work but stay optional so a missing optional field cannot disable
 # the eyes/weapon paths.
-ATTACH_FIELDS: tuple[AttachField, ...] = (
-    AttachField("player_origin", "CGameSceneNode", "m_vecAbsOrigin", "VectorWS"),
-    AttachField("player_angles", "CGameSceneNode", "m_angAbsRotation", "QAngle"),
-    AttachField("eye_offset", "C_BaseModelEntity", "m_vecViewOffset", "CNetworkViewOffsetVector"),
-    AttachField("eye_angles", "C_CitadelPlayerPawn", "m_angEyeAngles", "QAngle"),
-    AttachField("scene_child", "CGameSceneNode", "m_pChild", "CGameSceneNode*"),
-    AttachField("scene_sibling", "CGameSceneNode", "m_pNextSibling", "CGameSceneNode*"),
-    AttachField("world_transform", "CGameSceneNode", "m_nodeToWorld", "CTransformWS", False),
-    AttachField("attach_bone", "CGameSceneNode", "m_nParentAttachmentOrBone", "int16", False),
-    AttachField("owner_entity", "C_BaseEntity", "m_hOwnerEntity", "CHandle", False),
-    AttachField("pawn_controller", "C_BasePlayerPawn", "m_hController", "CHandle", False),
-)
+ATTACH_FIELDS: tuple[AttachField, ...] = tuple(AttachField(*spec) for spec in ATTACH_FIELD_SPECS)
 
 # Live-verified 2026-09-19 on client d1ee16fc (replay 104550184, tick 22473):
 # every required field above was reported at the expected offset with the
@@ -68,7 +58,6 @@ ATTACH_FIELDS: tuple[AttachField, ...] = (
 # quantization metadata). Standing poses read (0, 0, eye height), and the pose
 # transform bone nearest that point matched the head/eye bone within 1.4 to 8.7
 # units on all twelve players. The optional entries stay candidates.
-VIEW_OFFSET_VALUE_OFFSETS = (16, 24, 32)
 
 
 def decode_view_offset(raw: bytes) -> tuple[float, float, float] | None:

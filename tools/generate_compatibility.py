@@ -1,0 +1,375 @@
+"""Regenerate/check reviewed compatibility contracts without running Deadlock.
+
+--check (default) detects drift without writing. --write emits reviewed data;
+it never approves a build or changes the manifest. --verify-game-dir additionally
+checks the saved current-module/schema/code evidence against local PE files.
+"""
+from __future__ import annotations
+
+import argparse
+import ast
+import hashlib
+import json
+from pathlib import Path
+import re
+import struct
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT / 'tools') not in sys.path:
+    sys.path.insert(0, str(ROOT / 'tools'))
+import generate_profile as camera
+import generate_sound_profile as sound
+
+CONTRACT = 'native/profiles/runtime-contracts.json'
+ANCHOR_FIELDS = ('controller', 'observer_base', 'composition', 'blend', 'blend_caller',
+    'image_size', 'rig', 'manager', 'manager_table', 'camera_table', 'controller_table',
+    'entity_list', 'observer_table', 'services_table', 'pawn_table', 'observer_services_offset')
+IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z_0-9]*\Z')
+HASH = re.compile(r'[0-9a-f]{64}\Z')
+
+
+class ContractError(ValueError):
+    pass
+
+
+def require(condition, message):
+    if not condition:
+        raise ContractError(message)
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'Duplicate JSON key: ' + key)
+        result[key] = value
+    return result
+
+
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding='utf-8'), object_pairs_hook=unique_object)
+
+
+def integer(value):
+    require(type(value) is int or isinstance(value, str) and re.fullmatch(r'0x[0-9a-f]+', value),
+            'Expected integer or lowercase hexadecimal value')
+    return int(value, 16) if isinstance(value, str) else value
+
+
+def bounded(value, end, *, size=1):
+    value = integer(value)
+    require(type(size) is int and 0 < size <= 0x100000 and 0 < value <= end - size,
+            'Reviewed address/offset span is outside its module or structure')
+    return value
+
+
+def profile_at(root, name, manifest):
+    require(isinstance(name, str) and Path(name).name == name and name in manifest['profiles'],
+            'Profile must be an explicitly listed manifest file')
+    return read_json(root / 'native/profiles' / name)
+
+
+def load_contract(root=ROOT):
+    root = Path(root)
+    data = read_json(root / CONTRACT)
+    require(data['format'] == 1, 'Unsupported runtime contract format')
+    manifest = read_json(root / 'native/profiles/manifest.json')
+    require(len(set(manifest['profiles'])) == len(manifest['profiles']) and
+            all(isinstance(name,str) and Path(name).name == name for name in manifest['profiles']),
+            'Manifest profile names must be unique filenames')
+    modules = {}
+    for name, entry in data['modules'].items():
+        require(IDENTIFIER.fullmatch(name), 'Invalid module name')
+        path = entry['path']
+        require(path in manifest['modules'], 'Module is absent from compatibility manifest')
+        if 'profile' in entry:
+            section = profile_at(root, entry['profile'], manifest)[entry['section']]
+            digest, size = section[entry['hash_key']], integer(section[entry['size_key']])
+        else:
+            digest, size = entry['sha256'], integer(entry['image_size'])
+        require(HASH.fullmatch(digest) and digest in manifest['modules'][path]['accepted'],
+                'Runtime module identity must already be reviewed in the manifest')
+        require(0 < size < 0x80000000, 'Invalid reviewed module size')
+        modules[name] = dict(sha256=digest, image_size=size, path=path)
+    require(manifest['modules'][modules['client']['path']]['feature_pins']['automatic preload']
+            == [modules['client']['sha256']], 'Automatic preload pin differs from its runtime contract')
+    for name, field in data['schema'].items():
+        require(re.fullmatch(r'[A-Za-z_][A-Za-z_0-9]*\.m_[A-Za-z_0-9]+', name), 'Invalid named schema field')
+        module = modules[field['module']]
+        bounded(field['offset'], 0x8000)
+        bounded(field['record_rva'], module['image_size'], size=20)
+        require(field.get('evidence') and len(field['getters']) >= 2, 'Schema field needs independent getter evidence')
+        for getter in field['getters']:
+            bounded(getter['rva'], module['image_size'], size=17)
+            bounded(getter['slot'], 0x1000, size=8)
+            expected = (bytes.fromhex('48 8b 89') + struct.pack('<I', integer(field['offset']))
+                        + bytes.fromhex('48 8b 01 48 ff a0') + struct.pack('<I', integer(getter['slot'])))
+            require(bytes.fromhex(getter['bytes']) == expected, 'Schema offset conflicts with its saved stock getter')
+            evidence = [span for entries in data['groups'].values() for entry in entries.values()
+                        if entry['kind'] == 'spans' and entry['module'] == field['module']
+                        for span in entry['value'] if integer(span['rva']) == integer(getter['rva'])
+                        and span['size'] == len(expected)]
+            require(evidence and all(span['sha256'] == hashlib.sha256(expected).hexdigest() for span in evidence),
+                    'Schema getter is absent from or contradicts the runtime code audit')
+    require(set(data['groups']) == {'Preload','ReplayCamera','FollowCapabilities','FollowTarget','AttachRuntime'},
+            'Runtime contract groups are incomplete or unknown')
+    values = {}
+    for group, entries in data['groups'].items():
+        require(IDENTIFIER.fullmatch(group), 'Invalid generated group name')
+        values[group] = {}
+        for name, entry in entries.items():
+            require(IDENTIFIER.fullmatch(name), 'Invalid generated constant name')
+            module = modules[entry['module']]
+            kind, value = entry['kind'], entry.get('value')
+            if kind == 'module_hash':
+                value = module['sha256']
+            elif kind == 'module_size':
+                value = module['image_size']
+            elif kind == 'schema_offset':
+                field = data['schema'][entry['field']]
+                require(field['module'] == entry['module'], 'Schema field belongs to another module')
+                value = integer(field['offset'])
+            elif kind in ('rva', 'offset'):
+                value = bounded(value, module['image_size'] if kind == 'rva' else 0x8000)
+            elif kind == 'rvas':
+                value = tuple(bounded(v, module['image_size']) for v in value)
+                require(value and len(set(value)) == len(value), 'Duplicate/empty reviewed addresses')
+            elif kind == 'rva_map':
+                require(value and all(IDENTIFIER.fullmatch(key) for key in value), 'Invalid named references')
+                value = {key: bounded(v, module['image_size']) for key, v in value.items()}
+            elif kind == 'spans':
+                require(value, 'Empty code audit')
+                spans = []
+                for span in value:
+                    require(HASH.fullmatch(span['sha256']), 'Code span lacks saved evidence digest')
+                    spans.append((bounded(span['rva'], module['image_size'], size=span['size']), span['size']))
+                require(len(set(spans)) == len(spans), 'Duplicate code audit span')
+                value = tuple(spans)
+            elif kind == 'bytes':
+                value = bytes.fromhex(value)
+                require(0 < len(value) < 4096, 'Invalid reviewed byte span')
+            else:
+                raise ContractError('Unknown contract value kind: ' + str(kind))
+            values[group][name] = value
+    fields = data['attach_fields']
+    require(fields and len({f['purpose'] for f in fields}) == len(fields), 'Duplicate/empty attach field contract')
+    for f in fields:
+        require(all(isinstance(f[key], str) and IDENTIFIER.fullmatch(f[key])
+                    for key in ('purpose', 'layout_class', 'field')), 'Invalid named attach field')
+        require(type(f['required']) is bool and isinstance(f['expected_type'], str) and f['expected_type'],
+                'Attach fields need explicit type and required/optional status')
+    wire = data['attach_wire_fields']
+    require(wire == ['scene_node','owner','player_origin','player_angles','eye_offset','eye_angles','scene_child','scene_sibling'],
+            'Attach ABI field order must remain unchanged')
+    components = data['view_offset_components']
+    require(len(components) == 3 and all(type(v) is int and 0 <= v < 128 for v in components)
+            and components == sorted(set(components)), 'Invalid view-offset components')
+    seen = set()
+    for anchor in data['follow_anchors']:
+        require(re.fullmatch(r'\d+', anchor['build']), 'Invalid anchor build identifier')
+        profile = profile_at(root, anchor['profile'], manifest)['client']
+        digest, size = profile['client_sha256'], profile['size_of_image']
+        require(digest not in seen and digest in manifest['modules'][modules['client']['path']]['accepted'],
+                'Duplicate or unreviewed Follow anchor profile')
+        seen.add(digest)
+        require(set(anchor['values']) == set(ANCHOR_FIELDS), 'Follow anchor layout is incomplete or has unknown members')
+        require(integer(anchor['values']['image_size']) == size, 'Follow image size differs from its reviewed profile')
+        for key, value in anchor['values'].items():
+            if key != 'image_size':
+                bounded(value, 0x8000 if key.endswith('_offset') else size)
+        require(anchor['schema_field'] == 'C_BasePlayerPawn.m_pObserverServices' and anchor.get('evidence'),
+                'Follow observer field needs explicit named review')
+        require(anchor['spans'], 'Follow anchor needs exact code evidence')
+        covered = set()
+        for span in anchor['spans']:
+            raw = bytes.fromhex(span['bytes'])
+            rva = bounded(span['rva'], size, size=len(raw))
+            require(rva not in covered, 'Duplicate Follow code span')
+            covered.add(rva)
+        require(all(integer(anchor['values'][name]) in covered for name in ('composition','blend')),
+                'Follow hook entry is absent from exact code evidence')
+        anchor['_sha256'] = digest
+    return data, modules, values
+
+
+def cpp_value(name, value):
+    if isinstance(value, str):
+        return f'inline constexpr char {name}[] = {json.dumps(value)};'
+    if type(value) is int:
+        return f'inline constexpr std::uintptr_t {name} = {hex(value)};'
+    if isinstance(value, bytes):
+        return f'inline constexpr unsigned char {name}[] = {{' + ', '.join(hex(v) for v in value) + '};'
+    if isinstance(value, dict):
+        return f'inline constexpr NamedRva {name}[] = {{' + ', '.join(
+            '{' + json.dumps(k) + ', ' + hex(v) + '}' for k,v in value.items()) + '};'
+    if value and isinstance(value[0], tuple):
+        return f'inline constexpr CodeSpan {name}[] = {{' + ', '.join(
+            '{' + hex(rva) + ', ' + str(size) + '}' for rva,size in value) + '};'
+    return f'inline constexpr std::uintptr_t {name}[] = {{' + ', '.join(hex(v) for v in value) + '};'
+
+
+def render_runtime(data, values):
+    py = ['"""Generated by tools/generate_compatibility.py; edit reviewed profiles, not this file."""', '']
+    cpp = ['// Generated by tools/generate_compatibility.py. Do not edit by hand.', '#pragma once',
+           '#include <cstddef>', '#include <cstdint>', 'namespace dolly { namespace reviewed {',
+           'struct CodeSpan { std::uintptr_t rva; std::size_t size; };',
+           'struct NamedRva { const char* name; std::uintptr_t rva; };']
+    for group, entries in values.items():
+        py.append(f'class {group}:')
+        cpp.append(f'namespace {group} {{')
+        for name, value in entries.items():
+            py.append(f'    {name} = {repr(value)}')
+            cpp.append(cpp_value(name, value))
+        py += ['', '']
+        cpp.append('}')
+    specs = tuple(tuple(f[k] for k in ('purpose','layout_class','field','expected_type','required')) for f in data['attach_fields'])
+    py += ['ATTACH_FIELD_SPECS = ' + repr(specs), 'ATTACH_WIRE_FIELDS = ' + repr(tuple(data['attach_wire_fields'])),
+           'VIEW_OFFSET_VALUE_OFFSETS = ' + repr(tuple(data['view_offset_components'])), '']
+    cpp += ['enum class AttachFieldIndex : unsigned { ' + ', '.join(data['attach_wire_fields']) + ' };',
+            'inline constexpr std::size_t kViewOffsetComponents[] = {' + ', '.join(map(str,data['view_offset_components'])) + '};',
+            '} } // namespace dolly::reviewed', '']
+    return '\n'.join(py), '\n'.join(cpp)
+
+
+def render_follow(data):
+    lines = ['// Generated by tools/generate_compatibility.py. Do not edit by hand.', '#pragma once',
+             '// Included inside the bridge scope; no nested dolly namespace.',
+             'struct FollowCodeSpan { std::uintptr_t rva; const unsigned char* bytes; std::size_t size; };']
+    for anchor in data['follow_anchors']:
+        build = anchor['build']
+        for span in anchor['spans']:
+            raw = bytes.fromhex(span['bytes'])
+            name = 'kFollowCode' + build + '_' + format(integer(span['rva']), 'x')
+            lines.append(f'constexpr unsigned char {name}[] = {{')
+            for index in range(0,len(raw),16):
+                lines.append('    ' + ', '.join(f'0x{b:02x}' for b in raw[index:index+16]) + ',')
+            lines.append('};')
+        lines.append(f'constexpr FollowCodeSpan kFollowCode{build}Spans[] = {{')
+        for span in anchor['spans']:
+            name = 'kFollowCode' + build + '_' + format(integer(span['rva']), 'x')
+            lines.append('    {' + span['rva'] + f', {name}, sizeof({name})' + '},')
+        lines.append('};')
+    lines += ['struct FollowAnchorProfile {', '    const char* hash;']
+    lines += [f'    std::uintptr_t {name};' for name in ANCHOR_FIELDS]
+    lines += ['    const FollowCodeSpan* spans;', '    std::size_t count;', '};',
+              'constexpr FollowAnchorProfile kFollowAnchorProfiles[] = {']
+    for anchor in data['follow_anchors']:
+        name = 'kFollowCode' + anchor['build'] + 'Spans'
+        lines.append('    {' + json.dumps(anchor['_sha256']) + ', ' + ', '.join(
+            anchor['values'][key] for key in ANCHOR_FIELDS) + f', {name}, sizeof({name}) / sizeof(*{name})' + '},')
+    lines += ['};', '']
+    return '\n'.join(lines)
+
+
+def generated_outputs(root=ROOT):
+    root = Path(root)
+    data, modules, values = load_contract(root)
+    # Check the consumer API before emitting anything. Removing/renaming a
+    # reviewed symbol cannot silently produce a broken startup monitor.
+    for module, group in (('preload','Preload'), ('replay_camera','ReplayCamera'),
+                          ('follow_capabilities','FollowCapabilities'), ('follow_target','FollowTarget')):
+        tree = ast.parse((root / 'dolly' / (module + '.py')).read_text(encoding='utf-8'))
+        required = {node.attr for node in ast.walk(tree) if isinstance(node,ast.Attribute)
+                    and isinstance(node.value,ast.Name) and node.value.id == '_profile'}
+        require(required <= values[group].keys(), f'{group}: missing symbols required by its runtime consumer')
+    py, cpp = render_runtime(data, values)
+    outputs = {'dolly/_runtime_generated.py': py, 'native/include/dolly_runtime_generated.hpp': cpp,
+               'native/src/dolly_follow_anchor_generated.hpp': render_follow(data)}
+    with tempfile.TemporaryDirectory() as directory:
+        target = Path(directory) / 'generated.hpp'
+        manifest = read_json(root / 'native/profiles/manifest.json')
+        entries = camera.collect_profile_entries(root / 'native/profiles', None, profile_names=manifest['profiles'])
+        accepted = manifest['modules'][modules['client']['path']]['accepted']
+        require(all(profile['client']['client_sha256'] in accepted for profile,_ in entries),
+                'Camera profile hash is not reviewed in the manifest')
+        camera.emit_header(entries, target)
+        outputs['native/src/dolly_compat_generated.hpp'] = target.read_text(encoding='utf-8')
+        current = profile_at(root, sound.PROFILE.name, manifest)
+        legacy = profile_at(root, sound.LEGACY_PROFILE.name, manifest)
+        accepted_sound = manifest['modules']['bin/win64/soundsystem.dll']['accepted']
+        require(all(profile['sha256'] in accepted_sound for profile in (current,legacy)),
+                'Sound profile hash is not reviewed in the manifest')
+        sound.emit_sound_header(current, target, legacy_profile=legacy)
+        outputs['native/src/dolly_sound_compat_generated.hpp'] = target.read_text(encoding='utf-8')
+    return outputs
+
+
+def check_generated(root=ROOT):
+    root = Path(root)
+    stale = [name for name, text in generated_outputs(root).items()
+             if not (root/name).is_file() or (root/name).read_text(encoding='utf-8') != text]
+    require(not stale, 'Generated compatibility drift: ' + ', '.join(stale)
+            + '. Review profiles, then run tools/generate_compatibility.py --write.')
+
+
+def verify_game(root, game_dir):
+    data, modules, values = load_contract(root)
+    game = camera.resolve_game_dir(Path(game_dir))
+    images = {}
+    report = {'method':'offline exact-module/code/schema verification', 'modules':{}, 'schema':{}}
+    try:
+        for name, module in modules.items():
+            image = images[name] = camera.Image(game / module['path'])
+            require(image.sha256 == module['sha256'] and image.image_size == module['image_size'],
+                    f'{name}: installed module differs from the reviewed runtime contract')
+            report['modules'][name] = dict(sha256=image.sha256, image_size=image.image_size, code_spans=0)
+        for entries in data['groups'].values():
+            for entry in entries.values():
+                if entry['kind'] != 'spans':
+                    continue
+                image = images[entry['module']]
+                for span in entry['value']:
+                    raw = image.read(integer(span['rva']), span['size'])
+                    require(hashlib.sha256(raw).hexdigest() == span['sha256'], 'Saved code span evidence differs')
+                    report['modules'][entry['module']]['code_spans'] += 1
+        for name, field in data['schema'].items():
+            report['schema'][name] = verify_named_field(images[field['module']], name, field)
+        return report
+    finally:
+        for image in images.values():
+            image.close()
+
+
+def verify_named_field(image, name, field):
+    """Prove the named record and independent getter consumers agree, read-only."""
+    record = image.read(integer(field['record_rva']), 20)
+    require(len(record) == 20, 'Truncated named schema record')
+    address = struct.unpack_from('<Q', record)[0]
+    label = name.split('.')[1].encode() + b'\0'
+    require(image.read(address-image.base, len(label)) == label, 'Named schema record differs')
+    offset = struct.unpack_from('<I', record, 16)[0]
+    require(offset == integer(field['offset']), 'Named schema field offset differs')
+    for getter in field['getters']:
+        expected = bytes.fromhex(getter['bytes'])
+        require(image.read(integer(getter['rva']), len(expected)) == expected, 'Stock schema getter differs')
+    return dict(offset=offset, getters=len(field['getters']))
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--check', action='store_true')
+    mode.add_argument('--write', action='store_true')
+    parser.add_argument('--verify-game-dir', type=Path)
+    args = parser.parse_args(argv)
+    try:
+        # Validate/render everything before touching any generated output.
+        if args.write:
+            outputs = generated_outputs()
+            for name, text in outputs.items():
+                (ROOT/name).write_text(text, encoding='utf-8')
+            print(f'Generated {len(outputs)} compatibility files from saved reviews.')
+        else:
+            check_generated()
+            print('Generated compatibility files match the saved reviews.')
+        if args.verify_game_dir:
+            print(json.dumps(verify_game(ROOT,args.verify_game_dir),indent=2))
+    except (ContractError, camera.ProfileError, KeyError, TypeError, OSError, ValueError) as exc:
+        print(str(exc),file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

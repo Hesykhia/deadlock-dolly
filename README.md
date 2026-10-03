@@ -192,6 +192,13 @@ native preview holds the current scene without seeking. The scripted intro
 remains visible during shot preparation until a true skip is verified. Some console position-
 calibration recoveries still require exact ticks and can fail on sparse recordings.
 
+Console camera preparation first checks the current view without seeking. It
+uses a bounded refresh only when the measured camera response fails. If
+**Stop / restore** leaves the health panel pending, the restore guide opens:
+choose **Open replay controls**, select a hero and wait for its camera, then
+return to Dolly and choose **Restore after selection**. The panel stays hidden
+until that handoff is verified.
+
 ## Compatibility
 
 Native mode supports reviewed builds of `client.dll`, `engine2.dll` and
@@ -201,6 +208,22 @@ unrecognized build instead of injecting. **Settings → Troubleshooting & recove
 **Check game build** action, and **Console (legacy)** remains available when
 Native is unavailable. See [game updates](docs/internal/GAME_UPDATES.md) for the
 manifest, signature scanning and profile-generation workflow.
+Console avoids the native camera/capture bridge, but its unlocker and automatic
+startup-readiness checks still need support for the installed game build.
+
+Native camera startup checks its essential view and gameplay-effect hooks
+separately from the optional Follow correction. A rejected Follow correction
+disables Game Follow while keeping a verified camera usable. Diagnostics record
+which prerequisite failed; malformed optional diagnostic blocks no longer hide
+the main camera status. Core protocol and process-identity checks remain strict.
+This separation reduces the scope of some update failures; it does not approve
+unknown game builds or establish support for Depth or Players output.
+
+Current startup, Follow and attachment definitions share reviewed inputs across
+Python and native code. One offline generator reproduces these definitions and
+the camera/sound compatibility tables; native builds reject stale generated
+data. The [maintainer workflow](docs/internal/GAME_UPDATES.md#shared-reviewed-contracts-unreleased-hardening)
+records how to review and regenerate them after a game update.
 
 0.6.0-alpha was checked against build 6726. Current-build checks covered camera
 paths and mode transitions, camera-list/history controls, health/HUD restoration,

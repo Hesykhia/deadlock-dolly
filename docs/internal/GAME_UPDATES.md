@@ -1,5 +1,50 @@
 # Deadlock updates and Dolly
 
+## Shared reviewed contracts (unreleased hardening)
+
+`native/profiles/manifest.json` controls accepted module fingerprints and the
+narrower feature pins. `native/profiles/runtime-contracts.json` now holds the
+shared current preload, replay-camera, Follow and attachment definitions. Its
+module identities reference existing reviewed profiles where available. Named
+schema fields retain their evidence, stock getter bytes and audited code spans;
+attachment field names/types and wire order are shared by Python and native code.
+Older Follow correction profiles keep their own layouts and exact checked bytes.
+
+Use the unified generator from the repository root:
+
+```powershell
+python tools/generate_compatibility.py --check
+python tools/generate_compatibility.py --write
+python tools/generate_compatibility.py --check --verify-game-dir "<Deadlock install>"
+```
+
+`--check` is the default and detects stale generated files without writing.
+`--write` validates saved reviews and regenerates the Python runtime constants,
+native runtime definitions, Follow correction table, camera header and sound
+header. It needs no installed game and never changes accepted fingerprints or
+approves a new build. Native builds run the check before removing the previous
+DLL. Edit the reviewed inputs and generator, not generated files.
+
+The optional `--verify-game-dir` reads installed PE files; it never launches or
+attaches to Deadlock. It checks the current runtime contract's exact client,
+tier0 and resource identities, saved code spans, and named observer-services
+field against both stock getters. It needs the build dependencies used by the
+profile tools. This is offline evidence, not an in-game or output certification.
+
+For a game update, first review the changed subsystems and retain the old
+profiles. The existing client and sound profile tools remain discovery tools;
+their output still needs review. Update the relevant saved contracts, evidence
+and manifest pins, then regenerate all five outputs with the unified command.
+Inspect the diff, run the Python/native checks, and verify the actual affected
+workflow in a bounded owned replay before claiming new runtime support.
+Never widen preload or an optional feature's support merely because camera
+code was accepted.
+
+This migration preserves existing values, behavior and feature gates. It does
+not automatically discover every private layout or make Dolly update-proof.
+Historical attachment branches and separate renderer/Depth/Players contracts
+remain independently reviewed; this work does not expand their support.
+
 ## Version6722 hotfix and Follow slide correction
 
 Steam build25614556 uses client44a50bc2.../image40f5000. Exact original6712
@@ -110,14 +155,15 @@ module pins instead of approving them during a client-only review. New sound
 code/layouts require a fresh review and updated profile; prefix matches do not
 prove every helper or data layout unchanged.
 
-`client.dll`'s hash is intentionally duplicated in the manifest, the generated
-client header, and `dolly/preload.py::CLIENT_SHA256`. Camera support accepts
-several older hashes; preload's code/layout review accepts one. The manifest's
-`feature_pins` records that narrower preload requirement, so an older accepted
-camera build no longer implies preload support. `tests/test_sound_profile.py`
-cross-checks these pins, the resource-system pin, and the native scene, sound
-and renderer pins. Update them together after reviewing the relevant subsystem;
-do not copy the camera's accepted hash list into preload.
+The generated client header and `dolly/preload.py::CLIENT_SHA256` now obtain
+their hashes from saved reviewed inputs through the unified generator above.
+Camera support accepts several older hashes; preload's code/layout review
+accepts one. The manifest's `feature_pins` records that narrower requirement,
+which the generator checks against the runtime contract. An older accepted
+camera build therefore does not imply preload support. Existing tests also
+cross-check the resource-system, native scene, sound and renderer pins. Review
+each relevant subsystem before updating its inputs; do not copy the camera's
+accepted hash list into preload.
 
 Validation is offline: generated signatures are unique in the installed PE,
 native resolution is checked against its full `.text` snapshot, and synthetic

@@ -208,9 +208,11 @@ class NativePackagingTests(unittest.TestCase):
                 patch.object(sys, "platform", "win32"), \
                 patch.object(build_native.platform, "machine", return_value="AMD64"), \
                 patch.object(build_native.struct, "calcsize", return_value=8), \
+                patch.object(build_native, "check_generated") as generated, \
                 patch.object(build_native, "verify_native_dll", return_value={"machine": "x64"}), \
                 patch("subprocess.run", side_effect=compile_and_link) as run:
             info = build_native.build_native(self.root)
+        generated.assert_called_once_with(self.root)
         self.assertEqual([call.args[0][0] for call in run.call_args_list], ["cmake", "cmake", "ctest"])
         configure = run.call_args_list[0].args[0]
         self.assertIn("Visual Studio 17 2022", configure)
@@ -232,10 +234,25 @@ class NativePackagingTests(unittest.TestCase):
         with patch.object(sys, "platform", "win32"), \
                 patch.object(build_native.platform, "machine", return_value="AMD64"), \
                 patch.object(build_native.struct, "calcsize", return_value=8), \
+                patch.object(build_native, "check_generated"), \
                 patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "cmake")):
             with self.assertRaises(subprocess.CalledProcessError):
                 build_native.build_native(self.root)
         self.assertFalse(metadata.exists())
+
+    def test_generated_drift_preserves_previous_native_build_and_never_compiles(self):
+        _native, dll, metadata = self.runtime_fixture()
+        old_dll, old_metadata = dll.read_bytes(), metadata.read_bytes()
+        with patch.object(sys, 'platform', 'win32'), \
+                patch.object(build_native.platform, 'machine', return_value='AMD64'), \
+                patch.object(build_native.struct, 'calcsize', return_value=8), \
+                patch.object(build_native, 'check_generated', side_effect=ValueError('Generated compatibility drift')), \
+                patch('subprocess.run') as run:
+            with self.assertRaisesRegex(ValueError, 'drift'):
+                build_native.build_native(self.root)
+        run.assert_not_called()
+        self.assertEqual(dll.read_bytes(), old_dll)
+        self.assertEqual(metadata.read_bytes(), old_metadata)
 
 
 if __name__ == "__main__":

@@ -93,6 +93,33 @@ class PausedRefreshTests(unittest.TestCase):
         self.assertEqual(self.controller._camera_calibration["translation_response"]["gain"],
                          {"x": 1, "y": 1, "z": 1})
 
+    def test_responsive_camera_prepares_without_requiring_an_adjacent_tick_seek(self):
+        # Build 6745 can render and control the loaded replay but cannot always
+        # land an adjacent-tick round trip. A healthy camera needs no recovery.
+        self.console.weak = False
+        self.console.on_seek = lambda old, new: self.fail('Healthy camera must not seek')
+        original = list(self.console.pose)
+        frame = self.prepare()
+        self.assertEqual([frame[a] for a in ("x", "y", "z", "pitch", "yaw")], original)
+        self.assert_pose(frame)
+        self.assertEqual(self.console.tick, 112249)
+        self.assertTrue(self.controller._camera_calibration['direct_response_verified'])
+        self.assertEqual(self.console.seek_pairs, [])
+        self.assertNotIn('demo_resume', self.console.operations)
+
+    def test_responsive_saved_views_verify_translation_without_seeking(self):
+        self.console.weak = False
+        self.console.on_seek = lambda old, new: self.fail('Healthy camera must not seek')
+        project = Project(start_tick=1000, keyframes=[
+            Keyframe(0, -2400, 9200, 800, -35, 317, 7, aspect_ratio=1.2)])
+        for operation in ('select_paused_camera', 'apply'):
+            with self.subTest(operation=operation):
+                getattr(self.controller, operation)(project, 0)
+                self.assert_pose(project.evaluate(0))
+                self.assertEqual(self.console.tick, 112249)
+                self.assertTrue(self.controller._camera_calibration['direct_response_verified'])
+                self.assertEqual(self.console.seek_pairs, [])
+
     def test_distant_saved_view_preserves_current_replay_moment_for_select_and_preview(self):
         project = Project(start_tick=1000, keyframes=[
             Keyframe(0, -2400, 9200, 800, -35, 317, 7, aspect_ratio=1.2)])
@@ -137,7 +164,8 @@ class PausedRefreshTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.prepare()
         self.assertEqual(self.console.seek_pairs, [])
-        self.assertEqual(self.console.camera_writes, [])
+        self.assertFalse(self.controller._camera_calibration['verified'])
+        self.assertNotIn('demo_resume', self.console.operations)
         self.assertFalse(self.controller.status()["paused_camera"])
 
     def test_permanently_weak_camera_remains_blocked_after_bounded_refresh(self):
@@ -150,20 +178,30 @@ class PausedRefreshTests(unittest.TestCase):
         self.assertNotIn("demo_resume", self.console.operations)
         self.assertEqual(self.console.tick, 112249)
 
-    def test_cancel_after_outbound_seek_stops_before_camera_writes(self):
-        self.console.on_seek = lambda old, new: self.controller._stop_event.set()
+    def test_cancel_after_outbound_seek_stops_before_further_camera_writes(self):
+        before_cancel = []
+        def cancel(old, new):
+            before_cancel.extend(self.console.camera_writes)
+            self.controller._stop_event.set()
+        self.console.on_seek = cancel
         with self.assertRaisesRegex(RuntimeError, "cancel"):
             self.prepare()
-        self.assertEqual(self.console.camera_writes, [])
+        self.assertTrue(before_cancel)  # Failed measurement triggered recovery.
+        self.assertEqual(self.console.camera_writes, before_cancel)
         self.assertFalse(self.controller.status()["paused_camera"])
         self.assertNotIn("demo_resume", self.console.operations)
         self.assertEqual(self.console.seek_pairs, [(112249, 112248)])
 
     def test_changed_demo_after_outbound_seek_is_not_rewritten(self):
-        self.console.on_seek = lambda old, new: setattr(self.console, "demo_name", "another.dem")
+        before_change = []
+        def change_demo(old, new):
+            before_change.extend(self.console.camera_writes)
+            self.console.demo_name = 'another.dem'
+        self.console.on_seek = change_demo
         with self.assertRaisesRegex(RuntimeError, "different"):
             self.prepare()
-        self.assertEqual(self.console.camera_writes, [])
+        self.assertTrue(before_change)
+        self.assertEqual(self.console.camera_writes, before_change)
         self.assertEqual(len(self.console.seek_pairs), 1)
         self.assertFalse(self.controller.status()["paused_camera"])
         self.assertNotIn("demo_resume", self.console.operations)

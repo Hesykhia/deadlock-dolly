@@ -286,12 +286,20 @@ class SeekOvershootTests(unittest.TestCase):
         self.assert_failed_without_camera_writes()
 
     def test_cancel_after_corrective_seek_prevents_pose_restoration_and_manual_enable(self):
-        self.console.on_seek = lambda seek: (
-            self.controller._stop_event.set() if len(self.console.seek_attempts) == 3 else None)
+        before_cancel = []
+        def cancel_after_correction(seek):
+            if len(self.console.seek_attempts) == 3:
+                before_cancel.extend(self.console.camera_writes)
+                self.controller._stop_event.set()
+        self.console.on_seek = cancel_after_correction
         with self.assertRaisesRegex(RuntimeError, "cancel"):
             self.prepare()
         self.assertEqual(len(self.console.seek_attempts), 3)
-        self.assert_failed_without_camera_writes()
+        self.assertTrue(before_cancel)  # Initial measurement precedes recovery.
+        self.assertEqual(self.console.camera_writes, before_cancel)
+        self.assertFalse(self.controller.status()['paused_camera'])
+        self.assertFalse(self.controller._last_seek_details['verified'])
+        self.assertNotIn('demo_resume', self.console.operations)
 
     def test_dialog_cancellation_on_final_overshoot_sample_prevents_correction(self):
         self.console.tick = 100

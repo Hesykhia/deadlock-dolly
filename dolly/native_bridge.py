@@ -353,6 +353,57 @@ class NativeBridge(MediaTransport):
                     "corrections": corrections, "rejected": rejected}
         return None
 
+    @staticmethod
+    def _optional_status(reader):
+        """Telemetry failure belongs to its feature, not the camera protocol."""
+        try:
+            return reader()
+        except (NativeBridgeError, OSError, ValueError, struct.error) as exc:
+            return {"error": str(exc)}
+
+    def capabilities(self):
+        """Read feature admission without invalidating an independent view."""
+        from . import native_capabilities as wire
+        def read():
+            for _ in range(4):
+                first = self._load_sequence(wire.OFFSET + 8)
+                if first:
+                    self._capabilities_seen = True
+                if first & 1:
+                    continue
+                data = bytes(self._mapping[wire.OFFSET:wire.OFFSET + wire.WIRE.size])
+                if first != self._load_sequence(wire.OFFSET + 8):
+                    continue
+                if struct.unpack_from('<I', data, 8)[0] != first:
+                    continue
+                if any(data):
+                    self._capabilities_seen = True
+                result = wire.unpack(data, self.game_pid)
+                if result is None and getattr(self, '_capabilities_seen', False):
+                    raise NativeBridgeError('Native capability report disappeared')
+                return result
+            raise NativeBridgeError('Native capability report is busy; retry the feature')
+        with self._lock:
+            self._check_open()
+            return self._optional_status(read)
+
+    def capability_available(self, feature):
+        from .native_capabilities import available
+        return available(self.capabilities(), feature)
+
+    def require_capability(self, feature):
+        from .native_capabilities import available
+        report = self.capabilities()
+        if not available(report, feature):
+            reason = report.get('error') if isinstance(report, dict) else None
+            if not reason:
+                reason = ', '.join(name.replace('_', ' ') + ': ' + value['state']
+                                   + ' (' + value['reason'].replace('_', ' ') + ')'
+                                   for name, value in report.items()
+                                   if value['state'] not in ('ready', 'not_required'))
+            label = 'Game Follow' if feature == 'follow' else 'Native camera'
+            raise NativeBridgeError(label + ' is unavailable: ' + str(reason))
+
     def status(self):
         """Return one coherent, validated native status snapshot."""
         with self._lock:
@@ -408,8 +459,9 @@ class NativeBridge(MediaTransport):
                     "message": message.split(b"\0", 1)[0].decode("utf-8", errors="replace"),
                     "demo_name": demo.split(b"\0", 1)[0].decode("utf-8", errors="replace"),
                     "max_frame_interval_ms": maximum_ms, "frame_interval_ms": interval_ms,
-                    "confetti_diagnostics": self._confetti_diagnostics(),
-                    "follow_anchor_diagnostics": self._follow_anchor_diagnostics()}
+                    "confetti_diagnostics": self._optional_status(self._confetti_diagnostics),
+                    "follow_anchor_diagnostics": self._optional_status(self._follow_anchor_diagnostics),
+                    "capabilities": self.capabilities()}
             now = self._clock()
             if now - self._view_sample_at >= 1:
                 # Reuse this validated read, including outside path playback.
@@ -719,6 +771,7 @@ class NativeBridge(MediaTransport):
         from . import editor_wire as wire
         with self._lock:
             self._check_open()
+            available = bool(available and self.capability_available('follow'))
             previous = getattr(self, '_editor_follow_sequence', 0)
             odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
             data = wire.pack_follow(odd, settings, available=available, active=active, pending=pending, show_hud=show_hud)

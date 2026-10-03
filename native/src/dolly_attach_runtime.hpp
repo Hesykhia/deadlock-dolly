@@ -29,8 +29,8 @@ inline bool september_6742 = false;
 inline bool september_6745 = false;
 inline void configure_client(HMODULE client) {
     configured_client = client;
-    september_6745 = module_matches(
-        client, "948260612c9b7243964e4a0d5f0f6252ae846ceaa6e8c0e95b83bd5eba4caf60", 0x4150000);
+    september_6745 = module_matches(client, dolly::reviewed::AttachRuntime::CLIENT_SHA256,
+                                    dolly::reviewed::AttachRuntime::CLIENT_IMAGE_SIZE);
     september_6742 = module_matches(
         client, "255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657", 0x4150000);
     september_6739 = module_matches(
@@ -76,22 +76,20 @@ inline void configure_client(HMODULE client) {
     const unsigned char initializer6742[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
                                              0x24, 0x28, 0x48, 0x89, 0x0d, 0x50, 0x11,
                                              0xd2, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
-    const unsigned char initializer6745[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
-                                             0x24, 0x28, 0x48, 0x89, 0x0d, 0xe0, 0x11,
-                                             0xd2, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
     september_entity_code =
-        read_memory(reinterpret_cast<std::uintptr_t>(client) + (september_6745     ? 0x2031840
-                                                                : september_6742   ? 0x20318d0
-                                                                : september_6739   ? 0x2031870
-                                                                : september_6731   ? 0x200a320
-                                                                : september_6730   ? 0x2009b40
-                                                                : september_6726   ? 0x20088d0
-                                                                : september_latest ? 0x2005120
-                                                                : september_hotfix ? 0x2004af0
-                                                                                   : 0x20049f0),
+        read_memory(reinterpret_cast<std::uintptr_t>(client) +
+                        (september_6745     ? dolly::reviewed::AttachRuntime::INITIALIZER
+                         : september_6742   ? 0x20318d0
+                         : september_6739   ? 0x2031870
+                         : september_6731   ? 0x200a320
+                         : september_6730   ? 0x2009b40
+                         : september_6726   ? 0x20088d0
+                         : september_latest ? 0x2005120
+                         : september_hotfix ? 0x2004af0
+                                            : 0x20049f0),
                     actual, sizeof(actual)) &&
         std::memcmp(actual,
-                    september_6745     ? initializer6745
+                    september_6745     ? dolly::reviewed::AttachRuntime::INITIALIZER_BYTES
                     : september_6742   ? initializer6742
                     : september_6739   ? initializer6739
                     : september_6731   ? initializer6731
@@ -127,14 +125,21 @@ struct Cache {
 
 inline Offsets offsets_from(const EditorAttachConfig& config) noexcept {
     Offsets offsets;
-    offsets.scene_node = config.offsets[0];
-    offsets.owner = config.offsets[1];
-    offsets.origin = config.offsets[2];
-    offsets.angles = config.offsets[3];
-    offsets.view_offset = config.offsets[4];
-    offsets.eye_angles = config.offsets[5];
-    offsets.child = config.offsets[6];
-    offsets.sibling = config.offsets[7];
+    offsets.scene_node =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::scene_node)];
+    offsets.owner = config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::owner)];
+    offsets.origin =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::player_origin)];
+    offsets.angles =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::player_angles)];
+    offsets.view_offset =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::eye_offset)];
+    offsets.eye_angles =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::eye_angles)];
+    offsets.child =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::scene_child)];
+    offsets.sibling =
+        config.offsets[static_cast<unsigned>(dolly::reviewed::AttachFieldIndex::scene_sibling)];
     return offsets;
 }
 
@@ -207,7 +212,8 @@ inline bool locate_entity_system(HMODULE client, std::uintptr_t& out) noexcept {
         return false;
     if (client == configured_client && september_client) {
         std::uintptr_t candidate = 0, actual_vtable = 0;
-        const std::uintptr_t reviewed_vtable = september_6745     ? 0x2a40df0
+        const std::uintptr_t reviewed_vtable = september_6745
+                                                   ? dolly::reviewed::AttachRuntime::ENTITY_VTABLE
                                                : september_6742   ? 0x2a40df0
                                                : september_6739   ? 0x2a40df0
                                                : september_6731   ? 0x2a0c900
@@ -217,16 +223,15 @@ inline bool locate_entity_system(HMODULE client, std::uintptr_t& out) noexcept {
                                                : september_hotfix ? 0x2a07c10
                                                                   : 0x2a07c30;
         if (!september_entity_code || vtable != base + reviewed_vtable ||
-            !read_value(base + (september_6745     ? 0x3d52a30
-                               : september_6742    ? 0x3d52a30
-                               : september_6739    ? 0x3d52a30
-                               : september_6731    ? 0x3d023a0
-                               : september_6730    ? 0x3d023a0
-                               : september_6726    ? 0x3cfeda0
-                                                   : 0x3cfc7c0),
+            !read_value(base + (september_6745   ? dolly::reviewed::AttachRuntime::ENTITY_GLOBAL
+                                : september_6742 ? 0x3d52a30
+                                : september_6739 ? 0x3d52a30
+                                : september_6731 ? 0x3d023a0
+                                : september_6730 ? 0x3d023a0
+                                : september_6726 ? 0x3cfeda0
+                                                 : 0x3cfc7c0),
                         candidate) ||
-            !candidate ||
-            !read_value(candidate, actual_vtable) || actual_vtable != vtable)
+            !candidate || !read_value(candidate, actual_vtable) || actual_vtable != vtable)
             return false;
         out = candidate;
         return true;
@@ -898,9 +903,12 @@ inline bool sample(const Offsets& offsets, const Cache& cache, const dolly::Atta
     if (!read_memory(node + offsets.origin, origin, sizeof(origin)) ||
         !read_memory(node + offsets.angles, angles, sizeof(angles)) ||
         !read_memory(cache.pawn + offsets.eye_angles, aim, sizeof(aim)) ||
-        !read_memory(cache.pawn + offsets.view_offset + 16, &local[0], 4) ||
-        !read_memory(cache.pawn + offsets.view_offset + 24, &local[1], 4) ||
-        !read_memory(cache.pawn + offsets.view_offset + 32, &local[2], 4)) {
+        !read_memory(cache.pawn + offsets.view_offset + dolly::reviewed::kViewOffsetComponents[0],
+                     &local[0], 4) ||
+        !read_memory(cache.pawn + offsets.view_offset + dolly::reviewed::kViewOffsetComponents[1],
+                     &local[1], 4) ||
+        !read_memory(cache.pawn + offsets.view_offset + dolly::reviewed::kViewOffsetComponents[2],
+                     &local[2], 4)) {
         error = "The attach target pose was not readable; the shot stopped.";
         return false;
     }

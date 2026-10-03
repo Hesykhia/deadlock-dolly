@@ -2389,7 +2389,62 @@ class DollyApp:
         self._close_paused_camera(stop=False)
         if function == self.controller.stop:
             function = lambda: self.controller.stop(preserve_speed=True)
+            return self._submit(label, function, self._restore_completed)
         return self._submit(label, function)
+
+    def _restore_completed(self, _result=None):
+        status = self.controller.status()
+        if (status.get("connected") and status.get("camera_backend") == "console"
+                and status.get("health_panel_restore_pending")):
+            self._show_restore_guidance()
+        elif not status.get("health_panel_restore_pending"):
+            dialog = getattr(self, "restore_guidance_dialog", None)
+            if dialog is not None and dialog.winfo_exists():
+                dialog.destroy()
+                self.status_text.set("Health panel restored to its saved setting.")
+            self.restore_guidance_dialog = None
+
+    def _show_restore_guidance(self):
+        dialog = getattr(self, "restore_guidance_dialog", None)
+        if dialog is not None and dialog.winfo_exists():
+            dialog.lift()
+            return
+        dialog = tk.Toplevel(self.root)
+        self.restore_guidance_dialog = dialog
+        dialog.title("Restore the game health panel")
+        dialog.configure(bg=BG)
+        dialog.transient(self.root)
+        body = ttk.Frame(dialog, padding=18)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="ONE MORE STEP TO RESTORE", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(body, wraplength=self._window_dimensions(460, 0)[0], justify="left", text=(
+            "The health and ability panel is still hidden because the game is in free camera. "
+            "Dolly is keeping your original setting until a hero view is ready.\n\n"
+            "1. Open replay controls below.\n"
+            "2. Select a hero and wait for the camera to follow that hero.\n"
+            "3. Return to Dolly and click Restore after selection."
+        )).pack(fill="x", pady=(12, 16))
+        actions = ttk.Frame(body)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Open replay controls",
+                   command=self._open_restore_replay_controls).pack(side="left")
+        ttk.Button(actions, text="Restore after selection", command=lambda:
+                   self._session_operation("Restoring game controls", self.controller.stop)
+                   ).pack(side="left", padx=(10, 0))
+        ttk.Label(body, wraplength=self._window_dimensions(460, 0)[0], style="Muted.TLabel", text=(
+            "You can leave this window open. Restore checks the hero view before showing the panel."
+        )).pack(fill="x", pady=(12, 0))
+
+    def _open_restore_replay_controls(self):
+        def open_controls():
+            self.controller.toggle_console(False)
+            self.controller.toggle_game_ui(True)
+        def focused(_result):
+            pid = self.controller.game_pid()
+            if pid is not None:
+                focus_window(pid)
+            self.status_text.set("Select a hero in Deadlock, then return here and click Restore after selection.")
+        return self._submit("Opening replay controls", open_controls, focused)
 
     def _open_coordinates(self):
         if self.coordinates_dialog is not None and self.coordinates_dialog.winfo_exists():

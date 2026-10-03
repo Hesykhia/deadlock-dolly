@@ -55,7 +55,9 @@ class ReleasePackagingTests(unittest.TestCase):
         listed = {line.strip() for line in (root / "SOURCE_FILES.txt").read_text(encoding="utf-8").splitlines()
                   if line.strip() and not line.lstrip().startswith("#")}
         shipped = []
-        for pattern in ("dolly/*.py", "tests/test_*.py", "tools/*.py", "packaging/*"):
+        for pattern in ("dolly/*.py", "tests/test_*.py", "tools/*.py", "packaging/*",
+                        "native/src/*.cpp", "native/src/*.hpp", "native/include/*.hpp",
+                        "native/include/*.h", "native/tests/*.cpp"):
             shipped.extend(sorted(path.relative_to(root).as_posix()
                                   for path in root.glob(pattern) if path.is_file()))
         missing = [name for name in shipped if name not in listed]

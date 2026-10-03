@@ -2,32 +2,6 @@
 // Exact reviewed version6722 and6723 profiles. Correct a private blend input, never persistent game state.
 #include "dolly_follow_anchor_generated.hpp"
 
-struct FollowAnchorProfile {
-    const char* hash;
-    std::uintptr_t controller, observer_base, composition, blend, blend_caller;
-    const FollowCodeSpan* spans;
-    std::size_t count;
-    std::size_t image_size = 0x40f5000;
-    std::uintptr_t rig = 0x35f7180;
-    std::uintptr_t manager = 0x35f5780;
-    std::uintptr_t manager_table = 0x261d0a0;
-    std::uintptr_t camera_table = 0x2624b08;
-    std::uintptr_t controller_table = 0x2683968;
-    std::uintptr_t entity_list = 0x33e37c8;
-    std::uintptr_t observer_table = 0x2601268;
-    std::uintptr_t services_table = 0x26843b0;
-    std::uintptr_t pawn_table = 0x260dc30;
-};
-constexpr FollowAnchorProfile kFollowAnchorProfiles[] = {
-    {"44a50bc28e7a49f52e725b95a62a7046fcbc99cc9107beae4b448cccbd52dbbc", 0x3b7c0f0, 0x2a191c8,
-     0x5dffc0, 0x5f5d20, 0x5e01e7, kFollowCode6722Spans, std::size(kFollowCode6722Spans)},
-    {"14a1f187b4dbe0801c805cfb4050dff495601867b1f0c7a21889d47c633a4bf3", 0x3b7c100, 0x2a191b8,
-     0x5dfff0, 0x5f5d50, 0x5e0217, kFollowCode6723Spans, std::size(kFollowCode6723Spans)},
-    {"07f65ab6f862517ef6b1049679f78342d572acc589cba54e9851d61380b19e6e", 0x3b7dba8, 0x2a1c4e8,
-     0x5dffb0, 0x5f5d10, 0x5e01d7, kFollowCode6726Spans, std::size(kFollowCode6726Spans), 0x40f7000,
-     0x35f98f0, 0x35f7ec0, 0x26200f0, 0x2627b58, 0x2686c08, 0x33e5d58, 0x26041f8, 0x2687650,
-     0x2610c60},
-};
 const FollowAnchorProfile* gFollowAnchorProfile = &kFollowAnchorProfiles[0];
 
 using FollowCompositionFn = void(__fastcall*)(void*, void*, float, dolly::FollowDescriptor*);
@@ -98,7 +72,8 @@ static bool follow_anchor_target(std::uintptr_t camera, std::uintptr_t pawn,
     };
     if (!resolve(observer_handle, observer) || !read_value(observer, table) ||
         table != gClient + gFollowAnchorProfile->observer_table ||
-        !read_value(observer + 0xe40, services) || !services || !read_value(services, table) ||
+        !read_value(observer + gFollowAnchorProfile->observer_services_offset, services) ||
+        !services || !read_value(services, table) ||
         (table != gClient + gFollowAnchorProfile->services_table &&
          table != gClient + gFollowAnchorProfile->observer_base) ||
         !read_value(services + 0x48, mode) || (mode != 2 && mode != 3) ||
@@ -126,8 +101,8 @@ static bool follow_anchor_target(std::uintptr_t camera, std::uintptr_t pawn,
            again == gClient + gFollowAnchorProfile->controller_table &&
            resolve(observer_handle, again) && again == observer && read_value(observer, again) &&
            again == gClient + gFollowAnchorProfile->observer_table &&
-           read_value(observer + 0xe40, again) && again == services &&
-           read_value(services, again) && again == service_type &&
+           read_value(observer + gFollowAnchorProfile->observer_services_offset, again) &&
+           again == services && read_value(services, again) && again == service_type &&
            read_value(services + 0x48, mode_again) && mode_again == mode &&
            read_value(services + 0x4c, handle_again) && handle_again == target &&
            read_value(camera + 0xb0, handle_again) && handle_again == target &&
@@ -208,7 +183,7 @@ __declspec(noinline) static void __fastcall follow_blend_hook(float weight,
     gOriginalFollowBlend(weight, a, b, output);
 }
 
-static bool install_follow_anchor(HMODULE client) {
+static CapabilityResult install_follow_anchor(HMODULE client) {
     gFollowAnchorProfile = nullptr;
     for (const auto& profile : kFollowAnchorProfiles)
         if (module_matches(client, profile.hash, profile.image_size)) {
@@ -216,43 +191,37 @@ static bool install_follow_anchor(HMODULE client) {
             break;
         }
     if (!gFollowAnchorProfile)
-        return true; // Older reviewed builds keep their existing behavior.
+        return {CapabilityState::NotRequired,
+                CapabilityReason::None}; // Existing reviewed behavior.
     for (std::size_t index = 0; index < gFollowAnchorProfile->count; ++index) {
         const auto& span = gFollowAnchorProfile->spans[index];
         std::vector<unsigned char> actual(span.size);
         if (!read_memory(gClient + span.rva, actual.data(), actual.size()) ||
             std::memcmp(actual.data(), span.bytes, span.size))
-            return false;
+            return {CapabilityState::Unavailable, CapabilityReason::SignatureMismatch};
     }
-    void* composition = reinterpret_cast<void*>(gClient + gFollowAnchorProfile->composition);
-    void* blend = reinterpret_cast<void*>(gClient + gFollowAnchorProfile->blend);
-    if (MH_CreateHook(composition, reinterpret_cast<void*>(follow_composition_hook),
-                      reinterpret_cast<void**>(&gOriginalFollowComposition)) != MH_OK)
-        return false;
-    if (MH_CreateHook(blend, reinterpret_cast<void*>(follow_blend_hook),
-                      reinterpret_cast<void**>(&gOriginalFollowBlend)) != MH_OK) {
-        MH_RemoveHook(composition);
-        return false;
-    }
-    // Both callbacks stay resident with the existing pinned bridge. They only
-    // correct while the current editor/replay/target ownership checks succeed.
-    if (MH_QueueEnableHook(composition) != MH_OK || MH_QueueEnableHook(blend) != MH_OK) {
-        // Nothing has executed yet; cancel queued state before removal.
-        MH_QueueDisableHook(composition);
-        MH_QueueDisableHook(blend);
-        MH_RemoveHook(composition);
-        MH_RemoveHook(blend);
-        return false;
-    }
-    if (MH_ApplyQueued() != MH_OK) {
-        // Applying can fail after one callback was enabled. Never free either
-        // trampoline without quiescence; retained callbacks remain pass-through.
-        MH_DisableHook(composition);
-        MH_DisableHook(blend);
-        return false;
-    }
+    struct Hooks {
+        void* targets[2];
+        void* callbacks[2];
+        void** originals[2];
+        bool create(unsigned i) {
+            return MH_CreateHook(targets[i], callbacks[i], originals[i]) == MH_OK;
+        }
+        bool queue_enable(unsigned i) { return MH_QueueEnableHook(targets[i]) == MH_OK; }
+        void queue_disable(unsigned i) { MH_QueueDisableHook(targets[i]); }
+        void remove(unsigned i) { MH_RemoveHook(targets[i]); }
+        void disable(unsigned i) { MH_DisableHook(targets[i]); }
+        bool apply() { return MH_ApplyQueued() == MH_OK; }
+    } hooks{{reinterpret_cast<void*>(gClient + gFollowAnchorProfile->composition),
+             reinterpret_cast<void*>(gClient + gFollowAnchorProfile->blend)},
+            {reinterpret_cast<void*>(follow_composition_hook),
+             reinterpret_cast<void*>(follow_blend_hook)},
+            {reinterpret_cast<void**>(&gOriginalFollowComposition),
+             reinterpret_cast<void**>(&gOriginalFollowBlend)}};
+    if (!install_optional_pair(hooks))
+        return {CapabilityState::Unavailable, CapabilityReason::HookInstallation};
     gFollowAnchorInstalled = true;
-    return true;
+    return {CapabilityState::Ready, CapabilityReason::None};
 }
 
 static void publish_follow_anchor(unsigned char* memory) noexcept {

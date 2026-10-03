@@ -2,7 +2,7 @@
 import copy
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from dolly.navigation import CameraMotion
 from dolly.path import Keyframe
@@ -88,6 +88,41 @@ class PausedGuiTests(unittest.TestCase):
     def setUp(self):
         self.h = PausedHarness()
         self.app = self.h.app
+
+    def test_console_stop_offers_guidance_only_after_guarded_restore_finishes(self):
+        self.app.controller.stop = Mock(side_effect=lambda **kw:
+            self.app.controller.state.update(health_panel_restore_pending=True))
+        self.app.controller.state['camera_backend'] = 'console'
+        self.app._show_restore_guidance = Mock()
+        self.app._session_operation('Stopping', self.app.controller.stop)
+        self.app._show_restore_guidance.assert_not_called()
+        self.h.finish()
+        self.app.controller.stop.assert_called_once_with(preserve_speed=True)
+        self.app._show_restore_guidance.assert_called_once()
+
+    def test_failed_restore_retry_keeps_guidance_and_success_closes_it(self):
+        dialog = self.app.restore_guidance_dialog = Mock()
+        self.app.controller.state.update(camera_backend='console', health_panel_restore_pending=True)
+        self.app._show_restore_guidance = Mock()
+        self.app._restore_completed()
+        dialog.destroy.assert_not_called()
+        self.app.controller.state['health_panel_restore_pending'] = False
+        self.app._restore_completed()
+        dialog.destroy.assert_called_once()
+        self.assertIsNone(self.app.restore_guidance_dialog)
+
+    def test_open_restore_controls_hands_off_without_selecting_or_resuming(self):
+        order = []
+        self.app.controller.toggle_console = Mock(side_effect=lambda value: order.append(('console', value)))
+        self.app.controller.toggle_game_ui = Mock(side_effect=lambda value: order.append(('game_ui', value)))
+        self.app.controller.game_pid = lambda: 123
+        self.app._open_restore_replay_controls()
+        self.assertEqual(order, [])
+        with patch('dolly.gui.focus_window') as focus:
+            self.h.finish()
+        self.assertEqual(order, [('console', False), ('game_ui', True)])
+        focus.assert_called_once_with(123)
+        self.app.controller.play.assert_not_called()
 
     def test_switch_uses_authored_pose_at_current_tick_without_retiming_project(self):
         before = copy.deepcopy(self.app.project)

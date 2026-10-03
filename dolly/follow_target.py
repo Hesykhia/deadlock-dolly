@@ -8,32 +8,26 @@ from .replay_camera import CLIENT_SHA256
 from .preload import _image_bytes
 from .replay_camera import ReplayCameraMonitor
 
-TARGET_SPANS = ((0x16153e0, 0x79), (0x864ad0, 5),
-                (0x864ae0, 0x5c), (0x836270, 0xc1),
-                (0x815ee0, 0x11), (0x815f00, 0x11))
+from ._runtime_generated import FollowTarget as _profile
+
+TARGET_SPANS = _profile.TARGET_SPANS
 # Exact stock HUD getter chain and its entity predicates. Camera mode alone
 # cannot prove that health/ability children have a non-null player receiver.
-HEALTH_CONTEXT_SPANS = ((0x930ae0, 0x21), (0x16153c0, 0x17),
-                        (0x579c90, 0xfc), (0x815ee0, 0x11),
-                        (0x815f00, 0x11), (0x864b70, 0x89),
-                        (0x1b3a960, 0x129), (0x1b3b000, 0x41),
-                        (0x8148d0, 0x37), (0x4a3430, 5),
-                        (0x709c70, 3), (0x15f1340, 3),
-                        (0x52c8a0, 3), (0x587ea0, 3), (0x84e4f0, 0x17c))
+HEALTH_CONTEXT_SPANS = _profile.HEALTH_CONTEXT_SPANS
 # Reviewed exact-build vtables. Some heroes use the familiar/clone pawn class
 # for their selected target, and the local pawn can be either the observer
 # pawn or a player pawn; both derive from CBasePlayerPawn and expose the same
 # observer-services member used below.
-CONTROLLER_VTABLE = 0x26b05a8
-OBSERVER_PAWN_VTABLE = 0x262d2b8
-PLAYER_PAWN_VTABLE = 0x2639da0
-FAMILIAR_CLONE_PAWN_VTABLE = 0x27e6900
-SERVICES_VTABLES = (0x26b0ff0, 0x2a52388)
-CONTROLLER_FINAL_VTABLE = 0x26b0578
+CONTROLLER_VTABLE = _profile.CONTROLLER_VTABLE
+OBSERVER_PAWN_VTABLE = _profile.OBSERVER_PAWN_VTABLE
+PLAYER_PAWN_VTABLE = _profile.PLAYER_PAWN_VTABLE
+FAMILIAR_CLONE_PAWN_VTABLE = _profile.FAMILIAR_CLONE_PAWN_VTABLE
+SERVICES_VTABLES = _profile.SERVICES_VTABLES
+CONTROLLER_FINAL_VTABLE = _profile.CONTROLLER_FINAL_VTABLE
 # Build 6745: C_BasePlayerPawn::m_pObserverServices schema field and both
 # stock pawn getters (0x815ee0/0x815f00) agree on +0xe98. The old +0xe40
 # field no longer holds observer services. Audit those getters for Follow too.
-OBSERVER_SERVICES_OFFSET = 0xe98
+OBSERVER_SERVICES_OFFSET = _profile.OBSERVER_SERVICES_OFFSET
 
 
 class FollowTargetMonitor(FollowCapabilityMonitor):
@@ -103,7 +97,7 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
                 raise PreloadError(
                     f'Game Follow {label} object type differs from the reviewed build (got {got}).')
 
-        entity_system = pointer(self.base + 0x3425fb8)
+        entity_system = pointer(self.base + _profile.ENTITY_LIST)
         if not entity_system:
             raise PreloadError('Game Follow entity system is unavailable.')
 
@@ -114,39 +108,39 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
             chunk = pointer(entity_system + 8 * (index >> 9))
             if not chunk:
                 raise PreloadError('Game Follow observer identity chunk is unavailable.')
-            identity = chunk + 0x70 * (index & 0x1ff)
-            if uint(identity + 0x10) != handle:
+            identity = chunk + _profile.IDENTITY_STRIDE * (index & 0x1ff)
+            if uint(identity + _profile.IDENTITY_HANDLE) != handle:
                 raise PreloadError('Game Follow observer handle serial differs.')
             instance = pointer(identity)
-            if not instance or pointer(instance + 0x10) != identity:
+            if not instance or pointer(instance + _profile.ENTITY_IDENTITY) != identity:
                 raise PreloadError('Game Follow observer identity backpointer differs.')
             return instance
 
-        controller = pointer(self.base + 0x3bd0eb0)
+        controller = pointer(self.base + _profile.CONTROLLER)
         require_type(controller, (CONTROLLER_VTABLE,), 'observer controller')
-        pawn = resolve(uint(controller + 0x6bc))
+        pawn = resolve(uint(controller + _profile.CONTROLLER_PAWN))
         require_type(pawn, (OBSERVER_PAWN_VTABLE, PLAYER_PAWN_VTABLE), 'observer pawn')
         observer_pawn = pointer(pawn) == self.base + OBSERVER_PAWN_VTABLE
         if _require_health_context and not observer_pawn:
             raise PreloadError(
                 'Health HUD requires the reviewed spectator pawn; reveal deferred.')
         if _require_health_context:
-            if (read(controller + 0x3ef, 1)[0] in (2, 3)
-                    or read(pawn + 0x3ef, 1)[0] in (2, 3)
-                    or pointer(self.base + OBSERVER_PAWN_VTABLE + 0x500) != self.base + 0x52c8a0):
+            if (read(controller + _profile.NETWORK_STATE, 1)[0] in (2, 3)
+                    or read(pawn + _profile.NETWORK_STATE, 1)[0] in (2, 3)
+                    or pointer(self.base + OBSERVER_PAWN_VTABLE + _profile.OBSERVER_PREDICATE_SLOT) != self.base + _profile.OBSERVER_PREDICATE):
                 raise PreloadError('Health HUD requires the reviewed spectator player branch.')
         services = pointer(pawn + OBSERVER_SERVICES_OFFSET)
         require_type(services, SERVICES_VTABLES, 'observer services')
         vtable = pointer(services)
-        if (pointer(vtable + 0xf0) != self.base + 0x864ad0
-                or pointer(vtable + 0x100) != self.base + 0x864ae0):
+        if (pointer(vtable + _profile.OBSERVER_MODE_SLOT) != self.base + _profile.GET_OBSERVER_MODE
+                or pointer(vtable + _profile.OBSERVER_TARGET_SLOT) != self.base + _profile.GET_OBSERVER_TARGET):
             raise PreloadError('Game Follow observer getters differ from the reviewed build.')
-        mode = read(services + 0x48, 1)[0]
+        mode = read(services + _profile.OBSERVER_MODE, 1)[0]
         if not _selection_only and (mode not in (0, 1, 2, 3) or (require_chase and mode not in (2, 3))):
             error = PreloadError(f'Game Follow requires a selected player chase view (observer mode {mode}).')
             error.observer_mode = mode
             raise error
-        handle = uint(services + 0x4c)
+        handle = uint(services + _profile.OBSERVER_TARGET)
         if _selection_only:
             pass  # Previous target may be absent/recycled; it will not be used.
         elif handle not in (0xffffffff, 0xfffffffe):
@@ -158,15 +152,15 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
                 raise PreloadError(
                     'Health HUD requires the reviewed player pawn; reveal deferred.')
             if _require_health_context:
-                if (pointer(self.base + PLAYER_PAWN_VTABLE + 0x4e0) != self.base + 0x15f1340
-                        or pointer(self.base + PLAYER_PAWN_VTABLE + 0xad8) != self.base + 0x587ea0):
+                if (pointer(self.base + PLAYER_PAWN_VTABLE + _profile.PLAYER_PREDICATE_SLOT) != self.base + _profile.PLAYER_PREDICATE
+                        or pointer(self.base + PLAYER_PAWN_VTABLE + _profile.PLAYER_DATA_PREDICATE_SLOT) != self.base + _profile.PLAYER_DATA_PREDICATE):
                     raise PreloadError('Health HUD player predicates differ from the reviewed build.')
-                target_controller = resolve(uint(target + 0x51c))
+                target_controller = resolve(uint(target + _profile.PAWN_CONTROLLER))
                 require_type(target_controller, (CONTROLLER_VTABLE,), 'selected player controller')
-                if (pointer(self.base + CONTROLLER_VTABLE + 0x4e8) != self.base + 0x709c70
+                if (pointer(self.base + CONTROLLER_VTABLE + _profile.CONTROLLER_PREDICATE_SLOT) != self.base + _profile.CONTROLLER_PREDICATE
                         # Final network-bound type, not the temporary base
                         # vtable installed earlier inside the constructor.
-                        or pointer(target_controller + 0x908) != self.base + CONTROLLER_FINAL_VTABLE):
+                        or pointer(target_controller + _profile.CONTROLLER_FINAL_DATA) != self.base + CONTROLLER_FINAL_VTABLE):
                     raise PreloadError('Health HUD player data receiver differs from the reviewed build.')
         elif require_chase or _require_health_context:
             raise PreloadError('Game Follow observer target is unavailable.')

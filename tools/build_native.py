@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dolly import __version__
 from release_files import sha256
+from generate_compatibility import check_generated
 
 BRIDGE_ABI = 4
 DLL_RELATIVE = Path("bin/win64/DollyNative.dll")
@@ -115,6 +116,8 @@ def build_native(root: Path = ROOT) -> dict:
             or platform.machine().lower() not in {"amd64", "x86_64"}):
         raise RuntimeError("Build DollyNative.dll on Windows x64 using Visual Studio 2022")
     root = Path(root)
+    # Refuse stale/unreviewed generated data before deleting the last good DLL.
+    check_generated(root)
     native = root / "native"
     build = root / "build" / "native-msvc"
     checks = root / "build" / "checks"

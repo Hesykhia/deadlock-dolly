@@ -77,8 +77,7 @@ CITADEL_DOF_OFFSET = DOF_OFFSET + DOF_CONFIG.size
 CITADEL_DOF = struct.Struct("<8s4I2d")
 ATTACH_OFFSET = CITADEL_DOF_OFFSET + CITADEL_DOF.size
 ATTACH_CONFIG = struct.Struct("<8s4IQ8I6I7d3IQ64s")
-ATTACH_FIELDS = ("scene_node", "owner", "player_origin", "player_angles",
-                 "eye_offset", "eye_angles", "scene_child", "scene_sibling")
+from ._runtime_generated import ATTACH_WIRE_FIELDS as ATTACH_FIELDS
 ATTACH_NO_TARGET = 0xFFFFFFFF
 ATTACH_OFFSET_LIMIT = 10000.0
 ROSTER_OFFSET = 2 * 1024 * 1024 + 4096

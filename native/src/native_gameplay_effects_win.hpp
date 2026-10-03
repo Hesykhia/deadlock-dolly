@@ -153,7 +153,7 @@ constexpr GameplayEffectsProfile kGameplayEffectsProfiles[] = {
       0x00},
      {0xe8, 0xe7, 0xec, 0xf9, 0xff}},
     // Build 6745: pure relocation of the 6742 controller/render loop.
-    {"948260612c9b7243964e4a0d5f0f6252ae846ceaa6e8c0e95b83bd5eba4caf60",
+    {dolly::reviewed::AttachRuntime::CLIENT_SHA256,
      0x4150000,
      0x31a15a0,
      0x8629a0,
@@ -235,7 +235,7 @@ __declspec(noinline) static float __fastcall gameplay_effect_weight_hook(void* e
     return gameplay_effect_weight(effect, caller);
 }
 
-static bool install_gameplay_effect_filter(HMODULE client) {
+static CapabilityResult install_gameplay_effect_filter(HMODULE client) {
     // Optional for older reviewed camera profiles. Never use these addresses
     // for a signature-only camera match or a different client fingerprint.
     const GameplayEffectsProfile* selected = nullptr;
@@ -246,7 +246,7 @@ static bool install_gameplay_effect_filter(HMODULE client) {
         }
     }
     if (!selected)
-        return true;
+        return {CapabilityState::NotRequired, CapabilityReason::None};
     unsigned char weight[sizeof(kGameplayEffectWeightBytes)]{};
     unsigned char caller[sizeof(kGameplayEffectCallBytes)]{};
     unsigned char option[sizeof(kGameplayRenderOptionBytes)]{};
@@ -260,14 +260,18 @@ static bool install_gameplay_effect_filter(HMODULE client) {
         !read_memory(gClient + selected->screen_caller - sizeof(screen_call), screen_call,
                      sizeof(screen_call)) ||
         std::memcmp(screen_call, selected->screen_call.data(), sizeof(screen_call)))
-        return false;
+        return {CapabilityState::Unavailable, CapabilityReason::SignatureMismatch};
     gGameplayEffectsProfile = selected;
     auto target = reinterpret_cast<void*>(gClient + selected->weight);
-    return MH_CreateHook(target, reinterpret_cast<void*>(gameplay_effect_weight_hook),
-                         reinterpret_cast<void**>(&gOriginalGameplayEffectWeight)) == MH_OK &&
-           MH_EnableHook(target) == MH_OK &&
-           MH_CreateHook(reinterpret_cast<void*>(gClient + selected->option),
-                         reinterpret_cast<void*>(gameplay_render_option_hook),
-                         reinterpret_cast<void**>(&gOriginalGameplayRenderOption)) == MH_OK &&
-           MH_EnableHook(reinterpret_cast<void*>(gClient + selected->option)) == MH_OK;
+    const bool installed =
+        MH_CreateHook(target, reinterpret_cast<void*>(gameplay_effect_weight_hook),
+                      reinterpret_cast<void**>(&gOriginalGameplayEffectWeight)) == MH_OK &&
+        MH_EnableHook(target) == MH_OK &&
+        MH_CreateHook(reinterpret_cast<void*>(gClient + selected->option),
+                      reinterpret_cast<void*>(gameplay_render_option_hook),
+                      reinterpret_cast<void**>(&gOriginalGameplayRenderOption)) == MH_OK &&
+        MH_EnableHook(reinterpret_cast<void*>(gClient + selected->option)) == MH_OK;
+    return installed
+               ? CapabilityResult{CapabilityState::Ready, CapabilityReason::None}
+               : CapabilityResult{CapabilityState::Unavailable, CapabilityReason::HookInstallation};
 }

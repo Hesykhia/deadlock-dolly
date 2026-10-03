@@ -11,15 +11,15 @@ import struct
 
 from .preload import _Memory, _image_bytes, PreloadError
 
-CLIENT_SHA256 = '948260612c9b7243964e4a0d5f0f6252ae846ceaa6e8c0e95b83bd5eba4caf60'
-MANAGER = 0x36384b0
-MANAGER_VTABLE = 0x2649aa0
-GAMEPLAY_CAMERA_VTABLE = 0x26514f8
-RULES_GLOBAL = 0x3c17ae0
-RULES_VTABLE = 0x26859b0
-CODE_SPANS = ((0x5d1c60, 0x2ad), (0x5b4260, 0xb5), (0x1808640, 0x105),
-              (0x181d680, 5), (0x18217a0, 6), (0x1b0a3a0, 0x66a),
-              (0x18ac600, 0x58))
+from ._runtime_generated import ReplayCamera as _profile
+
+CLIENT_SHA256 = _profile.CLIENT_SHA256
+MANAGER = _profile.MANAGER
+MANAGER_VTABLE = _profile.MANAGER_VTABLE
+GAMEPLAY_CAMERA_VTABLE = _profile.GAMEPLAY_CAMERA_VTABLE
+RULES_GLOBAL = _profile.RULES_GLOBAL
+RULES_VTABLE = _profile.RULES_VTABLE
+CODE_SPANS = _profile.CODE_SPANS
 
 
 class ReplayCameraMonitor:
@@ -68,17 +68,17 @@ class ReplayCameraMonitor:
             if not rules:
                 return unavailable
             rules_type = m.pointer(rules)
-            raw_state = m.read(rules+0x74, 4)
-            before = m.read(self.base+MANAGER, 0x48)
-            current, previous = struct.unpack_from('<QQ', before, 0x28)
+            raw_state = m.read(rules+_profile.RULES_STATE, 4)
+            before = m.read(self.base+MANAGER, _profile.MANAGER_SIZE)
+            current, previous = struct.unpack_from('<QQ', before, _profile.CURRENT_CAMERA)
             if not current:
                 return unavailable
             current_type = m.pointer(current)
             previous_type = m.pointer(previous) if previous else None
-            if (raw_state != m.read(rules+0x74, 4)
+            if (raw_state != m.read(rules+_profile.RULES_STATE, 4)
                     or m.pointer(self.base+RULES_GLOBAL) != rules
                     or m.pointer(rules) != rules_type
-                    or m.read(self.base+MANAGER, 0x48) != before
+                    or m.read(self.base+MANAGER, _profile.MANAGER_SIZE) != before
                     or m.pointer(current) != current_type
                     or (previous and m.pointer(previous) != previous_type)):
                 return unavailable
@@ -88,8 +88,8 @@ class ReplayCameraMonitor:
                 or struct.unpack_from('<Q', before)[0] != self.base+MANAGER_VTABLE):
             raise PreloadError('Replay camera object type differs from the reviewed build.')
         state = struct.unpack('<i', raw_state)[0]
-        blend = before[0x38]
-        weight = struct.unpack_from('<f', before, 0x44)[0]
+        blend = before[_profile.BLENDING]
+        weight = struct.unpack_from('<f', before, _profile.BLEND_WEIGHT)[0]
         if (not 0 <= state <= 11 or blend not in (0, 1)
                 or not math.isfinite(weight) or not 0 <= weight <= 1
                 or (blend and not previous)):

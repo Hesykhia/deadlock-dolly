@@ -25,6 +25,36 @@ class FollowControllerTests(unittest.TestCase):
         self.assertIn('spec_target 2', self.console.events)
         target.close.assert_called_once()
 
+    def test_rejected_native_follow_never_mutates_target_or_rig(self):
+        player, _ = self.select_fixture()
+        self.bridge.require_capability = Mock(side_effect=RuntimeError('Game Follow is unavailable'))
+        for operation in (lambda: self.c.start_game_follow(FollowSettings()),
+                          lambda: self.c.start_selected_game_follow(FollowSettings(), player)):
+            with self.subTest(operation=operation), \
+                    patch('dolly.follow_target.FollowTargetMonitor') as target, \
+                    patch.object(self.c, 'toggle_game_ui') as handoff:
+                before = list(self.console.events)
+                with self.assertRaisesRegex(RuntimeError, 'Follow is unavailable'):
+                    operation()
+                # Quiet-session/identity checks may query these commands; no
+                # target, rig, HUD or camera mutation may reach the console.
+                self.assertTrue(all(event in ('demo_goto', 'demo_info')
+                                    for event in self.console.events[len(before):]))
+                self.assertEqual(self.console.values, self.originals)
+                self.assertFalse(self.c._follow_active)
+                target.assert_not_called()
+                handoff.assert_not_called()
+        self.bridge.require_capability.assert_called_with('follow')
+
+    def test_follow_restore_remains_available_after_capability_loss(self):
+        self.c.start_game_follow(FollowSettings(distance=250))
+        self.bridge.require_capability = Mock(side_effect=RuntimeError('Game Follow is unavailable'))
+        self.c.stop_game_follow()
+        self.assertEqual(self.console.values[ENABLED], self.originals[ENABLED])
+        for name in BOUNDS:
+            self.assertEqual(self.console.values[PREFIX + name], self.originals[PREFIX + name])
+        self.bridge.require_capability.assert_not_called()
+
     def test_stale_player_refused_before_command_or_monitor(self):
         player, _ = self.select_fixture()
         self.bridge.editor_roster.return_value = {'players': []}

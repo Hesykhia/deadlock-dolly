@@ -585,18 +585,20 @@ def resolve_game_dir(path: Path) -> Path:
     raise ProfileError(f"could not find {MODULE_RELATIVES['client']} under {path}")
 
 
-def collect_profile_entries(profiles_dir: Path, image: Image) -> list[tuple[dict, dict | None]]:
+def collect_profile_entries(profiles_dir: Path, image: Image | None, *, profile_names=None) -> list[tuple[dict, dict | None]]:
     """Pair every reviewed profile with resolved symbols when its binary is installed."""
     entries: list[tuple[dict, dict | None]] = []
     seen: dict[str, int] = {}
-    for path in sorted(profiles_dir.glob("*.json")):
+    paths = (profiles_dir.glob("*.json") if profile_names is None
+             else (profiles_dir / name for name in profile_names))
+    for path in sorted(paths):
         if path.name == "manifest.json":
             continue
         profile = json.loads(path.read_text(encoding="utf-8"))
         client = profile.get("client")
         if not isinstance(client, dict) or "client_sha256" not in client:
             continue
-        if client["client_sha256"] == image.sha256:
+        if image is not None and client["client_sha256"] == image.sha256:
             resolved = {
                 "setup_rva": int(client["main_view_setup_rva"], 16),
                 "caller_rva": int(client["view_setup_abi"]["caller_return_rva"], 16),

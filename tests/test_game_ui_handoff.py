@@ -222,9 +222,11 @@ class GameUiHandoffTests(unittest.TestCase):
             # The explicit handoff restores the original HUD/replay/cursor
             # values, so only the unverified health panel stays pending.
             self.assertEqual(self.controller._game_ui_restore, {name: 0})
+            self.assertTrue(self.controller.status()['health_panel_restore_pending'])
         self.controller.stop()
         self.assertEqual(self.console.values[name], 0)
         self.assertFalse(self.controller._game_ui_restore)
+        self.assertFalse(self.controller.status()['health_panel_restore_pending'])
 
     def test_native_owner_cannot_expose_panel_even_with_show_hud_enabled(self):
         name = self.health_panel()

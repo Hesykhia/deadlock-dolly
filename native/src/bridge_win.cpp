@@ -18,6 +18,9 @@
 #include <vector>
 #include "MinHook.h"
 #include "dolly_follow_anchor.hpp"
+#include "dolly_capabilities.hpp"
+#include "dolly_runtime_generated.hpp"
+#include "dolly_optional_hooks.hpp"
 #include "dolly_path.hpp"
 #include "dolly_effects.hpp"
 #include "dolly_protocol.hpp"
@@ -295,7 +298,13 @@ static void write_status(Status status, bool may_wait = false) noexcept {
     InterlockedExchange(sequence, even + 2);
     gStatusLock.clear(std::memory_order_release);
 }
+#include "native_feature_status_win.hpp"
+
 static void startup_status(State state, unsigned error, const char* message) noexcept {
+    if (state == State::Unsupported || state == State::Fault)
+        gCapabilities.at(Capability::CameraCore) = {CapabilityState::Unavailable,
+                                                    CapabilityReason::CoreAdmission};
+    publish_native_capabilities();
     Status status{};
     status.state = std::uint32_t(state);
     status.error = error;
@@ -1451,17 +1460,20 @@ static DWORD WINAPI worker(void*) {
             startup_status(State::Fault, 23, "Could not prepare the native view hook.");
             return 0;
         }
-        // Collect shader metadata during hideout/replay loading, not only after
-        if (!install_follow_anchor(client)) {
-            startup_status(
-                State::Unsupported, 48,
-                "The Follow camera blend could not be verified; no camera ownership was enabled.");
-            return 0;
+        // Follow owns its reviewed correction independently of the core camera.
+        // Failed/partially installed callbacks remain resident pass-through;
+        // the editor must refuse Follow before any rig/target writes.
+        try {
+            gCapabilities.at(Capability::FollowAnchor) = install_follow_anchor(client);
+        } catch (...) {
+            gCapabilities.at(Capability::FollowAnchor) = {
+                CapabilityState::Unavailable, CapabilityReason::InitializationException};
         }
         // Collect shader metadata during hideout/replay loading, not only after
         // the first camera command (when character shaders may already exist).
         // Keep disk hashing off the render callback and retain the exact gate.
-        if (!install_gameplay_effect_filter(client)) {
+        gCapabilities.at(Capability::CameraEffects) = install_gameplay_effect_filter(client);
+        if (!usable(gCapabilities.at(Capability::CameraEffects))) {
             startup_status(
                 State::Unsupported, 47,
                 "The selected-player effect filter could not be verified; no camera ownership was enabled.");
@@ -1494,6 +1506,8 @@ static DWORD WINAPI worker(void*) {
             return 0;
         }
         gHookInstalled = true;
+        gCapabilities.at(Capability::CameraCore) = {CapabilityState::Ready, CapabilityReason::None};
+        publish_native_capabilities();
         // Hook discovery and installation happen on the worker, never in DllMain
         // or the view callback. The main camera remains usable if overlay fails.
         editor_install_input_hooks();

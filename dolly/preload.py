@@ -24,24 +24,21 @@ class _ReviewedBuildMismatch(PreloadError):
     """A successful read disagreed with the reviewed build; never retried away."""
 
 
-CLIENT_SHA256 = "948260612c9b7243964e4a0d5f0f6252ae846ceaa6e8c0e95b83bd5eba4caf60"
-RESOURCE_SHA256 = "86d09bc988ab3609d43473c3fdc07246bd8958e7f8fc50af4bbba4ffe05a3da0"
-MANAGER = 0x3184890
-MANAGER_VTABLE = 0x2650190
-RESOURCE_GLOBAL = 0x3dd6030
-RESOURCE_VTABLE = 0x6bc58
-RESOURCE_QUERY = 0x1c860
-INTRO_GLOBAL = 0x3c347f8
-INTRO_VTABLE = 0x2ae28a8
+from ._runtime_generated import Preload as _profile
+
+CLIENT_SHA256 = _profile.CLIENT_SHA256
+RESOURCE_SHA256 = _profile.RESOURCE_SHA256
+MANAGER = _profile.MANAGER
+MANAGER_VTABLE = _profile.MANAGER_VTABLE
+RESOURCE_GLOBAL = _profile.RESOURCE_GLOBAL
+RESOURCE_VTABLE = _profile.RESOURCE_VTABLE
+RESOURCE_QUERY = _profile.RESOURCE_QUERY
+INTRO_GLOBAL = _profile.INTRO_GLOBAL
+INTRO_VTABLE = _profile.INTRO_VTABLE
 
 # Build 6745: status observes two lifecycle flags and consumes the finished
 # job handle itself. Check the producer/callback as well as the UI predicate.
-CLIENT_CODE_SPANS = (
-    (0x5ef9d0, 8), (0x5f8c70, 0x7e), (0x1ce4290, 0x10a),
-    (0x5e0bfe, 0x33), (0x5fc010, 10), (0x5d5280, 0x4b),
-    (0x1aad4e5, 0x65), (0x1acabc0, 0xe6),
-    (0x1af0eee, 0x1d1), (0x1ad95b0, 0x42), (0x1ab63c0, 0x22a),
-)
+CLIENT_CODE_SPANS = _profile.CLIENT_CODE_SPANS
 
 
 def _post_intro_escape(session):
@@ -256,17 +253,17 @@ class PreloadMonitor:
 
     def _sample(self):
         memory = self.memory
-        raw = memory.read(self.base+MANAGER, 64)
-        if raw != memory.read(self.base+MANAGER, 64):
+        raw = memory.read(self.base+MANAGER, _profile.MANAGER_SIZE)
+        if raw != memory.read(self.base+MANAGER, _profile.MANAGER_SIZE):
             return {'coherent': False}
         if struct.unpack_from('<Q', raw)[0] != self.base+MANAGER_VTABLE:
             raise _ReviewedBuildMismatch('Preload object type differs from the reviewed build.')
-        completed, total = struct.unpack_from('<ii', raw, 0x24)
+        completed, total = struct.unpack_from('<ii', raw, _profile.COMPLETED)
         if not 0 <= completed <= 10000000 or not 0 <= total <= 10000000:
             raise _ReviewedBuildMismatch('Preload counters are outside their reviewed range.')
-        resource = struct.unpack_from('<Q', raw, 0x30)[0]
-        job = struct.unpack_from('<i', raw, 0x38)[0]
-        scheduled, job_complete = raw[0x3c:0x3e]
+        resource = struct.unpack_from('<Q', raw, _profile.RESOURCE)[0]
+        job = struct.unpack_from('<i', raw, _profile.JOB)[0]
+        scheduled, job_complete = raw[_profile.LIFECYCLE_BEGIN:_profile.LIFECYCLE_END]
         if scheduled not in (0, 1) or job_complete not in (0, 1):
             raise _ReviewedBuildMismatch('Preload lifecycle flags differ from the reviewed build.')
         # The resource-system global is populated partway through the hideout
@@ -281,26 +278,26 @@ class PreloadMonitor:
         except PreloadError:
             return {'coherent': False}
         if (vtable != self.resource_base+RESOURCE_VTABLE
-                or memory.pointer(vtable+0xc0) != self.resource_base+RESOURCE_QUERY):
+                or memory.pointer(vtable+_profile.RESOURCE_QUERY_SLOT) != self.resource_base+RESOURCE_QUERY):
             raise _ReviewedBuildMismatch('Resource completion query differs from the reviewed build.')
-        resource_done = memory.read(resource+0x44, 1)[0] if resource else 1
-        if resource_done not in (0, 1) or raw != memory.read(self.base+MANAGER, 64):
+        resource_done = memory.read(resource+_profile.RESOURCE_DONE, 1)[0] if resource else 1
+        if resource_done not in (0, 1) or raw != memory.read(self.base+MANAGER, _profile.MANAGER_SIZE):
             return {'coherent': False}
         intro_phase = None
         if not resource:
             intro = memory.pointer(self.base+INTRO_GLOBAL)
             if intro:
                 try:
-                    state = memory.read(intro, 0x84)
+                    state = memory.read(intro, _profile.INTRO_SIZE)
                 except PreloadError:
                     return {'coherent': False}
                 if struct.unpack_from('<Q', state)[0] != self.base+INTRO_VTABLE:
                     raise _ReviewedBuildMismatch('Intro object type differs from the reviewed build.')
-                intro_phase = struct.unpack_from('<i', state, 0x80)[0]
+                intro_phase = struct.unpack_from('<i', state, _profile.INTRO_PHASE)[0]
                 if intro_phase not in (0, 1, 2, 3):
                     raise _ReviewedBuildMismatch('Unrecognized Deadlock intro state.')
                 if (memory.pointer(self.base+INTRO_GLOBAL) != intro
-                        or memory.read(intro+0x80, 4) != state[0x80:0x84]):
+                        or memory.read(intro+_profile.INTRO_PHASE, 4) != state[_profile.INTRO_PHASE:_profile.INTRO_SIZE]):
                     return {'coherent': False}
         return {'coherent': True, 'started': bool(resource), 'completed': completed, 'total': total,
                 'intro_phase': intro_phase,

@@ -331,6 +331,7 @@ class Controller:
         state["native_holding"] = self._native_active and not state.get("playing", False)
         state["native_editor_active"] = self._native_manual
         state["game_ui_visible"] = self._game_ui_visible
+        state["health_panel_restore_pending"] = self._game_ui_restore.get(OWN_HEALTH_HUD) == 0
         state["game_follow_active"] = self._follow_active
         state["game_running"] = self._alive()
         if self._session and not self._alive():
@@ -1232,6 +1233,9 @@ class Controller:
             self._require_quiet_session('selecting a Game Follow hero')
             self._require_demo(require_tick=False)
             bridge = self._native_bridge()
+            require_capability = getattr(bridge, 'require_capability', None)
+            if callable(require_capability):
+                require_capability('follow')
             if self._recorder_active() or not bridge.status().get('paused'):
                 raise RuntimeError('Pause the replay before selecting a Follow hero.')
             def current_player():
@@ -1307,6 +1311,9 @@ class Controller:
             settings.values()
             self._require_quiet_session("previewing Game Follow")
             bridge = self._native_bridge()
+            require_capability = getattr(bridge, 'require_capability', None)
+            if callable(require_capability):
+                require_capability('follow')
             if self._recorder_active() or bridge is None or not bridge.status().get("paused"):
                 raise RuntimeError("Pause the selected replay and finish recording before Game Follow.")
             if ((not self._game_ui_visible and not self._follow_active)
@@ -2273,7 +2280,10 @@ class Controller:
             self._check_position_cancelled()
             if int(self._require_demo()["tick"]) != tick:
                 raise RuntimeError("The replay moved before the camera check. Pause it and start Paused camera again.")
-            self._position_direct_frame(frame, tick, refresh=True)
+            # A responsive paused camera needs no replay reconstruction. Some
+            # builds cannot land the adjacent-tick round trip reliably. Keep
+            # that bounded recovery for measured camera failures only.
+            self._position_direct_frame(frame, tick)
             if int(self._require_demo()["tick"]) != tick:
                 raise RuntimeError("The replay moved during the camera check. Pause it and start Paused camera again.")
             self._check_position_cancelled()
@@ -2946,7 +2956,8 @@ class Controller:
                     self._game_ui_restore.pop(name, None)
             self._game_ui_visible = False
             if health_pending:
-                return 'Game HUD restoration is pending; select a hero in the game view, then use Stop / restore.'
+                return ('Health panel restoration is pending. Open replay controls, select a hero '
+                        'and wait for its camera, then return to Dolly and use Stop / restore.')
         except (RuntimeError, ValueError, OSError) as exc:
             LOG.warning("Replay UI restoration remains pending: %s", exc)
             return "Replay UI settings could not be restored; reconnect and use Stop / restore. " + str(exc)
@@ -3478,7 +3489,7 @@ class Controller:
             frame = project.evaluate(shot_time)
             self._request("demo_pause")
             tick = self._require_demo(require_tick=False).get("tick")
-            self._position_direct_frame(frame, tick, refresh=tick is not None)
+            self._position_direct_frame(frame, tick)
             self._message("Camera position verified and lens settings applied. Replay paused at this view.", time=float(shot_time))
 
     @staticmethod

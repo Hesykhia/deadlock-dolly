@@ -21,6 +21,21 @@ class Value:
 
 
 class EditorSessionTests(unittest.TestCase):
+    def test_follow_capability_recovery_republishes_cached_controls(self):
+        from dolly.replay_camera import CLIENT_SHA256
+        self.controller.status.return_value['native_editor_active'] = True
+        self.controller._startup_evidence = {'replay_camera_identity': {'client_sha256': CLIENT_SHA256}}
+        self.controller._follow_transaction = None
+        self.controller._follow_mode_original = None
+        self.bridge.capability_available.return_value = False
+        session.configure(self.app)
+        self.assertFalse(self.bridge.configure_editor_follow.call_args.kwargs['available'])
+        self.bridge.configure_editor_follow.reset_mock()
+        self.bridge.capability_available.return_value = True
+        session.configure(self.app)
+        self.assertTrue(self.bridge.configure_editor_follow.call_args.kwargs['available'])
+        self.bridge.configure_editor_follow.assert_called_once()
+
     def test_follow_attach_preview_waits_for_successful_camera_handoff(self):
         from unittest.mock import patch
         self.controller._follow_active = True
