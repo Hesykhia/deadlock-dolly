@@ -34,6 +34,11 @@ _WS_CHILD = 0x40000000
 _WS_VISIBLE = 0x10000000
 _WS_TABSTOP = 0x00010000
 _WS_EX_DLGMODALFRAME = 0x00000001
+_WS_EX_TOPMOST = 0x00000008
+_HWND_TOPMOST = -1
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
+_SWP_SHOWWINDOW = 0x0040
 _SS_LEFT = 0x00000000
 _SS_ICON = 0x00000003
 _SS_NOPREFIX = 0x00000080
@@ -257,6 +262,11 @@ def _run_native_dialog(owner, title: str, message: str, details: str) -> bool:
     user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
     user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     user32.SetFocus.argtypes = [wintypes.HWND]
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
+    user32.BringWindowToTop.argtypes = [wintypes.HWND]
+    user32.BringWindowToTop.restype = wintypes.BOOL
     user32.IsWindow.argtypes = [wintypes.HWND]
     user32.IsDialogMessageW.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.MSG)]
     user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
@@ -302,7 +312,7 @@ def _run_native_dialog(owner, title: str, message: str, details: str) -> bool:
     client_height = pad + content_height + pad + button_height + bottom_margin
 
     style = _WS_POPUP | _WS_CAPTION | _WS_SYSMENU
-    exstyle = _WS_EX_DLGMODALFRAME
+    exstyle = _WS_EX_DLGMODALFRAME | _WS_EX_TOPMOST
     window_rect = wintypes.RECT(0, 0, client_width, client_height)
     user32.AdjustWindowRectEx(ctypes.byref(window_rect), style, False, exstyle)
     window_width = window_rect.right - window_rect.left
@@ -387,6 +397,12 @@ def _run_native_dialog(owner, title: str, message: str, details: str) -> bool:
         user32.EnableWindow(owner, False)
     try:
         user32.ShowWindow(window, _SW_SHOW)
+        # Keep the error above the game window. A modal dialog centered on a
+        # Dolly window that sits behind a fullscreen game must still be visible,
+        # or the user cannot read it and the disabled owner accepts no clicks.
+        user32.SetWindowPos(window, wintypes.HWND(_HWND_TOPMOST), 0, 0, 0, 0,
+                            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW)
+        user32.BringWindowToTop(window)
         _play_error_sound()
         user32.SetForegroundWindow(window)
         user32.SetFocus(ok_button)
