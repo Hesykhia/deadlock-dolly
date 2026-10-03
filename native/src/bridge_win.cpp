@@ -60,20 +60,9 @@ constexpr char kBuild6728EngineHash[] =
     "8b846736ddbd833fcc85c943dccc7b7fe3cd13eeef772d1ca375c2961f51a53e";
 constexpr char kBuild6739EngineHash[] =
     "0782caed3e1c476389fe2a27a0713d47567a5237f706b151ce7cc34a05dbadc3";
-constexpr char kScene6726Hash[] =
-    "026a6e953e6bf1f2fdbcf8388ba5f6868d830ad54216dcf4518df136be50fc5a";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
 constexpr char kUnlockerHash[] = "f7550389cf079c29fcda5f82ca73f4282756ff791764a325adffd593b363ea30";
-// Reviewed scenesystem.dll for the player layer capture. Any other build keeps
-// the capture disabled instead of patching unverified producer code; re-review
-// this hash in the same turn as a game update.
-constexpr char kPlayerCaptureScenesystemHash[] =
-    "e480a7f28ae073dd4a83833bfee8db44bfff22f097147f2f697a109b2ea2de4b";
-constexpr char kSeptemberScenesystemHash[] =
-    "3ece2e69f0f779e9bb05f1bd52b524df7adc5da262ddf9766ea71d1b01ce248d";
-constexpr char kScene6739Hash[] =
-    "eb8082bbb3b1895ae37c90181192e0f4b5787fe8fa2986114dd6173fdc234849";
 constexpr char kSoundSystemHash[] =
     "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr char kSeptemberSoundSystemHash[] =
@@ -369,17 +358,21 @@ static bool read_config(std::wstring& mapping, DWORD& editor_pid) {
     editor_pid = DWORD(pid);
     return true;
 }
-static bool module_matches(HMODULE module, const char* expected, std::uint32_t image_size) {
-    if (!module || hash_file(module_path(module)) != expected)
-        return false;
+static std::uint32_t module_image_size(HMODULE module) {
+    if (!module)
+        return 0;
     auto base = reinterpret_cast<std::uintptr_t>(module);
     IMAGE_DOS_HEADER dos{};
     IMAGE_NT_HEADERS64 nt{};
-    return read_value(base, dos) && dos.e_magic == IMAGE_DOS_SIGNATURE && dos.e_lfanew > 0 &&
-           dos.e_lfanew < 4096 && read_value(base + dos.e_lfanew, nt) &&
-           nt.Signature == IMAGE_NT_SIGNATURE &&
-           nt.FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
-           nt.OptionalHeader.SizeOfImage == image_size;
+    if (!read_value(base, dos) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0 ||
+        dos.e_lfanew >= 4096 || !read_value(base + dos.e_lfanew, nt) ||
+        nt.Signature != IMAGE_NT_SIGNATURE || nt.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
+        return 0;
+    return nt.OptionalHeader.SizeOfImage;
+}
+static bool module_matches(HMODULE module, const char* expected, std::uint32_t image_size) {
+    return module && hash_file(module_path(module)) == expected &&
+           module_image_size(module) == image_size;
 }
 #include "dolly_compat_runtime.hpp"
 #include "native_camera_view.hpp"
@@ -1480,25 +1473,17 @@ static DWORD WINAPI worker(void*) {
             return 0;
         }
         const auto scene_module = GetModuleHandleW(L"scenesystem.dll");
-        const bool scene6726 = module_matches(scene_module, kScene6726Hash, 0x9c6000);
-        const bool september_scene =
-            module_matches(scene_module, kSeptemberScenesystemHash, 0x9c6000);
-        const bool scene6739 = module_matches(scene_module, kScene6739Hash, 0x9c6000);
-        // Scene records reference renderer-owned wrappers; require the reviewed
-        // pair before selecting the wrapper member (legacy +0x60, build 6712 +0x70).
+        // Select the entire reviewed layout/ABI from the exact scene/renderer
+        // pair. A new module cannot inherit an older producer through booleans.
         const auto renderer_module = GetModuleHandleW(L"rendersystemdx11.dll");
-        const auto& renderer_layout = kRendererDiagnosticLayouts[scene6739         ? 3
-                                                                 : scene6726       ? 2
-                                                                 : september_scene ? 1
-                                                                                   : 0];
-        const bool scene_renderer_pair =
-            module_matches(renderer_module, renderer_layout.hash, renderer_layout.image_size);
+        const auto scene_hash = scene_module ? hash_file(module_path(scene_module)) : std::string{};
+        const auto renderer_hash =
+            renderer_module ? hash_file(module_path(renderer_module)) : std::string{};
+        const auto* scene_profile = player_capture::reviewed_scene_profile(
+            scene_hash.c_str(), module_image_size(scene_module), renderer_hash.c_str(),
+            module_image_size(renderer_module));
         player_capture::configure(reinterpret_cast<std::uintptr_t>(scene_module),
-                                  scene_renderer_pair && (scene6726 || september_scene ||
-                                                          (scene_module != nullptr &&
-                                                           hash_file(module_path(scene_module)) ==
-                                                               kPlayerCaptureScenesystemHash)),
-                                  september_scene || scene6726, scene6726);
+                                  scene_profile);
         gHeartbeatTime = now_seconds();
         HeartbeatMonitor heartbeat_monitor(gMemory, gEditor);
         if (MH_EnableHook(reinterpret_cast<void*>(gClient + gCompat.setup)) != MH_OK) {

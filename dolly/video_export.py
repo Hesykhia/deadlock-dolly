@@ -276,11 +276,20 @@ class VideoExport:
         self._start_ack = None
         self._capture_only = False
         self._depth_options: VideoOptions | None = None
+        self._finish_pending = False
+        self._finished_status: dict | None = None
         self.output_path: Path | None = None
         # The folder that receives new takes (the take folder's parent when a
         # layered take created one) and the current layered folder, if any.
         self.output_directory: Path | None = None
         self._layer_folder: Path | None = None
+
+    @property
+    def finish_pending(self) -> bool:
+        """The operation worker still owns output finishing or restoration."""
+        timing = getattr(self.controller, "_export_timing", None)
+        with self._lock:
+            return self._finish_pending or (isinstance(timing, dict) and bool(timing.get("restore_pending")))
 
     def status(self) -> dict:
         with self._lock:
@@ -329,6 +338,10 @@ class VideoExport:
             else:
                 return last
         with self._lock:
+            if current.get("state") == "completed" and self._finished_status is not None:
+                for key in ("depth_preview", "audit"):
+                    if key in self._finished_status:
+                        current[key] = self._finished_status[key]
             self._last = current
             pending = self._start_pending
         if not pending and current.get("state") in TERMINAL_STATES:
@@ -342,13 +355,14 @@ class VideoExport:
         if callable(setter):
             setter(fps, speed)
 
-    def _clear_export_timing(self):
+    def _clear_export_timing(self, *, required=False):
         clear = getattr(self.controller, "clear_export_timing", None)
         if callable(clear):
             try:
                 clear()
             except (RuntimeError, ValueError, OSError):
-                pass
+                if required:
+                    raise
 
     def _clear_export_resolution(self):
         clear = getattr(self.controller, "clear_export_resolution", None)
@@ -357,7 +371,7 @@ class VideoExport:
 
     def start(self, options: VideoOptions, project=None, *, frozen=False,
               before_record=None, capture_only=False, pov=False) -> dict:
-        if self.status().get("state") in ACTIVE_STATES:
+        if self.status().get("state") in ACTIVE_STATES or self.finish_pending:
             raise RuntimeError("Finish the current recording before starting another.")
         try:
             return self._start(options, project, frozen=frozen, before_record=before_record,
@@ -374,7 +388,7 @@ class VideoExport:
     def _start(self, options: VideoOptions, project=None, *, frozen=False,
                before_record=None, capture_only=False, pov=False) -> dict:
         options = options.validated()
-        if self.status().get("state") in ACTIVE_STATES:
+        if self.status().get("state") in ACTIVE_STATES or self.finish_pending:
             raise RuntimeError("Finish the current recording before starting another.")
         if not recording_ready(self.controller.status()):
             raise RuntimeError("Launch a DirectX 11 replay through Dolly and wait for the native editor before recording.")
@@ -426,6 +440,8 @@ class VideoExport:
             raise
         if capture_only:
             with self._lock:
+                self._finish_pending = False
+                self._finished_status = None
                 self._capture_only = True
                 self._bridge = None
                 self._last = {"state": "recording", "fps": options.fps}
@@ -445,6 +461,8 @@ class VideoExport:
             self._start_pending = True
             self._start_ack = initial_ack
             self._depth_options = options if options.depth else None
+            self._finish_pending = True
+            self._finished_status = None
         encoder, codec_id = resolve_backend(options)
         mark = getattr(self.controller, "mark_recording_pending", None)
         if callable(mark):
@@ -489,8 +507,11 @@ class VideoExport:
                     self._last = {"state": "cancelled" if cancel else "completed"}
                 self.controller.mark_recording_pending(False)
                 return self.status()
-            if bridge is None or self.status().get("state") not in ACTIVE_STATES:
-                return self.status()
+            current = self.status()
+            if bridge is None:
+                return current
+            if current.get("state") not in ACTIVE_STATES:
+                return self._finish_terminal(current, cancel=cancel)
             bridge.stop_video(cancel=cancel)
             with self._lock:
                 self._start_pending = False
@@ -502,25 +523,41 @@ class VideoExport:
                         self._depth_options = None
                         self._discard_empty_layer_folder()
                         raise RuntimeError(str(current.get("error") or "MP4 finalization failed."))
-                    if current.get("state") == "completed" and not cancel:
-                        self._finish_layered_sidecar()
-                        current = self._encode_depth_preview(current)
-                        current = self._audit_take(current)
-                    else:
-                        self._depth_options = None
-                        if cancel:
-                            self._discard_empty_layer_folder()
-                    return current
+                    return self._finish_terminal(current, cancel=cancel)
                 if time.monotonic() >= deadline:
                     raise RuntimeError("The video recorder is still finishing. Wait for its status before starting another recording or closing the game.")
                 time.sleep(0.05)
         finally:
-            self._clear_export_timing()
             try:
-                self._clear_export_resolution()
+                self._clear_export_timing(required=True)
             finally:
-                if getattr(self, "_pov", False):
-                    self.controller.finish_pov_recording()
+                try:
+                    self._clear_export_resolution()
+                finally:
+                    if getattr(self, "_pov", False):
+                        self.controller.finish_pov_recording()
+            with self._lock:
+                if not self._start_pending and self._last.get("state") in TERMINAL_STATES:
+                    self._finish_pending = False
+
+    def _finish_terminal(self, status: dict, *, cancel: bool) -> dict:
+        # A native frame cap or shutdown can finish before Stop is requested.
+        # Run desktop finishing on the worker in that case too, exactly once.
+        if status.get("state") == "completed" and not cancel:
+            with self._lock:
+                finished = self._finished_status
+            if finished is not None:
+                return {**status, **finished}
+            self._finish_layered_sidecar()
+            status = self._encode_depth_preview(status)
+            status = self._audit_take(status)
+            with self._lock:
+                self._finished_status = dict(status)
+        else:
+            self._depth_options = None
+            if cancel or status.get("state") in ("cancelled", "failed"):
+                self._discard_empty_layer_folder()
+        return status
 
     def _audit_take(self, status: dict) -> dict:
         """Attach a read-only take-folder validation report to the status.

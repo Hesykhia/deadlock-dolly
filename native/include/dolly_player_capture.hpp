@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "dolly_player_scene_generated.hpp"
 struct ID3D11Device;
 struct ID3D11DeviceContext;
 struct ID3D11CommandList;
@@ -21,8 +22,9 @@ inline int forward_producer(Producer legacy, ProducerSeptember september, std::u
     return september ? september(a, object, mesh, opaque, params, mode, flag, outA, outB, outC)
                      : legacy(a, object, mesh, opaque, params, mode, flag, outA, outB);
 }
-void configure(std::uintptr_t scene, bool hashes_ok, bool september = false,
-               bool build6726 = false) noexcept;
+// A null profile keeps capture unavailable. The bridge selects one complete
+// reviewed scene/renderer pair; ABI, producer and layout cannot be mixed.
+void configure(std::uintptr_t scene, const SceneProfile* profile) noexcept;
 void tick() noexcept;
 // Optional read-only observer at the reviewed mesh producer. Installation is
 // requested through the existing overlay worker, never from the view callback.

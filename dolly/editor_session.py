@@ -604,10 +604,9 @@ def _dispatch(app, event, bridge):
         # camera ownership before displaying the editor panel.
         if event["value"] == 1:
             def return_to_editor():
-                # F8 from the console is a return to Dolly, whereas F7 closes
-                # the console back to the underlying game UI when it was open.
-                if getattr(app.controller, "_console_open", False) is True:
-                    app.controller.toggle_console(enabled=False)
+                # Both controller handoffs close the console themselves. Let
+                # them validate readiness first so a rejected F8 keeps the
+                # console and ordinary game input available for recovery.
                 if (_value(app, "video_source", "Camera path") == "Player POV"
                         or getattr(app.controller, "_follow_active", False) is True):
                     app.controller.open_pov_panel()

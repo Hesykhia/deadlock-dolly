@@ -743,6 +743,10 @@ class DollyApp:
 
     def _video_operation_done(self, status):
         state = status.get("state", "idle")
+        if state == "completed" and getattr(self.video_export, "finish_pending", False) is True:
+            if not self.busy:
+                self._stop_video_recording()
+            return
         self.video_status_text.set(format_video_status(status))
         self.status_text.set(self.video_status_text.get())
         self._last_video_state = state
@@ -1100,8 +1104,10 @@ class DollyApp:
         previous = getattr(self, "_last_video_state", "idle")
         if state != previous:
             if state == "completed":
-                if self.clip_audio is not None and not self.busy:
-                    self._stop_video_recording()
+                if (self.clip_audio is not None
+                        or getattr(self.video_export, "finish_pending", False) is True):
+                    if not self.busy:
+                        self._stop_video_recording()
                     return
                 self._video_operation_done(status)
             elif state == "failed":
@@ -1668,6 +1674,8 @@ class DollyApp:
                 raise ValueError("Choose your Deadlock executable and a .dem replay first.")
             options = self.launch_options.get().strip()
             parse_launch_options(options)
+            from .graphics_profiles_ui import launch_options as graphics_launch_options
+            graphics_options = graphics_launch_options(self)
             settings = replace(self.app_settings, game_path=game, demo_path=demo,
                                replay_folder=self.replay_folder.get().strip(), launch_options=options)
             cancel = threading.Event()
@@ -1679,7 +1687,7 @@ class DollyApp:
             def start():
                 save_settings(settings)
                 return self.controller.start_editing(game, demo, protocol=protocol, native=native,
-                    launch_options=options, cancel_event=cancel)
+                    launch_options=options, cancel_event=cancel, **graphics_options)
             def complete(result):
                 self.app_settings = settings
                 self._editing_started(result)
@@ -1696,6 +1704,10 @@ class DollyApp:
         # backend the running session actually uses.
         self.startup_progress.set("Replay paused and ready. Return to Deadlock to frame your first camera.")
         self.status_text.set("Use your editor shortcut to open the in-game panel. F7 opens the console.")
+        graphics = self.controller._startup_evidence.get("graphics_profile", {})
+        if graphics.get("warning"):
+            self.status_text.set(graphics["warning"])
+            self._log(json.dumps(graphics, indent=2))
         editor_session.configure(self)
         self._submit("Preparing attach camera fields", self._query_attach_fields,
                      self._attach_fields_complete)
@@ -3035,8 +3047,15 @@ class DollyApp:
             return
         protocol = "vconsole" if self.protocol.get() == "VConsole" else "netcon"
         native = self.camera_driver.get() == "Native (experimental)"
+        from .graphics_profiles_ui import launch_options as graphics_launch_options
+        try:
+            graphics_options = graphics_launch_options(self)
+        except (OSError, ValueError, RuntimeError) as exc:
+            self._error("Graphics profiles", exc)
+            return
         self._close_paused_camera(stop=False)
-        self._submit("Launching hideout", lambda: self.controller.launch(game, demo, protocol=protocol, native=native), self._session_result)
+        self._submit("Launching hideout", lambda: self.controller.launch(game, demo, protocol=protocol, native=native,
+                     **graphics_options), self._session_result)
 
     def _session_result(self, result):
         if result is not None:
@@ -3067,6 +3086,8 @@ class DollyApp:
         self._log(json.dumps(result, indent=2, default=str))
         message = result.get("message") if isinstance(result, dict) else None
         self.status_text.set(str(message or "Camera support check finished. Open the activity log for the results."))
+        if isinstance(result, dict) and result.get("graphics_profile", {}).get("warning"):
+            self.status_text.set(result["graphics_profile"]["warning"])
         self._offer_replay_tick_rate(result)
 
     def _read_standard_aspect(self):

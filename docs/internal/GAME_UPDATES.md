@@ -9,6 +9,9 @@ module identities reference existing reviewed profiles where available. Named
 schema fields retain their evidence, stock getter bytes and audited code spans;
 attachment field names/types and wire order are shared by Python and native code.
 Older Follow correction profiles keep their own layouts and exact checked bytes.
+Player capture profiles also keep the scene fingerprint, producer address and
+calling convention, record layout, and exact renderer pairing together. This
+avoids enabling a new scene build with an older producer entry point.
 
 Use the unified generator from the repository root:
 
@@ -20,30 +23,34 @@ python tools/generate_compatibility.py --check --verify-game-dir "<Deadlock inst
 
 `--check` is the default and detects stale generated files without writing.
 `--write` validates saved reviews and regenerates the Python runtime constants,
-native runtime definitions, Follow correction table, camera header and sound
-header. It needs no installed game and never changes accepted fingerprints or
+native runtime definitions, Follow correction table, player scene table, camera
+header and sound header. It needs no installed game and never changes accepted fingerprints or
 approves a new build. Native builds run the check before removing the previous
 DLL. Edit the reviewed inputs and generator, not generated files.
 
 The optional `--verify-game-dir` reads installed PE files; it never launches or
 attaches to Deadlock. It checks the current runtime contract's exact client,
 tier0 and resource identities, saved code spans, and named observer-services
-field against both stock getters. It needs the build dependencies used by the
+field against both stock getters. It also checks the installed scene/renderer
+pair, player producer entry bytes and its saved complete code span where present.
+It needs the build dependencies used by the
 profile tools. This is offline evidence, not an in-game or output certification.
 
 For a game update, first review the changed subsystems and retain the old
 profiles. The existing client and sound profile tools remain discovery tools;
 their output still needs review. Update the relevant saved contracts, evidence
-and manifest pins, then regenerate all five outputs with the unified command.
+and manifest pins, then regenerate all six outputs with the unified command.
 Inspect the diff, run the Python/native checks, and verify the actual affected
 workflow in a bounded owned replay before claiming new runtime support.
 Never widen preload or an optional feature's support merely because camera
 code was accepted.
 
-This migration preserves existing values, behavior and feature gates. It does
-not automatically discover every private layout or make Dolly update-proof.
-Historical attachment branches and separate renderer/Depth/Players contracts
-remain independently reviewed; this work does not expand their support.
+Generation preserves each reviewed profile's values and feature gates; it does
+not automatically discover private layouts or make Dolly update-proof. Historical
+attachment branches and Depth target/calibration contracts remain independently
+reviewed. The 6745 player scene candidate uses its reviewed producer at `0x5c8f0`
+with the retained ten-argument ABI; older profiles keep their original entries.
+Offline review and test passes do not certify live Players or Depth output.
 
 ## Version6722 hotfix and Follow slide correction
 

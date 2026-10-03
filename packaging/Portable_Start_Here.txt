@@ -134,7 +134,13 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
-0.6.10-alpha corrects Game Follow and health-panel verification on Deadlock
+0.6.11-alpha adds named replay graphics profiles in Settings, restores Console
+camera startup, improves editor readiness errors, repairs current-build Players
+capture admission and completes Depth export finishing/restoration. Players
+remains alpha with appearance limitations. See Video_and_ReShade.md for profiles
+and export usage, and Release_Notes.md for the complete changes and validation limits.
+
+The retained 0.6.10-alpha correction fixes Game Follow and health-panel verification on Deadlock
 build 6745, including the pending-restoration error that could block shot
 playback. Game audio is available
 again, and Game Follow attaches for every hero, including the new

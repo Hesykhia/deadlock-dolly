@@ -227,6 +227,8 @@ def build_settings(app):
     field(game, "Replay folder", app.replay_folder)
     actions(game, (("Browse folder...", app._browse_replay_folder), ("Save paths", app._save_layout_paths)), 2)
     actions(game, (("Display launch options...", app._open_launch_options),), 1)
+    from .graphics_profiles_ui import GraphicsProfiles
+    app.graphics_profiles = GraphicsProfiles(app, card(body, "Replay graphics profiles"))
     app.controls_disclosure = disclosure(body, "Controls & keybinds")
     app.keybinds_tab = app.controls_disclosure.body
     app._build_keybinds()

@@ -160,6 +160,89 @@ class VideoExportTests(unittest.TestCase):
         self.bridge.start_video.assert_not_called()
         self.controller.clear_export_resolution.assert_called_once()
 
+    def test_depth_native_completion_still_finishes_preview_metadata_and_restoration_once(self):
+        ffmpeg = self.path.parent / "ffmpeg.exe"
+        ffmpeg.write_bytes(b"MZ")
+        self.export.start(VideoOptions(self.path, depth=True, fixed_step=True,
+                                       max_frames=30, ffmpeg_path=ffmpeg))
+        folder = self.path.with_suffix("")
+        depth = folder / "depth"
+        depth.mkdir()
+        (depth / "preview_64x64.raw").write_bytes(b"x" * 4096)
+        sidecar = Path(str(self.export.output_path) + ".shot.json")
+        sidecar.write_text('{"frames_written":30}', encoding="utf-8")
+        # The hard frame cap can finish the encoder before the worker calls Stop.
+        self.state = {"state": "completed", "frames_written": 30}
+        with self.assertRaisesRegex(RuntimeError, "Finish the current recording"):
+            self.export.start(VideoOptions(self.path.parent / "next.mp4"))
+        self.assertEqual(self.bridge.start_video.call_count, 1)
+
+        def encode(args, **kwargs):
+            Path(args[-1]).write_bytes(b"preview")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with patch("dolly.video_export.subprocess.run", side_effect=encode) as encoder:
+            result = self.export.stop()
+            again = self.export.stop()
+        self.assertTrue((folder / "shot.json").is_file())
+        self.assertFalse(sidecar.exists())
+        self.assertEqual(result["depth_preview"], str(depth / "preview.mp4"))
+        self.assertEqual(again["depth_preview"], result["depth_preview"])
+        self.assertEqual(encoder.call_count, 1)
+        self.assertFalse(self.export.finish_pending)
+        self.bridge.stop_video.assert_not_called()
+        self.controller.clear_export_timing.assert_called()
+        self.controller.clear_export_resolution.assert_called()
+
+    def test_cancelled_native_depth_does_not_encode_preview(self):
+        ffmpeg = self.path.parent / "ffmpeg.exe"
+        ffmpeg.write_bytes(b"MZ")
+        self.export.start(VideoOptions(self.path, depth=True, ffmpeg_path=ffmpeg))
+        self.state = {"state": "cancelled"}
+        with patch.object(self.export, "_encode_depth_preview") as encode:
+            self.assertEqual(self.export.stop()["state"], "cancelled")
+        encode.assert_not_called()
+        self.assertFalse(self.export.finish_pending)
+        self.controller.clear_export_resolution.assert_called()
+
+    def test_completed_output_waits_for_restoration_retry_without_reencoding(self):
+        self.export.start(VideoOptions(self.path, full_resolution=True))
+        self.state = {"state": "completed"}
+        self.controller.clear_export_resolution.side_effect = [RuntimeError("restore failed"), None]
+        with patch.object(self.export, "_encode_depth_preview", side_effect=lambda s: s) as encode:
+            with self.assertRaisesRegex(RuntimeError, "restore failed"):
+                self.export.stop()
+            self.assertTrue(self.export.finish_pending)
+            self.assertEqual(self.export.stop()["state"], "completed")
+        encode.assert_called_once()
+        self.assertFalse(self.export.finish_pending)
+
+    def test_timing_restore_failure_keeps_take_pending_and_still_restores_resolution(self):
+        self.export.start(VideoOptions(self.path, fixed_step=True, full_resolution=True))
+        self.state = {"state": "completed"}
+        self.controller.clear_export_timing.side_effect = [RuntimeError("timing restore failed"), None]
+        with patch.object(self.export, "_encode_depth_preview", side_effect=lambda s: s) as encode:
+            with self.assertRaisesRegex(RuntimeError, "timing restore failed"):
+                self.export.stop()
+            self.controller.clear_export_resolution.assert_called_once()
+            self.assertTrue(self.export.finish_pending)
+            with self.assertRaisesRegex(RuntimeError, "Finish the current recording"):
+                self.export.start(VideoOptions(self.path.parent / "next.mp4"))
+            self.assertEqual(self.export.stop()["state"], "completed")
+        encode.assert_called_once()
+        self.assertFalse(self.export.finish_pending)
+
+    def test_failed_preparation_timing_restore_blocks_replacement_before_game_changes(self):
+        self.controller._export_timing = {"restore_pending": True, "restore": {"host_framerate": 0}}
+        self.assertTrue(self.export.finish_pending)
+        with self.assertRaisesRegex(RuntimeError, "Finish the current recording"):
+            self.export.start(VideoOptions(self.path))
+        self.controller.prepare_native_recording.assert_not_called()
+        self.bridge.start_video.assert_not_called()
+        self.controller.clear_export_timing.side_effect = lambda: setattr(self.controller, "_export_timing", None)
+        self.export.stop()
+        self.assertFalse(self.export.finish_pending)
+
     def test_discard_restores_resolution_but_rejected_second_start_does_not(self):
         self.export.start(VideoOptions(self.path, full_resolution=True))
         with self.assertRaisesRegex(RuntimeError, "current recording"):
@@ -732,6 +815,31 @@ class VideoGuiTests(unittest.TestCase):
         self.app._submit.reset_mock()
         self.app._refresh_video(READY)
         self.app._submit.assert_not_called()
+
+    def test_async_depth_completion_waits_for_worker_before_advancing_pipeline(self):
+        self._video_widgets()
+        self.app.video_export.status.return_value = {"state": "completed"}
+        self.app.video_export.finish_pending = True
+        self.app._video_operation_done = Mock()
+        self.app._stop_video_recording = Mock()
+        self.app._last_video_state = "recording"
+        self.app.busy = True
+        self.app._refresh_video(READY)
+        self.app._video_operation_done.assert_not_called()
+        self.app._stop_video_recording.assert_not_called()
+        self.assertEqual(self.app._last_video_state, "recording")
+        self.app.busy = False
+        self.app._refresh_video(READY)
+        self.app._stop_video_recording.assert_called_once_with()
+        self.app._video_operation_done.assert_not_called()
+
+    def test_completion_callback_finishes_native_output_before_layer_handoff(self):
+        self.app.video_export.finish_pending = True
+        self.app._stop_video_recording = Mock()
+        self.app._advance_layer_pipeline = Mock()
+        self.app._video_operation_done({"state": "completed"})
+        self.app._stop_video_recording.assert_called_once_with()
+        self.app._advance_layer_pipeline.assert_not_called()
 
     def test_layered_take_finishes_itself_when_the_shot_completes(self):
         self._video_widgets()

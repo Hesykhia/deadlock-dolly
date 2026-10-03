@@ -168,6 +168,9 @@ def main() -> int:
     video_guide = video_guide.replace(
         "](internal/", "](https://github.com/cravvnn/deadlock-dolly/blob/main/docs/internal/")
     (bundle / "Video_and_ReShade.md").write_text(video_guide, encoding="utf-8")
+    release_notes = ROOT / "docs" / f"RELEASE_NOTES_{__version__}.md"
+    if release_notes.is_file():
+        shutil.copy2(release_notes, bundle / "Release_Notes.md")
     shutil.copy2(ROOT / "LICENSE.txt", bundle / "LICENSE.txt")
     shutil.copy2(ROOT / "packaging" / "Portable_Start_Here.txt", bundle / "Start_Here.txt")
     for extension in ("md", "json"):

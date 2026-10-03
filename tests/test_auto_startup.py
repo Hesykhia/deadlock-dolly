@@ -528,6 +528,13 @@ class AutoStartupTests(unittest.TestCase):
         self.assertEqual(launch.call_args.kwargs["launch_options"], "-windowed -w 1280 -h 720")
         self.assertNotIn("playdemo", str(launch.call_args))
 
+    def test_selected_graphics_profile_reaches_normal_launcher(self):
+        with patch("dolly.controller.launcher.launch", return_value=self.session) as launch, \
+             patch("dolly.controller.ConsoleClient", return_value=self.console):
+            self.controller.start_editing("installation", self.demo, graphics_profile="selected-profile-id")
+        self.assertEqual(launch.call_args.kwargs["graphics_profile"], "selected-profile-id")
+        self.assertEqual(self.controller._launch_attempt["graphics_profile"], "selected-profile-id")
+
 
 if __name__ == "__main__":
     unittest.main()

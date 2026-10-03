@@ -81,6 +81,18 @@ class ReplayRecoveryTests(unittest.TestCase):
         self.assertEqual(len(self.console.sent), 1)
         self.assertEqual(self.controller._probe_result, {})
 
+    def test_return_after_failed_recovery_keeps_original_failure_without_game_changes(self):
+        self.camera_handoff.side_effect = RuntimeError('camera handoff unavailable')
+        with self.assertRaisesRegex(RuntimeError, 'camera handoff unavailable'):
+            self.recover()
+        requests = list(self.console.requests)
+        sent = list(self.console.sent)
+        with self.assertRaisesRegex(RuntimeError, 'camera handoff unavailable'):
+            self.controller.toggle_game_ui(False)
+        self.assertEqual(self.console.requests, requests)
+        self.assertEqual(self.console.sent, sent)
+        self.assertEqual(self.pause_ticks, [])
+
     def test_inactive_then_initial_update_before_pause_and_no_launch(self):
         result = self.recover()
         self.assertGreaterEqual(result['tick'], 2)

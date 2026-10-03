@@ -977,5 +977,27 @@
         }
       ]
     }
+  ],
+  "player_scenes": [
+    {
+      "profile": "scenesystem-2026-09-09.json",
+      "renderer_sha256": "386bdc4adfc8b8a0db67520b98b391f872a214e07077cc17a02f10bf94e3b2d8",
+      "renderer_size": "0x4d6000"
+    },
+    {
+      "profile": "scenesystem-2026-09-29.json",
+      "renderer_sha256": "00ee98d8f2b87b4a8b81ce185549b863f1c9b61e40000f81f6fcfc46a8c18c37",
+      "renderer_size": "0x4b7000"
+    },
+    {
+      "profile": "scenesystem-2026-09-30-6726.json",
+      "renderer_sha256": "d0b561df9ca1f02e8e78999e7828a03cd20b95d53de0d95215993e58efe0b59c",
+      "renderer_size": "0x4b7000"
+    },
+    {
+      "profile": "scenesystem-2026-10-02-6745.json",
+      "renderer_sha256": "ca0cd37c078fd070d9b8f4708fc892971d2a35f4c637624b366395e205723889",
+      "renderer_size": "0x4b7000"
+    }
   ]
 }

@@ -44,17 +44,22 @@ class SoundProfileTests(unittest.TestCase):
         modules = compatibility.load_manifest()["modules"]
         bridge = (ROOT / "native/src/bridge_win.cpp").read_text()
         for filename, constant, source in (
-            ("scenesystem.dll", "kPlayerCaptureScenesystemHash", bridge),
             ("soundsystem.dll", "kSoundSystemHash", bridge),
             ("soundsystem.dll", "kSeptemberSoundSystemHash", bridge),
             ("soundsystem.dll", "kSound6726Hash", bridge),
-            ("scenesystem.dll", "kScene6726Hash", bridge),
-            ("scenesystem.dll", "kSeptemberScenesystemHash", bridge),
             ("rendersystemdx11.dll", "kRendererDiagnosticsHash",
              (ROOT / "native/include/dolly_renderer_diagnostics.hpp").read_text()),
         ):
             digest = re.search(constant + r'\[\]\s*=\s*"([a-f0-9]{64})"', source)[1]
             self.assertIn(digest, modules[f"bin/win64/{filename}"]["accepted"])
+        # Player scene pins now travel with their complete layout and renderer
+        # pair in the shared generated contract; no bridge-only feature flag.
+        from generate_compatibility import load_contract, player_scenes
+        data, _, _ = load_contract(ROOT)
+        header = (ROOT / "native/include/dolly_player_scene_generated.hpp").read_text()
+        for row in player_scenes(ROOT, data):
+            self.assertIn(row['scene_hash'], header)
+            self.assertIn(row['renderer_hash'], header)
         sound = json.loads(PROFILE.read_text())
         legacy = json.loads(LEGACY_PROFILE.read_text())
         self.assertCountEqual(modules["bin/win64/soundsystem.dll"]["accepted"],

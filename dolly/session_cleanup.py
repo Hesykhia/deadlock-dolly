@@ -173,7 +173,7 @@ def remove_overlay(overlay: Path, paths, session_dir: Path | None = None) -> boo
 
 def recover_orphans(paths) -> list[str]:
     """Find mounts made by an older/moved copy of Dolly in this installation."""
-    from .launcher import LaunchError, _load_record, _restore_record
+    from .launcher import LaunchError, _load_record, _restore_session_configs
     recovered = []
     for overlay in sorted(paths.game_dir.glob(PREFIX + "*")):
         try:
@@ -189,7 +189,7 @@ def recover_orphans(paths) -> list[str]:
             if (Path(record["overlay_dir"]).resolve() != overlay.resolve()
                     or record["original_sha256"] != marker["original_sha256"]):
                 continue
-            _restore_record(session)
+            _restore_session_configs(session)
         # Even if its old portable folder was deleted, a marked mount can be
         # removed once the current gameinfo demonstrably does not reference it.
         if remove_overlay(overlay, paths, session):
@@ -247,7 +247,7 @@ def start_waiter(session) -> None:
 
 def wait_and_cleanup(session_dir: Path, handle: int) -> int:
     """Internal helper entry; no injection, console connection, or GUI startup."""
-    from .launcher import LaunchError, _load_record, _restore_record, validate_game, running_processes, _game_is_running
+    from .launcher import LaunchError, _load_record, _restore_session_configs, validate_game, running_processes, _game_is_running
     try:
         if sys.platform != "win32" or handle <= 0:
             raise LaunchError("Invalid detached cleanup process handle.")
@@ -266,7 +266,7 @@ def wait_and_cleanup(session_dir: Path, handle: int) -> int:
         if _game_is_running(running_processes()):
             _append_log(session_dir, "Another Deadlock process is running; temporary-file cleanup deferred until next launch.")
             return 0
-        _restore_record(session_dir)
+        _restore_session_configs(session_dir)
         record = _load_record(session_dir)
         paths = validate_game(Path(record["original_gameinfo"]).parent)
         overlay = Path(record["overlay_dir"])

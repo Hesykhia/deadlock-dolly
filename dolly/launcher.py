@@ -715,6 +715,22 @@ def _restore_record(session_dir: Path) -> bool:
         raise LaunchError(f"Could not restore Deadlock gameinfo.gi: {exc}\nOriginal backup: {backup}. Exit Deadlock, then use File > Recover game configuration in Dolly.") from exc
 
 
+def _restore_session_configs(session_dir: Path) -> None:
+    """Attempt both independent restorations, even if either has a conflict."""
+    from . import graphics_profiles
+    errors = []
+    for restore in (_restore_record, graphics_profiles.restore):
+        try:
+            if restore is graphics_profiles.restore and graphics_profiles.pending(session_dir):
+                if _game_is_running(running_processes()):
+                    raise LaunchError("Exit Deadlock before restoring this session's graphics settings.")
+            restore(session_dir)
+        except (OSError, LaunchError) as exc:
+            errors.append(str(exc))
+    if errors:
+        raise LaunchError("\n".join(errors))
+
+
 def recover_pending(game_path: str | os.PathLike[str] | None = None) -> list[str]:
     """Restore our unfinished transactions only while no Deadlock process runs.
 
@@ -738,7 +754,8 @@ def recover_pending(game_path: str | os.PathLike[str] | None = None) -> list[str
             continue
         if expected is not None and Path(preliminary.get("original_gameinfo", "")).resolve() != expected.resolve():
             continue
-        pending = preliminary.get("config_state") != "restored"
+        from . import graphics_profiles
+        pending = preliminary.get("config_state") != "restored" or graphics_profiles.pending(journal.parent)
         if not pending and not Path(preliminary.get("overlay_dir", "")).exists():
             continue
         if not pending and Path(preliminary.get("session_dir", "")).resolve() != journal.parent.resolve():
@@ -751,7 +768,7 @@ def recover_pending(game_path: str | os.PathLike[str] | None = None) -> list[str
         record = _load_record(journal.parent)
         paths = validate_game(Path(record["original_gameinfo"]).parent)
         installations[paths.game_dir] = paths
-        _restore_record(journal.parent)
+        _restore_session_configs(journal.parent)
         overlay = Path(record["overlay_dir"])
         removed = remove_overlay(overlay, paths, journal.parent)
         if pending or removed:
@@ -841,7 +858,9 @@ class Session:
         if self.native is not None:
             self.native.close()
             self.record_native_diagnostics()
-        self.restore_gameinfo()
+        with self._restore_lock:
+            _restore_session_configs(self.session_dir)
+        self.log("Original session configuration restored after game exit.")
         from .session_cleanup import remove_overlay
         try:
             record = _load_record(self.session_dir)
@@ -884,7 +903,7 @@ class Session:
             return False
 
 
-def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] | None = None, port: int = 29090, protocol: str = "netcon", native: bool = False, launch_options: str = "") -> Session:
+def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] | None = None, port: int = 29090, protocol: str = "netcon", native: bool = False, launch_options: str = "", graphics_profile: str = "") -> Session:
     _check_runtime()
     from .replays import parse_launch_options
     parse_launch_options(launch_options)  # Validate before changing game files.
@@ -955,6 +974,9 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         _atomic_write(session_dir / "original.gameinfo.gi", original_data)
         _save_record(session_dir, metadata)
         log_path.write_text("Deadlock Dolly development launcher\n" + json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        if graphics_profile:
+            from . import graphics_profiles
+            graphics_profiles.prepare(session_dir, graphics_profile)
         # Check again immediately before process creation, after file preparation.
         if _game_is_running(running_processes()):
             raise LaunchError("Deadlock started while Dolly was preparing. Exit it and try again.")
@@ -963,6 +985,8 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         _atomic_write(paths.gameinfo, patched_data, metadata["original_mode"])
         metadata["config_state"] = "mounted"
         _save_record(session_dir, metadata)
+        if graphics_profile:
+            graphics_profiles.apply(session_dir)
         with (session_dir / "game_stdout.log").open("ab") as output:
             with external_program_environment() as environment:
                 # Dolly owns the one graphics callback for its optional manual
@@ -1032,8 +1056,10 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
             session.log(f"Created development process PID {session.pid}; -dev and -insecure are mandatory.")
             session.log("Loaded Dolly's verified editing gameinfo; the user's exact original is backed up for restoration.")
             session.log("Replay loading deferred until the controller confirms cvar_unhide in the pre-lobby/hideout.")
-            metadata["pid"] = session.pid
-            _save_record(session_dir, metadata)
+            with session._restore_lock:
+                current_record = _load_record(session_dir)
+                current_record["pid"] = session.pid
+                _save_record(session_dir, current_record)
         except OSError:
             # A disk failure after process creation must not delete a live mount.
             pass
@@ -1044,7 +1070,7 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         if process is None:
             if (session_dir / "session.json").is_file():
                 try:
-                    _restore_record(session_dir)
+                    _restore_session_configs(session_dir)
                 except LaunchError as recovery:
                     raise LaunchError(f"{exc}\nConfiguration recovery needs attention: {recovery}") from exc
             if overlay.is_dir() and (overlay / ".dolly-session.json").is_file():

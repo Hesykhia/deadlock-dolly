@@ -1,5 +1,6 @@
 #include "dolly_player_producers.hpp"
 #include "dolly_capture_timing.hpp"
+#include "dolly_player_scene_generated.hpp"
 #include <cstdlib>
 #include <cstdio>
 #include <thread>
@@ -36,6 +37,34 @@ static int __fastcall september_producer(std::uintptr_t a, void* object, void* m
 #endif
 int main() {
     using namespace dolly::player_capture;
+    // Reproduce the 6745 failure: selecting the current module must select its
+    // moved producer, not just change a vtable on the older September layout.
+    const auto* current = reviewed_scene_profile(
+        "eb8082bbb3b1895ae37c90181192e0f4b5787fe8fa2986114dd6173fdc234849", 0x9c6000,
+        "ca0cd37c078fd070d9b8f4708fc892971d2a35f4c637624b366395e205723889", 0x4b7000);
+    require(current && current->layout.producer == 0x5c8f0 && current->layout.table == 0x61e860);
+    require(current->september && current->layout.owner == 0xd8 && current->layout.gpu_buffer == 0x70);
+    // Every old pair retains its original entry and ABI. Crossed pairs, missing
+    // modules, changed identities and wrong PE sizes must never enable a hook.
+    const std::uintptr_t entries[] = {0x564b0, 0x5c8e0, 0x5c8e0, 0x5c8f0};
+    const std::uintptr_t tables[] = {0x5d4fe8, 0x61e7d0, 0x61e860, 0x61e860};
+    unsigned profile_index = 0;
+    for (const auto& scene : kSceneProfiles) {
+        require(scene.layout.producer == entries[profile_index] && scene.layout.table == tables[profile_index]);
+        require(scene.september == (profile_index != 0));
+        ++profile_index;
+        for (const auto& renderer : kSceneProfiles)
+            require(reviewed_scene_profile(scene.scene_hash, scene.scene_size,
+                                           renderer.renderer_hash, renderer.renderer_size) ==
+                    (&scene == &renderer ? &scene : nullptr));
+        require(!reviewed_scene_profile(nullptr, scene.scene_size, scene.renderer_hash, scene.renderer_size));
+        require(!reviewed_scene_profile(scene.scene_hash, scene.scene_size, nullptr, scene.renderer_size));
+        require(!reviewed_scene_profile("unknown", scene.scene_size, scene.renderer_hash, scene.renderer_size));
+        require(!reviewed_scene_profile(scene.scene_hash, scene.scene_size, "unknown", scene.renderer_size));
+        require(!reviewed_scene_profile(scene.scene_hash, scene.scene_size + 1, scene.renderer_hash, scene.renderer_size));
+        require(!reviewed_scene_profile(scene.scene_hash, scene.scene_size, scene.renderer_hash, scene.renderer_size + 1));
+    }
+    require(profile_index == 4);
 #if defined(_WIN32)
     // Both real producer ABIs preserve every caller-owned output and invoke
     // the selected original exactly once; a tenth output must never be lost.

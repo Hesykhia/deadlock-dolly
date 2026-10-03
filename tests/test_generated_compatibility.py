@@ -143,6 +143,55 @@ class GeneratedCompatibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(generate.ContractError,'Duplicate JSON key'):
             generate.load_contract(self.root)
 
+    def test_player_profiles_keep_exact_pairs_and_moved_producer(self):
+        scenes = generate.player_scenes(self.root, self.data)
+        self.assertEqual([row['rva'] for row in scenes], [0x564b0, 0x5c8e0, 0x5c8e0, 0x5c8f0])
+        self.assertEqual([row['arguments'] for row in scenes], [9, 10, 10, 10])
+        self.assertEqual([row['fields'][1] for row in scenes], [0x5d4fe8, 0x61e7d0, 0x61e860, 0x61e860])
+        header = generate.generated_outputs(self.root)['native/include/dolly_player_scene_generated.hpp']
+        for scene in scenes:
+            self.assertIn(scene['scene_hash'], header)
+            self.assertIn(scene['renderer_hash'], header)
+
+    def test_invalid_player_contracts_are_rejected_before_emission(self):
+        path = self.root/'native/profiles'/self.data['player_scenes'][-1]['profile']
+        original = generate.read_json(path)
+        for edit in ('abi', 'prologue', 'stride', 'missing', 'unreviewed', 'rva', 'span'):
+            profile = deepcopy(original)
+            if edit == 'abi':
+                profile['producer']['arguments'] = 9
+            elif edit == 'prologue':
+                profile['producer']['prologue'] = '00' * 32
+            elif edit == 'stride':
+                profile['layout']['record_stride'] = 64
+            elif edit == 'missing':
+                del profile['layout']['owner_offset']
+            elif edit == 'unreviewed':
+                profile['sha256'] = 'f' * 64
+            elif edit == 'rva':
+                profile['producer']['rva'] = '0x10000000'
+            else:
+                profile['producer']['end_rva'] = profile['producer']['rva']
+            path.write_text(json.dumps(profile), encoding='utf-8')
+            with self.subTest(edit=edit), self.assertRaises((generate.ContractError, KeyError)):
+                generate.generated_outputs(self.root)
+        path.write_text(json.dumps(original), encoding='utf-8')
+        self.data['player_scenes'][-1]['renderer_sha256'] = 'f' * 64
+        self.save()
+        with self.assertRaisesRegex(generate.ContractError, 'renderer identity'):
+            generate.generated_outputs(self.root)
+
+    def test_duplicate_and_unlisted_player_profiles_cannot_enable_hooks(self):
+        self.data['player_scenes'].append(deepcopy(self.data['player_scenes'][0]))
+        self.save()
+        with self.assertRaisesRegex(generate.ContractError, 'Duplicate'):
+            generate.generated_outputs(self.root)
+        self.data['player_scenes'].pop()
+        self.data['player_scenes'][0]['profile'] = 'unlisted-scene.json'
+        self.save()
+        with self.assertRaisesRegex(generate.ContractError, 'explicitly listed'):
+            generate.generated_outputs(self.root)
+
     def test_named_schema_verification_checks_name_offset_and_each_getter(self):
         name='C_BasePlayerPawn.m_pObserverServices'
         field=self.data['schema'][name]

@@ -79,6 +79,28 @@ def configured_controller():
 
 
 class NativeFlightControllerTests(unittest.TestCase):
+    def test_rejected_editor_return_preserves_camera_and_input_owner(self):
+        self.controller.enter_native_flight()
+        self.controller._probe_result = {}
+        self.bridge.owner = 'console'
+        self.console.events.clear()
+        self.console.requests.clear()
+        with self.assertRaisesRegex(RuntimeError, 'Check camera support'):
+            self.controller.toggle_game_ui(False)
+        self.assertEqual(self.bridge.owner, 'console')
+        self.assertEqual(self.console.events, [])
+        self.assertEqual(self.console.requests, [])
+
+    def test_native_probe_failure_blocks_flight_and_retains_specific_reason(self):
+        self.bridge.state = 'fault'
+        with self.assertRaisesRegex(RuntimeError, 'Native camera is not ready'):
+            self.controller.probe()
+        self.console.events.clear()
+        with self.assertRaisesRegex(RuntimeError, 'Native camera is not ready'):
+            self.controller.enter_native_flight()
+        self.assertNotIn('native.flight', self.console.events)
+        self.assertNotIn('native.hold', self.console.events)
+
     def test_return_to_editor_recovers_native_release_with_stale_manual_flags(self):
         for state in ("stopped", "probe", "fault"):
             with self.subTest(state=state):

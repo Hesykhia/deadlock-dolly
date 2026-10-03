@@ -54,6 +54,8 @@ dolly/editor_session.py
 dolly/editor_wire.py
 dolly/export_audit.py
 dolly/graphics_diagnostics.py
+dolly/graphics_profiles.py
+dolly/graphics_profiles_ui.py
 dolly/gui.py
 dolly/ui_theme.py
 dolly/hotkey.py
@@ -200,6 +202,7 @@ tests/test_editor_settings.py
 tests/test_endpoint_playback.py
 tests/test_game_ui_handoff.py
 tests/test_graphics_diagnostics.py
+tests/test_graphics_profiles.py
 tests/test_gui_capture.py
 tests/test_hotkey.py
 tests/test_launcher.py
@@ -275,6 +278,7 @@ dolly/media_transport.py
 dolly/memory_watch.py
 dolly/video_export.py
 docs/VIDEO_AND_RESHADE.md
+docs/RELEASE_NOTES_0.6.11-alpha.md
 docs/internal/LAYER_EXPORT.md
 native/include/dolly_media.hpp
 native/include/dolly_video.hpp
@@ -448,6 +452,7 @@ native/include/dolly_optional_hooks.hpp
 native/src/native_feature_status_win.hpp
 native/tests/capability_tests.cpp
 native/include/dolly_runtime_generated.hpp
+native/include/dolly_player_scene_generated.hpp
 native/tests/reviewed_contract_tests.cpp
 native/profiles/runtime-contracts.json
 tools/generate_compatibility.py
@@ -484,4 +489,6 @@ third_party/cvar_unlocker/unlocker-build-6742.patch
 
 native/profiles/deadlock-2026-10-02-6745-complete.json
 native/profiles/soundsystem-2026-10-02-6745.json
+native/profiles/scenesystem-2026-09-09.json
+native/profiles/scenesystem-2026-10-02-6745.json
 third_party/cvar_unlocker/unlocker-build-6745.patch

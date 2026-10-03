@@ -1,5 +1,16 @@
 # Changes
 
+## 0.6.11 alpha — Replay graphics profiles, capture fixes and compatibility hardening
+
+**0.6.11-alpha**
+
+- **Choose recording graphics for Dolly sessions.** *Before:* Changing between gameplay and recording quality required manual settings changes. *After:* Save, import, preview and select named graphics profiles, with the actual previous settings backed up and restored after the game exits.
+- **More reliable camera startup and editor recovery.** *Before:* Console camera startup could stall on an unnecessary refresh, and returning to the editor could hide the original readiness failure behind an obsolete instruction. *After:* Dolly first checks camera response, guides safe health-panel restoration and retains actionable readiness errors without prematurely closing the console.
+- **Players capture and complete Depth exports.** *Before:* The current game's Players producer could be rejected, and automatically completed Depth takes could skip final output work or lose pending timing restoration. *After:* A reviewed scene/renderer profile fixes producer selection; export completion and verified restoration finish through the normal workflow. Players remains alpha with known appearance limits.
+- **Stronger compatibility and release checks.** *Before:* Optional feature failures could block independent camera functionality, compatibility facts were duplicated, and source archives omitted native files. *After:* Feature failures are better isolated, reviewed definitions are generated consistently, and complete source packages are checked with a clean local build.
+
+Full overnight changes, usage and validation limits: [0.6.11 release notes](RELEASE_NOTES_0.6.11-alpha.md).
+
 ## 0.6.10 alpha — Game Follow and shot playback on build 6745
 
 **0.6.10-alpha**

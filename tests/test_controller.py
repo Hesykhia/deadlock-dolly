@@ -469,6 +469,39 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("Frozen preview", self.controller.status()["message"])
         self.assertEqual(self.console.camera_writes, [])
 
+    def test_failed_probe_does_not_leave_partial_camera_permission(self):
+        self.console.supports = lambda name: name != 'demo_pause'
+        with self.assertRaisesRegex(RuntimeError, 'demo_pause'):
+            self.controller.probe()
+        self.assertEqual(self.controller._probe_result, {})
+        with self.assertRaisesRegex(RuntimeError, 'demo_pause'):
+            self.controller._require_probe()
+
+    def test_failed_recheck_invalidates_previous_success_and_can_be_rechecked(self):
+        self.console.fail_commands.add('version')
+        with self.assertRaises(RuntimeError):
+            self.controller.probe()
+        with self.assertRaisesRegex(RuntimeError, 'Startup controls'):
+            self.controller._require_probe()
+        self.console.fail_commands.clear()
+        self.controller.probe()
+        self.controller._require_probe()
+        self.assertIsNone(self.controller._probe_failure)
+
+    def test_missing_probe_points_to_current_desktop_controls_without_writes(self):
+        self.controller._probe_result = {}
+        with self.assertRaisesRegex(RuntimeError, 'Troubleshooting & recovery.*Startup controls.*Check camera support') as raised:
+            self.controller._require_probe()
+        self.assertNotIn('Complete 5', str(raised.exception))
+        self.assertEqual(self.console.requests, [])
+
+    def test_disconnect_clears_old_probe_failure_context(self):
+        self.console.supports = lambda name: name != 'demo_pause'
+        with self.assertRaises(RuntimeError):
+            self.controller.probe()
+        self.controller.disconnect()
+        self.assertIsNone(self.controller._probe_failure)
+
     def test_current_tick_uses_live_goto_with_filename_without_metadata_query(self):
         self.console.tick = 112025
         self.console.goto_output = 112025

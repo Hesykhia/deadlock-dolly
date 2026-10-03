@@ -296,6 +296,7 @@ class Controller:
         self._paused_details = {}
         self._paused_cancelled = None
         self._probe_result = {}
+        self._probe_failure = None
         self._last_output = {}
         self._launch_attempt = None
         self._unlocker_pid = None
@@ -513,7 +514,7 @@ class Controller:
             return None
         return info
 
-    def launch(self, game_path, demo_path, protocol="netcon", *, native=False, launch_options=""):
+    def launch(self, game_path, demo_path, protocol="netcon", *, native=False, launch_options="", graphics_profile=""):
         with self._op_lock:
             self._launch_attempt = {
                 "game_path": str(game_path),
@@ -523,11 +524,14 @@ class Controller:
             }
             if launch_options:
                 self._launch_attempt["launch_options"] = str(launch_options)
+            if graphics_profile:
+                self._launch_attempt["graphics_profile"] = str(graphics_profile)
             if native:
                 self._launch_attempt["camera_backend"] = "native"
             LOG.info("Launch requested: %s", self._launch_attempt)
             try:
-                result = self._launch(game_path, demo_path, protocol, native=native, launch_options=launch_options)
+                result = self._launch(game_path, demo_path, protocol, native=native, launch_options=launch_options,
+                                      graphics_profile=graphics_profile)
             except Exception as exc:
                 self._launch_attempt.update(status="failed", error=str(exc), error_type=type(exc).__name__)
                 LOG.exception("Launch failed")
@@ -536,7 +540,7 @@ class Controller:
             self._launch_attempt.update(status="started", pid=result["pid"], session_dir=result["session_dir"])
             return result
 
-    def _launch(self, game_path, demo_path, protocol, *, native=False, launch_options=""):
+    def _launch(self, game_path, demo_path, protocol, *, native=False, launch_options="", graphics_profile=""):
         with self._op_lock:
             if protocol not in ("vconsole", "netcon"):
                 raise ValueError("Unknown console protocol.")
@@ -551,6 +555,8 @@ class Controller:
             options = {"native": True} if native else {}
             if launch_options:
                 options["launch_options"] = launch_options
+            if graphics_profile:
+                options["graphics_profile"] = graphics_profile
             self._recording_replay = None
             self._session = launcher.launch(game_path, str(path), port=self._port, protocol=protocol, **options)
             self._native_active = False
@@ -566,7 +572,7 @@ class Controller:
             self._native_handoff_details = {}
             self._demo = path
             self._protocol = protocol
-            self._probe_result = {}
+            self._invalidate_probe()
             self._restore.clear()
             self._playback_restore.clear()
             self._dof_shader_restore.clear()
@@ -860,7 +866,7 @@ class Controller:
             monitor.close()
 
     def start_editing(self, game_path, demo_path, protocol="netcon", native=True,
-                      launch_options="", cancel_event=None):
+                      launch_options="", cancel_event=None, graphics_profile=""):
         """Launch, initialize once before the demo, and enter paused editing.
 
         Every transition uses process, console or rendered-view evidence.
@@ -870,7 +876,9 @@ class Controller:
         with self._op_lock:
             try:
                 self._check_startup_cancelled(cancel_event)
-                self.launch(game_path, demo_path, protocol, native=native, launch_options=launch_options)
+                profile_options = {"graphics_profile": graphics_profile} if graphics_profile else {}
+                self.launch(game_path, demo_path, protocol, native=native, launch_options=launch_options,
+                            **profile_options)
                 self._message("Starting Deadlock. Waiting for its console connection…", startup_stage="waiting_console")
 
                 def connected():
@@ -946,6 +954,8 @@ class Controller:
                     self._record_native_renderer()
                 return self.status()
             except Exception as exc:
+                if not self._probe_result:
+                    self._probe_failure = str(exc)
                 self._message(str(exc), startup_stage="cancelled" if cancel_event is not None and cancel_event.is_set() else "failed")
                 raise
 
@@ -1057,7 +1067,7 @@ class Controller:
             # Source commands use forward slashes; _validate_demo rejects quotes,
             # separators and line breaks before this trusted quoted argument.
             command = 'playdemo "' + path.as_posix() + '"'
-            self._probe_result = {}
+            self._invalidate_probe()
             self._replay_requested = True
             self._startup_evidence["replay_requested"] = str(path)
             try:
@@ -1126,7 +1136,7 @@ class Controller:
         self._recording_replay = None
         self._replay_recovery = {"pid": session.pid, "replay": str(path), "stage": "disconnecting"}
         self._replay_recovery_active = True
-        self._probe_result = {}
+        self._invalidate_probe()
         try:
             self._check_position_cancelled()
             self._message("Preparing replay for the shot…", startup_stage="recovering_replay")
@@ -1192,7 +1202,7 @@ class Controller:
             self._message("Replay prepared. Starting the shot…", startup_stage="replay_ready")
             return checked
         except Exception as exc:
-            self._probe_result = {}
+            self._invalidate_probe(str(exc))
             self._replay_recovery.update(stage="failed", error=str(exc))
             message = "Replay preparation stopped: " + str(exc) + " Dolly will not restart the game or retry automatically."
             self._message(message, startup_stage="failed", playing=False)
@@ -1538,8 +1548,24 @@ class Controller:
             try:
                 result = self._probe()
             except Exception as exc:
+                # A partial command list or an earlier successful check cannot
+                # grant camera access after any part of this check fails.
+                self._invalidate_probe(str(exc))
                 self._message(str(exc), startup_stage="failed")
                 raise
+            self._probe_failure = None
+            if isinstance(self._session, launcher.Session):
+                from .graphics_profiles import audit_runtime
+                try:
+                    graphics = audit_runtime(self._session.session_dir,
+                        lambda command: self._request(command, timeout=3, allow_error=True))
+                except (OSError, ValueError, RuntimeError) as exc:
+                    graphics = {"warning": "Graphics profile runtime check unavailable: " + str(exc)}
+                if graphics is not None:
+                    self._startup_evidence["graphics_profile"] = graphics
+                    result["graphics_profile"] = graphics
+                    if graphics.get("warning"):
+                        LOG.warning(graphics["warning"])
             return result
 
     def _probe(self):
@@ -1585,11 +1611,21 @@ class Controller:
             self._message(message, startup_stage="replay_ready")
             return self._probe_result
 
+    def _invalidate_probe(self, reason=None):
+        self._probe_result = {}
+        self._probe_failure = reason
+
     def _require_probe(self):
         capabilities = self._probe_result.get("capabilities", {})
         for name in ("spec_goto", "cl_citadel_forceangles", self.lens_cvar):
             if not capabilities.get(name):
-                raise RuntimeError("Complete 5 Check camera support before previewing or playing a path.")
+                reason = (" Last readiness failure: " + self._probe_failure
+                          if self._probe_failure else "")
+                raise RuntimeError(
+                    "Camera support is not verified for this replay." + reason
+                    + " In Dolly's desktop window, open Settings > Troubleshooting & recovery > "
+                    "Startup controls... and click Check camera support once the replay has "
+                    "finished loading. Then return to the editor.")
 
     def _capture_aspect_ratio(self):
         raw = read_cvar_value(ASPECT_CVAR, self._request(ASPECT_CVAR))
@@ -2514,8 +2550,8 @@ class Controller:
         with self._op_lock, self._paused_preparation(cancelled):
             if not self._supports_native_flight():
                 raise RuntimeError("Native free camera requires the matching native editor build.")
-            self._halt(native_action="native_hold")
             self._require_probe()
+            self._halt(native_action="native_hold")
             self._require_demo()
             restoration_error = self._restore_playback_settings()
             if restoration_error:
@@ -2622,6 +2658,10 @@ class Controller:
             enabled = not self._game_ui_visible if enabled is None else enabled
             if not isinstance(enabled, bool):
                 raise ValueError("Game UI visibility must be a boolean.")
+            if not enabled:
+                # Refuse unverified return before changing camera/input owner,
+                # hiding the console or taking new HUD restoration snapshots.
+                self._require_probe()
             self._require_demo(require_tick=False)
             # Deadlock has no registered `demoui` command in the reviewed build.
             # These readable cvars control the replay HUD and its real cursor;
@@ -4642,7 +4682,10 @@ class Controller:
             raise ValueError("Export speed must be a number between 0.05 and 4.") from exc
         if not math.isfinite(speed) or not .05 <= speed <= 4:
             raise ValueError("Export speed must be between 0.05 and 4.")
-        if getattr(self, "_export_timing", None) is not None:
+        previous = getattr(self, "_export_timing", None)
+        if previous is not None:
+            if previous.get("restore_pending"):
+                raise RuntimeError("Restore the previous export timing before starting another export.")
             return
         if self._console is None or not self._console.is_connected or not self._alive():
             raise RuntimeError("Connect to the game before fixed-step export.")
@@ -4665,21 +4708,26 @@ class Controller:
 
     def clear_export_timing(self):
         state = getattr(self, "_export_timing", None)
-        self._export_timing = None
         if state is None:
             return
-        if self._console is None or not self._console.is_connected or not self._alive():
+        if not self._alive():
+            self._export_timing = None
             return
+        state["restore_pending"] = True
+        if self._console is None or not self._console.is_connected:
+            raise RuntimeError("Reconnect and finish the recording to restore export timing.")
         restore = state.get("restore") or {}
         host = restore.get("host_framerate")
         wait = restore.get("r_wait_on_present")
         commands = ["host_framerate " + (numeric(host) if host else "0"),
                     "r_wait_on_present " + (numeric(wait) if wait is not None else "0"),
                     "demo_timescale 1"]
-        try:
-            self._request("; ".join(commands))
-        except (RuntimeError, ValueError, OSError) as exc:
-            self._message("Could not restore export timing: " + str(exc))
+        self._request("; ".join(commands))
+        for name, expected in restore.items():
+            actual = read_cvar_value(name, self._request(name))
+            if not math.isclose(actual, expected, rel_tol=1e-6):
+                raise RuntimeError("Could not restore export timing. Finish the recording again to retry.")
+        self._export_timing = None
 
     def suspend_export_timing(self):
         """Restore normal engine pacing for a paused-camera calibration.
@@ -4693,6 +4741,8 @@ class Controller:
         state = getattr(self, "_export_timing", None)
         if state is None or state.get("suspended"):
             return
+        if state.get("restore_pending"):
+            raise RuntimeError("Restore the previous export timing before continuing playback.")
         if self._console is None or not self._console.is_connected or not self._alive():
             return
         restore = state.get("restore") or {}
@@ -4709,6 +4759,8 @@ class Controller:
         state = getattr(self, "_export_timing", None)
         if state is None or not state.get("suspended"):
             return
+        if state.get("restore_pending"):
+            raise RuntimeError("Restore the previous export timing before continuing playback.")
         if self._console is None or not self._console.is_connected or not self._alive():
             return
         engine_fps = state["fps"] / state["speed"]
@@ -4893,7 +4945,7 @@ class Controller:
         if self._console:
             self._console.close()
         self._console = None
-        self._probe_result = {}
+        self._invalidate_probe()
         self._reset_camera_position()
         self._message("Disconnected." if not dof_error else "Disconnected. " + dof_error,
                       connected=False, playing=False)
@@ -4947,7 +4999,7 @@ class Controller:
             if deployment is not None:
                 preserve_diagnostics(deployment, self._session.session_dir)
         session_files = ("session.json", "launch.log", "game_stdout.log",
-                         "native_diagnostics.json") + DIAGNOSTIC_NAMES
+                         "native_diagnostics.json", "graphics-session.json", "graphics-runtime.json") + DIAGNOSTIC_NAMES
         destination = Path(destination)
         if destination.suffix.lower() != ".zip":
             destination = destination / ("Dolly_diagnostics_" + time.strftime("%Y%m%d_%H%M%S") + ".zip")
@@ -4960,6 +5012,7 @@ class Controller:
                   "game_exit_code": self._session.process.poll() if self._session else None,
                   "lens_control": self.lens_cvar, "standard_aspect": self.standard_aspect,
                   "aspect_capture": dict(self._aspect_capture), "probe": self._probe_result,
+                  "probe_failure": self._probe_failure,
                   "recent_console_responses": self._last_output,
                   "pending_cvar_restoration": self._restore,
                   "pending_look_restoration": dict(self._look_restore),

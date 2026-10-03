@@ -398,6 +398,28 @@ class GameUiHandoffTests(unittest.TestCase):
         self.assertTrue(self.controller._native_manual)
         self.assertEqual(self.bridge.owner, "panel")
 
+    def test_unverified_f8_preserves_console_then_explicit_recheck_restores_editor(self):
+        self.controller.toggle_game_ui(True)
+        self.controller.toggle_console(True)
+        self.controller._invalidate_probe('replay preparation was cancelled')
+        self.bridge.editor_status = lambda: {'console_open': self.controller._console_open}
+        app = SimpleNamespace(controller=self.controller, busy=False,
+                              _submit=lambda _label, function: function())
+        self.console.requests.clear()
+        with self.assertRaisesRegex(RuntimeError, 'replay preparation was cancelled'):
+            editor_session.dispatch(app, {'action': 'panel', 'value': 1}, self.bridge)
+        self.assertTrue(self.controller._console_open)
+        self.assertEqual(self.bridge.owner, 'console')
+        self.assertEqual(self.console.requests, [])
+        # The documented explicit support check enables return in this same
+        # healthy replay; no process launch or playdemo retry is involved.
+        self.controller.probe()
+        editor_session.dispatch(app, {'action': 'panel', 'value': 1}, self.bridge)
+        self.assertFalse(self.controller._console_open)
+        self.assertTrue(self.controller._native_manual)
+        self.assertEqual(self.bridge.owner, 'panel')
+        self.assertEqual(self.console.sent, [])
+
     def test_stop_restores_original_automatic_cursor_and_hud_values(self):
         self.controller.stop()
         self.console.values["citadel_hud_visible"] = 0

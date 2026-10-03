@@ -16,6 +16,7 @@ class DesktopLayoutTests(unittest.TestCase):
         self.root.withdraw()
         self.submit = patch.object(DollyApp, "_submit").start()
         self.settings = patch.object(DollyApp, "_load_app_settings", return_value=AppSettings()).start()
+        patch("dolly.graphics_profiles.load_library", return_value={"format": 1, "selected": "", "profiles": []}).start()
         self.addCleanup(patch.stopall)
         self.app = DollyApp(self.root)
         self.addCleanup(self.close_app)
@@ -105,3 +106,38 @@ class DesktopLayoutTests(unittest.TestCase):
                              ttk.Style(frame).lookup("Card.TFrame", "background"))
             frame = frame.master
         self.assertEqual(str(frame.toggle.cget("style")), "Disclosure.Card.TButton")
+
+    def test_graphics_profile_selector_is_available_with_current_settings_default(self):
+        from dolly.graphics_profiles import CURRENT
+        self.assertEqual(self.app.graphics_profiles.selection.get(), CURRENT)
+        self.assertEqual(tuple(self.app.graphics_profiles.combo.cget("values")), (CURRENT,))
+        self.assertIn("next launch", self.app.graphics_profiles.status.get())
+
+
+class GraphicsProfileStartupFailureTests(unittest.TestCase):
+    def test_damaged_profile_library_reports_error_after_window_finishes_building(self):
+        from dolly.launcher import LaunchError
+        try:
+            root = tk.Tk()
+        except tk.TclError as error:
+            self.skipTest(str(error))
+        root.withdraw()
+        app = None
+        try:
+            with patch.object(DollyApp, '_submit'), \
+                 patch.object(DollyApp, '_load_app_settings', return_value=AppSettings()), \
+                 patch('dolly.graphics_profiles.load_library', side_effect=LaunchError('Damaged profile library')), \
+                 patch('dolly.gui.dialogs.show_error') as show:
+                app = DollyApp(root)
+                self.assertTrue(hasattr(app, 'log_widget'))
+                root.update_idletasks()
+                show.assert_called_once()
+                self.assertIn('Damaged profile library', app.graphics_profiles.status.get())
+                self.assertIn('Damaged profile library', app.log_widget.get('1.0', 'end'))
+        finally:
+            if app is not None:
+                app.closed = True
+                app.jobs.put(None)
+            for timer in root.tk.splitlist(root.tk.call('after', 'info')):
+                root.tk.call('after', 'cancel', timer)
+            root.destroy()

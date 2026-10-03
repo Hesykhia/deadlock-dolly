@@ -45,15 +45,8 @@ std::uintptr_t sceneBase = 0;
 Producer original = nullptr;
 ProducerSeptember originalSeptember = nullptr;
 bool septemberScene = false;
-struct SceneLayout {
-    std::uintptr_t object, table, producer, frame, stack, records, capacity, ids, transforms;
-    std::uintptr_t cpu_transforms, owner, gpu_buffer;
-};
-constexpr SceneLayout kLegacyScene{0x8cd2e0, 0x5d4fe8, 0x564b0,  0x8ce9b8, 0x8cfce8, 0x8cfde0,
-                                   0x8cfde8, 0x8cfc50, 0x8cfd40, 0x8cfce0, 0xc0,     0x60};
-constexpr SceneLayout kSeptemberScene{0x955cc0, 0x61e7d0, 0x5c8e0,  0x957458, 0x957be8, 0x957ce0,
-                                      0x957ce8, 0x957b48, 0x957c40, 0x957be0, 0xd8,     0x70};
-SceneLayout sceneLayout = kLegacyScene;
+SceneLayout sceneLayout{};
+const SceneProfile* sceneProfile = nullptr;
 std::atomic<PoseObserver> poseObserver{nullptr};
 bool configured = false, hashesOk = false, attempted = false, captured = false,
      producerInstalled = false;
@@ -317,9 +310,6 @@ std::atomic<unsigned> presentDeviceChanges{0};
 std::atomic<unsigned long long> drawHookCalls{0}, producerCalls{0}, producerKnownCalls{0};
 ULONGLONG lastTimeline = 0;
 
-constexpr unsigned char Prologue[] = {
-    0x48, 0x8b, 0xc4, 0x4c, 0x89, 0x48, 0x20, 0x48, 0x89, 0x50, 0x10, 0x48, 0x89, 0x48, 0x08, 0x55,
-    0x53, 0x48, 0x8d, 0x68, 0xe8, 0x48, 0x81, 0xec, 0x08, 0x01, 0x00, 0x00, 0x48, 0x89, 0x70, 0xe8};
 template <class T> bool read(std::uintptr_t address, T& output) noexcept {
     if (address < 0x10000 || address > 0x00007fffffffffffULL - sizeof(T))
         return false;
@@ -770,13 +760,9 @@ bool install(void* target) noexcept {
     if (!hashesOk || !sceneBase ||
         value<std::uintptr_t>(sceneBase + sceneLayout.object) != sceneBase + sceneLayout.table)
         return false;
-    constexpr unsigned char septemberPrologue[] = {0x48, 0x8b, 0xc4, 0x4c, 0x89, 0x48, 0x20, 0x4c,
-                                                   0x89, 0x40, 0x18, 0x48, 0x89, 0x50, 0x10, 0x48,
-                                                   0x89, 0x48, 0x08, 0x55, 0x53, 0x48, 0x8d, 0x68,
-                                                   0xe8, 0x48, 0x81, 0xec, 0x08, 0x01, 0x00, 0x00};
-    unsigned char bytes[sizeof(Prologue)]{};
-    if (!read(reinterpret_cast<std::uintptr_t>(target), bytes) ||
-        std::memcmp(bytes, septemberScene ? septemberPrologue : Prologue, sizeof(bytes)))
+    unsigned char bytes[32]{};
+    if (!sceneProfile || !read(reinterpret_cast<std::uintptr_t>(target), bytes) ||
+        std::memcmp(bytes, sceneProfile->prologue, sizeof(bytes)))
         return false;
     const auto init = MH_Initialize();
     if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED)
@@ -934,17 +920,16 @@ void mapped_upload(ID3D11DeviceContext* context, ID3D11Resource* resource, unsig
         reinterpret_cast<std::uintptr_t>(mappedBuffer.Get()) == buffer(sceneLayout.records))
         submittedOwners.invalidate(); // Unsupported writer: no stale ownership.
 }
-void configure(std::uintptr_t base, bool hashes_ok, bool september, bool build6726) noexcept {
+void configure(std::uintptr_t base, const SceneProfile* profile) noexcept {
     if (configured)
         return;
     configured = true;
-    sceneBase = hashes_ok ? base : 0;
-    hashesOk = hashes_ok;
-    septemberScene = september && hashes_ok;
-    sceneLayout = septemberScene ? kSeptemberScene : kLegacyScene;
-    if (hashes_ok && build6726)
-        sceneLayout.table = 0x61e860;
-    layoutRequested.store(hashes_ok, std::memory_order_release);
+    sceneProfile = base ? profile : nullptr;
+    hashesOk = sceneProfile != nullptr;
+    sceneBase = hashesOk ? base : 0;
+    septemberScene = hashesOk && sceneProfile->september;
+    sceneLayout = hashesOk ? sceneProfile->layout : SceneLayout{};
+    layoutRequested.store(hashesOk, std::memory_order_release);
     HMODULE self = nullptr;
     wchar_t path[32768]{};
     if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |

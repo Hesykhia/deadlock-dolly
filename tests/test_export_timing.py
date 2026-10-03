@@ -80,6 +80,52 @@ class ExportTimingTests(unittest.TestCase):
             self.controller.set_export_timing(60)
         self.assertEqual(self.writes, [])
 
+    def test_failed_timing_restore_retains_originals_for_retry(self):
+        self.values.update(host_framerate=90, r_wait_on_present=0)
+        self.controller.set_export_timing(60, .5)
+        original = self.controller._export_timing
+        self.controller._request = Mock(side_effect=RuntimeError("connection lost"))
+        with self.assertRaisesRegex(RuntimeError, "connection lost"):
+            self.controller.clear_export_timing()
+        self.assertIs(self.controller._export_timing, original)
+        self.controller._request = self.request
+        with self.assertRaisesRegex(RuntimeError, "Restore.*timing"):
+            self.controller.set_export_timing(30)
+        self.controller.clear_export_timing()
+        self.assertEqual(self.values, {"host_framerate": 90, "r_wait_on_present": 0})
+        self.assertIsNone(self.controller._export_timing)
+
+    def test_timing_restore_requires_matching_readback(self):
+        self.values.update(host_framerate=90, r_wait_on_present=0)
+        self.controller.set_export_timing(60)
+        self.clamp = True
+        with self.assertRaisesRegex(RuntimeError, "restore.*timing"):
+            self.controller.clear_export_timing()
+        self.assertIsNotNone(self.controller._export_timing)
+        self.clamp = False
+        self.controller.clear_export_timing()
+        self.assertEqual(self.values, {"host_framerate": 90, "r_wait_on_present": 0})
+
+    def test_lost_console_keeps_timing_originals_without_writing(self):
+        self.controller.set_export_timing(60)
+        self.writes.clear()
+        self.controller._console.is_connected = False
+        with self.assertRaisesRegex(RuntimeError, "Reconnect"):
+            self.controller.clear_export_timing()
+        self.assertEqual(self.writes, [])
+        self.assertIsNotNone(self.controller._export_timing)
+        self.controller._console.is_connected = True
+        self.controller.clear_export_timing()
+        self.assertIsNone(self.controller._export_timing)
+
+    def test_dead_process_discards_timing_originals_without_writing(self):
+        self.controller.set_export_timing(60)
+        self.writes.clear()
+        self.controller._alive.return_value = False
+        self.controller.clear_export_timing()
+        self.assertEqual(self.writes, [])
+        self.assertIsNone(self.controller._export_timing)
+
 
 class ExportResolutionTests(unittest.TestCase):
     setUp = ExportTimingTests.setUp

@@ -1,5 +1,39 @@
 # Video and ReShade
 
+## Replay graphics profiles
+
+In **Settings > Replay graphics profiles**, save your current graphics under a
+name such as Recording, or import a saved `video.txt`. Close Deadlock before
+using **Save current graphics**. The preview lists the quality values to keep
+and the fields excluded from the profile. Choose a profile for the next Dolly
+replay launch; **Use current game settings** is the default.
+
+Profiles include supported shadow, fog, occlusion, texture, shader, bloom,
+anti-aliasing, motion blur and related quality controls. They preserve the
+destination's resolution, display mode, GPU information, upscaler, render scale
+and unrecognized settings. Use **Display launch options** for window size.
+There are no generated Ultra presets: save settings you have chosen in the
+game. Imported values are checked for format, not certified for every GPU.
+
+Dolly finds the signed-in Steam user's `video.txt`, previews changes, backs up
+the actual pre-launch bytes, and applies the selected values only for its replay
+session. The file is restored after Deadlock exits, including when Dolly closes
+first. Interrupted sessions are recovered on the next launch or through
+**Settings > Troubleshooting & recovery > Recover configuration**. Never delete
+the session logs while recovery is pending: they contain the originals.
+
+Unexpected edits to `video.txt` are preserved and reported with the backup path;
+compare those files before resolving the conflict. Dolly does not overwrite an
+unknown newer configuration. A game update that changes the video format or
+removes a profile field requires a new supported profile. Profiles do not swap
+arbitrary `gameinfo.gi` files or repair mods; Dolly retains its reviewed editing
+configuration and existing compatibility checks.
+
+The camera support check also records available profile render controls in
+diagnostics. Differences or unreadable values produce a warning without writing
+additional controls. This readback is not a visual-quality guarantee. Shot and
+export effects may deliberately change graphics later in the session.
+
 ## Record an MP4
 
 1. Open a replay through Dolly using DirectX 11 and Native camera mode.
