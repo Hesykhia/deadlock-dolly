@@ -23,6 +23,10 @@ inline constexpr RendererDiagnosticLayout kRendererDiagnosticLayouts[] = {
      0x1288, 0xfb8, 0x3fdb40, 0x1ec000, 0x42c1e4},
     {"d0b561df9ca1f02e8e78999e7828a03cd20b95d53de0d95215993e58efe0b59c", 0x4b7000, 0x6abd8832,
      0x436580, 0x498980, 0x1288, 0xfb8, 0x3fdb40, 0x1ec000, 0x42c204},
+    // Build 6739/6745 renderer (unchanged through 6745): instruction-verified
+    // against the reviewed 00ee98d8 dump; only the table end moved.
+    {"ca0cd37c078fd070d9b8f4708fc892971d2a35f4c637624b366395e205723889", 0x4b7000, 0x6ac0017d,
+     0x436580, 0x498980, 0x1288, 0xfb8, 0x3fdb40, 0x1ec000, 0x42c204},
 };
 inline const RendererDiagnosticLayout*
 renderer_diagnostic_layout(const char* hash, std::uint32_t image_size,

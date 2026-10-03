@@ -61,7 +61,7 @@ constexpr char kScene6726Hash[] =
     "026a6e953e6bf1f2fdbcf8388ba5f6868d830ad54216dcf4518df136be50fc5a";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
-constexpr char kUnlockerHash[] = "bcfda8e57d612f7d172da701bd4ee2190b52ba8a841e42ba2d0ef9e1fefe29f1";
+constexpr char kUnlockerHash[] = "f7550389cf079c29fcda5f82ca73f4282756ff791764a325adffd593b363ea30";
 // Reviewed scenesystem.dll for the player layer capture. Any other build keeps
 // the capture disabled instead of patching unverified producer code; re-review
 // this hash in the same turn as a game update.
@@ -69,10 +69,14 @@ constexpr char kPlayerCaptureScenesystemHash[] =
     "e480a7f28ae073dd4a83833bfee8db44bfff22f097147f2f697a109b2ea2de4b";
 constexpr char kSeptemberScenesystemHash[] =
     "3ece2e69f0f779e9bb05f1bd52b524df7adc5da262ddf9766ea71d1b01ce248d";
+constexpr char kScene6739Hash[] =
+    "eb8082bbb3b1895ae37c90181192e0f4b5787fe8fa2986114dd6173fdc234849";
 constexpr char kSoundSystemHash[] =
     "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr char kSeptemberSoundSystemHash[] =
     "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281";
+constexpr char kSound6739Hash[] =
+    "15b30cb326d8bbeb7c5fbe7a20aabd3d58d6d790ed344989f8d015c2c290981b";
 constexpr std::uintptr_t kDemoGlobal = 0x61b618, kDemoTable = 0x535730, kEngineTable = 0x540128;
 struct EngineLayout {
     std::uintptr_t demo_global, demo_table, engine_table;
@@ -1467,10 +1471,12 @@ static DWORD WINAPI worker(void*) {
         const bool scene6726 = module_matches(scene_module, kScene6726Hash, 0x9c6000);
         const bool september_scene =
             module_matches(scene_module, kSeptemberScenesystemHash, 0x9c6000);
+        const bool scene6739 = module_matches(scene_module, kScene6739Hash, 0x9c6000);
         // Scene records reference renderer-owned wrappers; require the reviewed
         // pair before selecting the wrapper member (legacy +0x60, build 6712 +0x70).
         const auto renderer_module = GetModuleHandleW(L"rendersystemdx11.dll");
-        const auto& renderer_layout = kRendererDiagnosticLayouts[scene6726         ? 2
+        const auto& renderer_layout = kRendererDiagnosticLayouts[scene6739         ? 3
+                                                                 : scene6726       ? 2
                                                                  : september_scene ? 1
                                                                                    : 0];
         const bool scene_renderer_pair =
@@ -1496,7 +1502,8 @@ static DWORD WINAPI worker(void*) {
         sound_capture_install(sound,
                               module_matches(sound, kSoundSystemHash, 0x678000) ||
                                   module_matches(sound, kSeptemberSoundSystemHash, 0x6bf000) ||
-                                  module_matches(sound, kSound6726Hash, 0x6bf000));
+                                  module_matches(sound, kSound6726Hash, 0x6bf000) ||
+                                  module_matches(sound, kSound6739Hash, 0x6bf000));
         // Hook and original trampoline remain resident until process exit. Losing
         // the editor only releases ownership, avoiding code-unload races in a view.
         std::shared_ptr<const NativeShot> shot;
@@ -1529,7 +1536,8 @@ static DWORD WINAPI worker(void*) {
                     sound_capture_install(
                         module, module_matches(module, kSoundSystemHash, 0x678000) ||
                                     module_matches(module, kSeptemberSoundSystemHash, 0x6bf000) ||
-                                    module_matches(module, kSound6726Hash, 0x6bf000));
+                                    module_matches(module, kSound6726Hash, 0x6bf000) ||
+                                    module_matches(module, kSound6739Hash, 0x6bf000));
                 }
             }
             if (diagnostic_now >= next_renderer_probe) {

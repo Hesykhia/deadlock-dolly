@@ -9,7 +9,7 @@ from .replay_camera import CLIENT_SHA256, ReplayCameraMonitor
 
 TIER0_SHA256 = '6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332'
 CLIENT_SPANS = ((0x8f000, 0xd66), (0x90a50, 0xa6), (0x232ff0, 0x73),
-                (0x23cd930, 0x81), (0x250900, 0xa), (0x607d56, 0xb))
+                (0x23cd8a0, 0x81), (0x250900, 0xa), (0x607d56, 0xb))
 TIER0_SPANS = ((0x20fd40, 0x279),)
 REFS = {
     'pivot_x_offset': 0x3639ef0, 'pivot_y_offset': 0x3639f00,
@@ -24,7 +24,7 @@ REFS = {
 # Same blocked bits as the existing reviewed native effect binding.
 BLOCKED_FLAGS = sum(1 << bit for bit in (2, 9, 10, 13, 15, 18, 22))
 OWN_HEALTH_HUD = 'citadel_hud_hide_own_health'
-OWN_HEALTH_SPANS = ((0x1b8d10, 0xae), (0x1af5d40, 0x323), (0x1ad7240, 0x2f))
+OWN_HEALTH_SPANS = ((0x1b8d10, 0xae), (0x1af5cb0, 0x323), (0x1ad72b0, 0x2f))
 # Current settings-checkbox binding marks its own ConVar with bit30. This
 # allowance belongs only to this reviewed panel, never the shared rig policy.
 OWN_HEALTH_ALLOWED_FLAGS = 0x40080088

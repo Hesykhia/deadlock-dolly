@@ -18,7 +18,7 @@ class FollowTargetTests(unittest.TestCase):
         put(controller + 0x3ef, 1, '<B')
         put(pawn + 0x3ef, 1, '<B')
         for vtable, slot, getter in ((0x262d2b8, 0x500, 0x52c8a0),
-                                    (0x2639da0, 0x4e0, 0x15f1320),
+                                    (0x2639da0, 0x4e0, 0x15f1340),
                                     (0x2639da0, 0xad8, 0x587ea0),
                                     (0x26b05a8, 0x4e8, 0x709c70)):
             put(m.base + vtable + slot, m.base + getter)

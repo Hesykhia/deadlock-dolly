@@ -1,13 +1,14 @@
 # Deadlock Dolly — user guide
 
 Dolly connects its desktop editor and in-game panel to the same camera project.
-Version 0.6.8-alpha supports Deadlock build 6742, keeps the native camera,
+Version 0.6.9-alpha supports Deadlock build 6745, keeps the native camera,
 automatic replay loading, Game Follow and health verification, particles such
-as confetti, and the cvar unlocker reviewed for that build. Game Follow now
-attaches for every hero, including the new familiar/clone pawn family used by
-heroes such as Chrono/Paradox. Selecting a hero no longer carries their death
-grayscale or red damage vignette into Dolly's camera, and F9 still returns the
-replay timeline reliably. The in-game camera list and shared Undo/Redo,
+as confetti, the cvar unlocker and game audio, all reviewed for that build.
+Game Follow attaches for every hero, including the new familiar/clone pawn
+family. Selecting a hero no longer carries their death grayscale or red damage
+vignette into Dolly's camera, and F9 still returns the replay timeline
+reliably. Player-layer/depth capture remains disabled on this build until its
+scene producer is re-certified. The in-game camera list and shared Undo/Redo,
 captured lens settings, and the assertion-dialog and native depth-of-field
 safeguards are unchanged. Real-time game audio, fixed-step silent layers and
 optional ReShade are available.

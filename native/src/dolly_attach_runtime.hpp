@@ -26,8 +26,11 @@ inline bool september_6730 = false;
 inline bool september_6731 = false;
 inline bool september_6739 = false;
 inline bool september_6742 = false;
+inline bool september_6745 = false;
 inline void configure_client(HMODULE client) {
     configured_client = client;
+    september_6745 = module_matches(
+        client, "948260612c9b7243964e4a0d5f0f6252ae846ceaa6e8c0e95b83bd5eba4caf60", 0x4150000);
     september_6742 = module_matches(
         client, "255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657", 0x4150000);
     september_6739 = module_matches(
@@ -46,7 +49,7 @@ inline void configure_client(HMODULE client) {
         module_matches(client, "bc0dae383a2cd65dc1616515cdffa6c947fd057e5590edf0f5a01bd953ec19c9",
                        0x40f4000) ||
         september_hotfix || september_latest || september_6726 || september_6730 || september_6731 ||
-        september_6739 || september_6742;
+        september_6739 || september_6742 || september_6745;
     september_entity_code = false;
     if (!september_client)
         return;
@@ -73,8 +76,12 @@ inline void configure_client(HMODULE client) {
     const unsigned char initializer6742[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
                                              0x24, 0x28, 0x48, 0x89, 0x0d, 0x50, 0x11,
                                              0xd2, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
+    const unsigned char initializer6745[] = {0x0f, 0xb6, 0x44, 0x24, 0x28, 0x88, 0x44,
+                                             0x24, 0x28, 0x48, 0x89, 0x0d, 0xe0, 0x11,
+                                             0xd2, 0x01, 0xe9, 0x9b, 0xbf, 0xff, 0xff};
     september_entity_code =
-        read_memory(reinterpret_cast<std::uintptr_t>(client) + (september_6742     ? 0x20318d0
+        read_memory(reinterpret_cast<std::uintptr_t>(client) + (september_6745     ? 0x2031840
+                                                                : september_6742   ? 0x20318d0
                                                                 : september_6739   ? 0x2031870
                                                                 : september_6731   ? 0x200a320
                                                                 : september_6730   ? 0x2009b40
@@ -84,7 +91,8 @@ inline void configure_client(HMODULE client) {
                                                                                    : 0x20049f0),
                     actual, sizeof(actual)) &&
         std::memcmp(actual,
-                    september_6742     ? initializer6742
+                    september_6745     ? initializer6745
+                    : september_6742   ? initializer6742
                     : september_6739   ? initializer6739
                     : september_6731   ? initializer6731
                     : september_6730   ? initializer6730
@@ -199,7 +207,8 @@ inline bool locate_entity_system(HMODULE client, std::uintptr_t& out) noexcept {
         return false;
     if (client == configured_client && september_client) {
         std::uintptr_t candidate = 0, actual_vtable = 0;
-        const std::uintptr_t reviewed_vtable = september_6742     ? 0x2a40df0
+        const std::uintptr_t reviewed_vtable = september_6745     ? 0x2a40df0
+                                               : september_6742   ? 0x2a40df0
                                                : september_6739   ? 0x2a40df0
                                                : september_6731   ? 0x2a0c900
                                                : september_6730   ? 0x2a0c8d0
@@ -208,7 +217,8 @@ inline bool locate_entity_system(HMODULE client, std::uintptr_t& out) noexcept {
                                                : september_hotfix ? 0x2a07c10
                                                                   : 0x2a07c30;
         if (!september_entity_code || vtable != base + reviewed_vtable ||
-            !read_value(base + (september_6742     ? 0x3d52a30
+            !read_value(base + (september_6745     ? 0x3d52a30
+                               : september_6742    ? 0x3d52a30
                                : september_6739    ? 0x3d52a30
                                : september_6731    ? 0x3d023a0
                                : september_6730    ? 0x3d023a0

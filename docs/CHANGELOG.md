@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.9 alpha — Deadlock build 6745, audio restored
+
+**0.6.9-alpha**
+
+- **Support for the newest Deadlock update.** *Before:* after Deadlock updated to build 6745, Dolly refused the new build. *After:* the native camera, automatic replay loading, Game Follow, particles, the damage/death filter and the cvar unlocker are reviewed for build 6745.
+- **Game audio works again on the current build.** *Before:* clip audio was disabled after the soundsystem changed. *After:* the reviewed audio hooks are relocated and enabled for the current soundsystem.
+- **Renderer diagnostics follow the current renderer.** *Before:* the optional renderer-pressure diagnostics stopped on the newer renderer. *After:* the reviewed layout is mapped for the current rendersystemdx11.
+
 ## 0.6.8 alpha — Game Follow for every hero
 
 **0.6.8-alpha**

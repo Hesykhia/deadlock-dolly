@@ -8,16 +8,16 @@ from .replay_camera import CLIENT_SHA256
 from .preload import _image_bytes
 from .replay_camera import ReplayCameraMonitor
 
-TARGET_SPANS = ((0x16153c0, 0x79), (0x864ad0, 5),
+TARGET_SPANS = ((0x16153e0, 0x79), (0x864ad0, 5),
                 (0x864ae0, 0x5c), (0x836270, 0xc1))
 # Exact stock HUD getter chain and its entity predicates. Camera mode alone
 # cannot prove that health/ability children have a non-null player receiver.
-HEALTH_CONTEXT_SPANS = ((0x930ae0, 0x21), (0x16153a0, 0x17),
+HEALTH_CONTEXT_SPANS = ((0x930ae0, 0x21), (0x16153c0, 0x17),
                         (0x579c90, 0xfc), (0x815ee0, 0x11),
                         (0x815f00, 0x11), (0x864b70, 0x89),
-                        (0x1b3a9f0, 0x129), (0x1b3b040, 0x41),
+                        (0x1b3a960, 0x129), (0x1b3b000, 0x41),
                         (0x8148d0, 0x37), (0x4a3430, 5),
-                        (0x709c70, 3), (0x15f1320, 3),
+                        (0x709c70, 3), (0x15f1340, 3),
                         (0x52c8a0, 3), (0x587ea0, 3), (0x84e4f0, 0x17c))
 # Reviewed exact-build vtables. Some heroes use the familiar/clone pawn class
 # for their selected target, and the local pawn can be either the observer
@@ -153,7 +153,7 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
                 raise PreloadError(
                     'Health HUD requires the reviewed player pawn; reveal deferred.')
             if _require_health_context:
-                if (pointer(self.base + PLAYER_PAWN_VTABLE + 0x4e0) != self.base + 0x15f1320
+                if (pointer(self.base + PLAYER_PAWN_VTABLE + 0x4e0) != self.base + 0x15f1340
                         or pointer(self.base + PLAYER_PAWN_VTABLE + 0xad8) != self.base + 0x587ea0):
                     raise PreloadError('Health HUD player predicates differ from the reviewed build.')
                 target_controller = resolve(uint(target + 0x51c))

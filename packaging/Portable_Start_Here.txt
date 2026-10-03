@@ -134,17 +134,17 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
-0.6.8-alpha supports reviewed Deadlock build 6742. Game Follow now attaches
-for every hero, including the new familiar/clone pawn family. Particle effects
-such as confetti render on this build again, and selecting a hero no longer
-carries their death grayscale or red damage vignette into Dolly's camera.
-Returning to the game with F9 keeps the replay timeline, HUD and cursor
-available even when the stock health-panel view cannot be verified; the health
-panel stays safely hidden until a valid view exists. Camera-list selection,
-double-click view, Delete and shared Undo/Redo are available in-game. The tabs
-are CAMERA, FOLLOW, BONE PICKER, LOOK and EXPORT. In the panel, Ctrl+Z undoes
-shot edits; Ctrl+Y or Ctrl+Shift+Z redoes them. History does not rewind the
-replay.
+0.6.9-alpha supports reviewed Deadlock build 6745. Game audio is available
+again, and Game Follow attaches for every hero, including the new
+familiar/clone pawn family. Particle effects such as confetti render on this
+build again, and selecting a hero no longer carries their death grayscale or
+red damage vignette into Dolly's camera. Returning to the game with F9 keeps
+the replay timeline, HUD and cursor available even when the stock health-panel
+view cannot be verified; the health panel stays safely hidden until a valid
+view exists. Camera-list selection, double-click view, Delete and shared
+Undo/Redo are available in-game. The tabs are CAMERA, FOLLOW, BONE PICKER,
+LOOK and EXPORT. In the panel, Ctrl+Z undoes shot edits; Ctrl+Y or
+Ctrl+Shift+Z redoes them. History does not rewind the replay.
 
 Saved camera markers keep a steady anchored size and a consistent shape at any
 framing or aspect, including while previewing camera paths. If Deadlock never

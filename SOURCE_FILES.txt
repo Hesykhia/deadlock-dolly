@@ -467,3 +467,7 @@ third_party/cvar_unlocker/unlocker-build-6739.patch
 
 native/profiles/deadlock-2026-10-02-6742-complete.json
 third_party/cvar_unlocker/unlocker-build-6742.patch
+
+native/profiles/deadlock-2026-10-02-6745-complete.json
+native/profiles/soundsystem-2026-10-02-6745.json
+third_party/cvar_unlocker/unlocker-build-6745.patch

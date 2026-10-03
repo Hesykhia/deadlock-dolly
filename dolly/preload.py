@@ -24,7 +24,7 @@ class _ReviewedBuildMismatch(PreloadError):
     """A successful read disagreed with the reviewed build; never retried away."""
 
 
-CLIENT_SHA256 = "255395880ac91d37c8b71124906f4f48737159a8cf4c9d1732035d1e27927657"
+CLIENT_SHA256 = "948260612c9b7243964e4a0d5f0f6252ae846ceaa6e8c0e95b83bd5eba4caf60"
 RESOURCE_SHA256 = "86d09bc988ab3609d43473c3fdc07246bd8958e7f8fc50af4bbba4ffe05a3da0"
 MANAGER = 0x3184890
 MANAGER_VTABLE = 0x2650190
@@ -34,13 +34,13 @@ RESOURCE_QUERY = 0x1c860
 INTRO_GLOBAL = 0x3c347f8
 INTRO_VTABLE = 0x2ae28a8
 
-# Build 6742: status observes two lifecycle flags and consumes the finished
+# Build 6745: status observes two lifecycle flags and consumes the finished
 # job handle itself. Check the producer/callback as well as the UI predicate.
 CLIENT_CODE_SPANS = (
-    (0x5ef9d0, 8), (0x5f8c70, 0x7e), (0x1ce4320, 0x10a),
+    (0x5ef9d0, 8), (0x5f8c70, 0x7e), (0x1ce4290, 0x10a),
     (0x5e0bfe, 0x33), (0x5fc010, 10), (0x5d5280, 0x4b),
-    (0x1aad4c5, 0x65), (0x1acab50, 0xe6),
-    (0x1af0ffe, 0x1d1), (0x1ad9600, 0x42), (0x1ab63a0, 0x22a),
+    (0x1aad4e5, 0x65), (0x1acabc0, 0xe6),
+    (0x1af0eee, 0x1d1), (0x1ad95b0, 0x42), (0x1ab63c0, 0x22a),
 )
 
 

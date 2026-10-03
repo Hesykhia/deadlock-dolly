@@ -13,16 +13,16 @@ import re
 from generate_profile import Image, ProfileError, ROOT, build_signature, resolve_game_dir
 
 LEGACY_PROFILE = ROOT / "native/profiles/soundsystem-2026-09-09.json"
-PROFILE = ROOT / "native/profiles/soundsystem-2026-09-29.json"
+PROFILE = ROOT / "native/profiles/soundsystem-2026-10-02-6745.json"
 HEADER = ROOT / "native/src/dolly_sound_compat_generated.hpp"
-REVIEWED_HASH = "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281"
+REVIEWED_HASH = "15b30cb326d8bbeb7c5fbe7a20aabd3d58d6d790ed344989f8d015c2c290981b"
 # Reviewed prefixes span complete instructions. Stop has split unwind records;
 # its first .pdata entry covers only the prologue, not the function body.
-ANCHORS = (("voice_start", 0x96400, 0x120, 14),
-           ("voice_stop", 0x985f0, 0x120, 13),
-           ("voice_map_remove", 0x7be50, 0x120, 20),
-           ("vmix_start", 0x1a4b10, 0x120, 14),
-           ("event_name", 0x1bce50, 91, 6))
+ANCHORS = (("voice_start", 0x96570, 0x120, 14),
+           ("voice_stop", 0x98760, 0x120, 13),
+           ("voice_map_remove", 0x7bf20, 0x120, 20),
+           ("vmix_start", 0x1a4c80, 0x120, 14),
+           ("event_name", 0x1bcfc0, 91, 6))
 
 
 def build_sound_profile(image):
@@ -46,7 +46,7 @@ def build_sound_profile(image):
         for ins in instructions:
             if any(op.type == capstone.x86.X86_OP_MEM and
                    op.mem.base == capstone.x86.X86_REG_RIP and
-                   ins.address + ins.size + op.mem.disp == image.base + 0x658dd8
+                   ins.address + ins.size + op.mem.disp == image.base + 0x658de0
                    for op in ins.operands):
                 references.append(dict(symbol=index, offset=ins.address-image.base-rva,
                                        displacement=ins.disp_offset, size=ins.size))

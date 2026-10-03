@@ -14,6 +14,13 @@ already invalidated, producing an access violation on normal game exit.
 
 ## Changes
 
+- `unlocker-build-6745.patch` (apply after the 6742 patch): adds the exact
+  October2 hotfix server hash; the reviewed Source2ServerConfig001 vtable and
+  all three method bodies are pure relocations of 6742 (slots +0x70). Connect
+  and Disconnect keep the this-8 thunk ABI and the tick method still returns a
+  float. Unknown module identities remain refused. Import, offline ABI and
+  lifecycle checks pass; build6745 live acceptance pending.
+
 - `unlocker-build-6742.patch` (apply after the 6739 patch): adds the exact
   October2 hotfix server hash; the reviewed Source2ServerConfig001 vtable and
   all three method bodies are unchanged from 6739. Connect/Disconnect keep the
@@ -101,7 +108,7 @@ provenance.
 
 Apply `unlocker-shutdown.patch` to the pinned upstream source and
 `sdk-disconnect.patch` to its pinned SDK first, then apply
-`unlocker-build-6712.patch` at the source root. Then apply `unlocker-build-6722.patch`, `unlocker-build-6723.patch`, `unlocker-build-6726.patch`, `unlocker-build-6728.patch`, `unlocker-build-6730.patch`, `unlocker-build-6731.patch`, `unlocker-build-6739.patch` and `unlocker-build-6742.patch` in order.
+`unlocker-build-6712.patch` at the source root. Then apply `unlocker-build-6722.patch`, `unlocker-build-6723.patch`, `unlocker-build-6726.patch`, `unlocker-build-6728.patch`, `unlocker-build-6730.patch`, `unlocker-build-6731.patch`, `unlocker-build-6739.patch`, `unlocker-build-6742.patch` and `unlocker-build-6745.patch` in order.
 The 6712 patch includes `CMakeLists.txt`
 and offline tests. With the SDK at `sdk/`:
 
