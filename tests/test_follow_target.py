@@ -138,7 +138,8 @@ class FollowTargetTests(unittest.TestCase):
             put(identity + 0x10, handle, '<I')
             put(instance + 0x10, identity)
             put(instance, m.base + vt)
-        put(pawn + 0xe40, services)
+        put(pawn + 0xe98, services)
+        put(pawn + 0xe40, 0)  # Prior-build field was null in the 6745 failure.
         put(services, m.base + 0x26b0ff0)
         put(m.base + 0x26b0ff0 + 0xf0, m.base + 0x864ad0)
         put(m.base + 0x26b0ff0 + 0x100, m.base + 0x864ae0)
@@ -157,6 +158,32 @@ class FollowTargetTests(unittest.TestCase):
         m, blocks, *_ = self.fixture()
         blocks[0x40000] = struct.pack('<Q', m.base + 0x2639da0)
         self.assertEqual(m.sample_target()['handle'], 0x10002)
+
+    def test_prior_services_field_cannot_rescue_missing_current_services(self):
+        for pawn_vtable in (0x262d2b8, 0x2639da0):
+            with self.subTest(pawn_vtable=hex(pawn_vtable)):
+                m, blocks, _, services, _ = self.fixture()
+                blocks[0x40000] = struct.pack('<Q', m.base + pawn_vtable)
+                blocks[0x40000 + 0xe40] = struct.pack('<Q', services)
+                blocks[0x40000 + 0xe98] = struct.pack('<Q', 0)
+                with self.assertRaisesRegex(PreloadError, 'observer services.*got null'):
+                    m.sample_selection_context()
+
+    def test_services_pointer_change_during_selection_is_refused(self):
+        m, blocks, *_ = self.fixture()
+        address = 0x40000 + 0xe98
+        original_read = m.memory.read.side_effect
+        reads = 0
+        def changing_read(where, size):
+            nonlocal reads
+            if where == address:
+                reads += 1
+                if reads > 1:
+                    return struct.pack('<Q', 0)
+            return original_read(where, size)
+        m.memory.read.side_effect = changing_read
+        with self.assertRaisesRegex(PreloadError, 'changed during'):
+            m.sample_selection_context()
 
     def test_familiar_clone_target_is_accepted_for_follow(self):
         m, blocks, *_ = self.fixture()

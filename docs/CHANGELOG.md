@@ -1,5 +1,12 @@
 # Changes
 
+## 0.6.10 alpha — Game Follow and shot playback on build 6745
+
+**0.6.10-alpha**
+
+- **Game Follow reads the current player view correctly.** *Before:* selecting a hero could fail with "observer services object type differs (got null)." *After:* Dolly uses the verified observer-services field for build 6745 while retaining its player and replay checks.
+- **Fix the health-panel check that blocked shot playback.** *Before:* the same outdated field left health-panel restoration pending, and starting a shot reported "Previous settings still need restoration." *After:* the check uses the current game layout so a valid hero view can finish restoration and unblock playback.
+
 ## 0.6.9 alpha — Deadlock build 6745, audio restored
 
 **0.6.9-alpha**

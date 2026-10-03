@@ -1,7 +1,9 @@
 # Deadlock Dolly — user guide
 
 Dolly connects its desktop editor and in-game panel to the same camera project.
-Version 0.6.9-alpha supports Deadlock build 6745, keeps the native camera,
+Version 0.6.10-alpha corrects Game Follow and health-panel verification on
+Deadlock build 6745, including the pending-restoration error that could block
+shot playback. It keeps the native camera,
 automatic replay loading, Game Follow and health verification, particles such
 as confetti, the cvar unlocker and game audio, all reviewed for that build.
 Game Follow attaches for every hero, including the new familiar/clone pawn

@@ -9,7 +9,8 @@ from .preload import _image_bytes
 from .replay_camera import ReplayCameraMonitor
 
 TARGET_SPANS = ((0x16153e0, 0x79), (0x864ad0, 5),
-                (0x864ae0, 0x5c), (0x836270, 0xc1))
+                (0x864ae0, 0x5c), (0x836270, 0xc1),
+                (0x815ee0, 0x11), (0x815f00, 0x11))
 # Exact stock HUD getter chain and its entity predicates. Camera mode alone
 # cannot prove that health/ability children have a non-null player receiver.
 HEALTH_CONTEXT_SPANS = ((0x930ae0, 0x21), (0x16153c0, 0x17),
@@ -29,6 +30,10 @@ PLAYER_PAWN_VTABLE = 0x2639da0
 FAMILIAR_CLONE_PAWN_VTABLE = 0x27e6900
 SERVICES_VTABLES = (0x26b0ff0, 0x2a52388)
 CONTROLLER_FINAL_VTABLE = 0x26b0578
+# Build 6745: C_BasePlayerPawn::m_pObserverServices schema field and both
+# stock pawn getters (0x815ee0/0x815f00) agree on +0xe98. The old +0xe40
+# field no longer holds observer services. Audit those getters for Follow too.
+OBSERVER_SERVICES_OFFSET = 0xe98
 
 
 class FollowTargetMonitor(FollowCapabilityMonitor):
@@ -130,7 +135,7 @@ class FollowTargetMonitor(FollowCapabilityMonitor):
                     or read(pawn + 0x3ef, 1)[0] in (2, 3)
                     or pointer(self.base + OBSERVER_PAWN_VTABLE + 0x500) != self.base + 0x52c8a0):
                 raise PreloadError('Health HUD requires the reviewed spectator player branch.')
-        services = pointer(pawn + 0xe40)
+        services = pointer(pawn + OBSERVER_SERVICES_OFFSET)
         require_type(services, SERVICES_VTABLES, 'observer services')
         vtable = pointer(services)
         if (pointer(vtable + 0xf0) != self.base + 0x864ad0
