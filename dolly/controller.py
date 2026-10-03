@@ -835,12 +835,12 @@ class Controller:
                       startup_stage="preload_ready")
 
     def _wait_replay_camera(self, bridge, cancel_event):
-        """Wait for the stock camera, after the first full replay packet."""
+        """Wait for the stock camera and HUD after the first full replay packet."""
         monitor = ReplayCameraMonitor(self._session)
         previous_ready = None
         try:
             self._startup_evidence['replay_camera_identity'] = monitor.identity
-            self._message("Waiting for the replay intro camera to finish…",
+            self._message("Waiting for the replay intro and HUD to finish…",
                           startup_stage="waiting_replay_camera")
 
             def ready():
@@ -849,7 +849,7 @@ class Controller:
                 native = bridge.status() if bridge is not None else None
                 if native is not None:
                     self._require_native_demo(native, allow_idle=True)
-                sample = monitor.sample()
+                sample = monitor.sample_startup()
                 self._startup_evidence['replay_camera'] = dict(sample, tick=info.get('tick'))
                 progress = int(native['frame_count']) if native is not None else int(info['tick'])
                 if sample.get('coherent') and sample.get('ready') and int(info.get('tick') or 0) >= 2:
@@ -860,7 +860,7 @@ class Controller:
                     previous_ready = None
                 return None
 
-            self._startup_wait(ready, "waiting for the replay intro camera to finish",
+            self._startup_wait(ready, "waiting for the replay intro and HUD to finish",
                                cancel_event, timeout=90)
         finally:
             monitor.close()
@@ -2630,6 +2630,11 @@ class Controller:
                 enabled = not self._console_open if self._console_open is not None else True
             bridge = self._native_bridge()
             editor_configure = getattr(bridge, "configure_editor", None)
+            # Startup closes the console before preload/replay readiness. Keep
+            # the editor's recovery keys enabled without opening its panel over
+            # the hideout. Only a verified replay may return to the panel.
+            return_owner = ("game_ui" if self._game_ui_visible else
+                            "panel" if self._probe_result else "disabled")
             if callable(editor_configure):
                 # A seek already in progress may have overwritten the optimistic
                 # F7 owner before this queued event runs. Suspend input again
@@ -2640,7 +2645,7 @@ class Controller:
                 self._request(command)
             elif self._console_open == enabled:
                 if not enabled and callable(editor_configure):
-                    editor_configure(owner="game_ui" if self._game_ui_visible else "panel")
+                    editor_configure(owner=return_owner)
                 return self.status()
             elif self._console_open is not None and self._console.supports("toggleconsole"):
                 self._request("toggleconsole")
@@ -2648,7 +2653,7 @@ class Controller:
                 raise RuntimeError("This game build did not confirm " + command + "; the console's current visibility is unknown. Console access was not changed.")
             self._console_open = enabled
             if not enabled and callable(editor_configure):
-                editor_configure(owner="game_ui" if self._game_ui_visible else "panel")
+                editor_configure(owner=return_owner)
             self._message("Console open. Editor movement is suspended while typing." if enabled else "Console closed. Return to the editor to continue.")
             return self.status()
 
@@ -4584,9 +4589,12 @@ class Controller:
             try:
                 editor = bridge.editor_status()
                 if editor.get("enabled"):
-                    # Release leaves the camera with the game. Show controls
-                    # instead of leaving an apparently frozen flight mode.
-                    bridge.configure_editor(owner="console" if editor.get("console_open") else "panel")
+                    # A verified editor needs controls after release. Startup
+                    # also calls Stop before loading/probing: keep its panel
+                    # closed while retaining console and recovery-key access.
+                    owner = ("console" if editor.get("console_open") else
+                             "panel" if self._probe_result else "disabled")
+                    bridge.configure_editor(owner=owner)
             except (RuntimeError, ValueError, OSError):
                 # UI recovery must never prevent the remaining cvar cleanup.
                 LOG.exception("Could not open the editor panel after Stop")

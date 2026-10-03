@@ -134,6 +134,11 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
+0.6.12-alpha fixes hidden F9 replay controls at automatic startup by waiting for
+the game's opening HUD transition before pausing. It also keeps Dolly's panel
+closed during startup and fixes overlay scaling when render/window sizes differ.
+Existing camera and export features are retained. See Release_Notes.md.
+
 0.6.11-alpha adds named replay graphics profiles in Settings, restores Console
 camera startup, improves editor readiness errors, repairs current-build Players
 capture admission and completes Depth export finishing/restoration. Players

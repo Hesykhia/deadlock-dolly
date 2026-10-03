@@ -1,5 +1,15 @@
 # Changes
 
+## 0.6.12 alpha - F9 startup, panel timing and display scaling
+
+**0.6.12-alpha**
+
+- **F9 replay controls return after startup.** *Before:* Dolly could pause while Deadlock's opening sequence still hid the replay timeline and hero controls. *After:* Startup waits for the game's HUD transition to finish before pausing, so F9 can show the controls immediately.
+- **A cleaner startup.** *Before:* Closing the startup console or resetting the editor while loading could open Dolly's panel too early. *After:* The panel stays closed until camera support is verified, while recovery shortcuts remain available.
+- **The in-game panel scales correctly.** *Before:* Different rendering and window sizes could clip or misplace parts of the panel. *After:* Dolly scales its drawing and clipping to the actual render surface, keeping the panel correctly positioned without changing your resolution.
+
+Full details: [0.6.12 release notes](RELEASE_NOTES_0.6.12-alpha.md).
+
 ## 0.6.11 alpha — Replay graphics profiles, capture fixes and compatibility hardening
 
 **0.6.11-alpha**

@@ -247,6 +247,26 @@
             "rva": "0x18ac600",
             "size": 88,
             "sha256": "ab72639d18a9838c2721bda5ce47534e953ee71d6c8096dbc7bec3f24142c0df"
+          },
+          {
+            "rva": "0x1ab80a0",
+            "size": 17,
+            "sha256": "7e5c47d0bebda21cab80ad5023e7171b10976ddd4be72a7e3b3c63c24cc0b18a"
+          },
+          {
+            "rva": "0x1aeaae1",
+            "size": 112,
+            "sha256": "67565990d71172eda7863c609301b2ed6c42d27888ced540bc19f05e23e5ae0a"
+          },
+          {
+            "rva": "0x1b03580",
+            "size": 91,
+            "sha256": "ca98451e13b00ebcae0af8642bd8676a8b4e66ec6886889ae10ac35781a0c3c6"
+          },
+          {
+            "rva": "0x1b0a050",
+            "size": 118,
+            "sha256": "d3cb9d882b256703bed33620f38d7f899b0342783f077664c77122ebe3c227ee"
           }
         ]
       },
@@ -274,6 +294,21 @@
         "kind": "offset",
         "module": "client",
         "value": "0x44"
+      },
+      "HUD_ROOT": {
+        "module": "client",
+        "kind": "rva",
+        "value": "0x3c33c18"
+      },
+      "HUD_ROOT_VTABLE": {
+        "module": "client",
+        "kind": "rva",
+        "value": "0x2adea98"
+      },
+      "HUD_TAKEOVER_COUNT": {
+        "module": "client",
+        "kind": "offset",
+        "value": "0x284"
       }
     },
     "FollowCapabilities": {

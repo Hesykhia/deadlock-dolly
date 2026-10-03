@@ -63,6 +63,7 @@ std::mutex input_mutex;
 std::deque<InputMessage> pending_input;
 bool input_overflow = false;
 IDXGISwapChain* swapchain = nullptr; // Identity only: do not retain a dead game's swapchain.
+UINT target_width = 0, target_height = 0;
 ID3D11Device* device = nullptr;
 ID3D11DeviceContext* immediate = nullptr;
 ID3D11DeviceContext1* context1 = nullptr;
@@ -322,8 +323,12 @@ bool create_target(IDXGISwapChain* chain) noexcept {
     ID3D11Texture2D* buffer = nullptr;
     if (FAILED(chain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&buffer))))
         return false;
+    D3D11_TEXTURE2D_DESC description{};
+    buffer->GetDesc(&description);
     const HRESULT result = device->CreateRenderTargetView(buffer, nullptr, &target);
     buffer->Release();
+    target_width = SUCCEEDED(result) ? description.Width : 0;
+    target_height = SUCCEEDED(result) ? description.Height : 0;
     return SUCCEEDED(result);
 }
 
@@ -2360,6 +2365,13 @@ void render_overlay(IDXGISwapChain* chain) {
     DeviceStateScope graphics_scope;
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
+    // Window/input coordinates need not match the swapchain (resolution changes,
+    // borderless scaling). Keep layout and mouse input in client coordinates;
+    // scale only the renderer's viewport and scissor rectangles to the buffer.
+    io.DisplayFramebufferScale = io.DisplaySize.x > 0 && io.DisplaySize.y > 0
+                                     ? ImVec2(float(target_width) / io.DisplaySize.x,
+                                              float(target_height) / io.DisplaySize.y)
+                                     : ImVec2(1, 1);
     ImGui::NewFrame();
     guide_geometry.line_count = guide_geometry.label_count = 0;
     if (draw_guides && !state.bone_picker)

@@ -45,7 +45,7 @@ class AutoStartupTests(unittest.TestCase):
             self.assertGreaterEqual(self.console.tick, 2)
             self.console.tick += 1  # Natural replay progress while startup waits.
             return {'coherent': True, 'ready': True}
-        self.camera_monitor.sample.side_effect = camera_sample
+        self.camera_monitor.sample_startup.side_effect = camera_sample
 
     def start(self, **kwargs):
         with patch("dolly.controller.launcher.launch", return_value=self.session), \
@@ -392,9 +392,36 @@ class AutoStartupTests(unittest.TestCase):
             self.assertNotIn('demo_pause', self.console.events)
             self.assertNotIn('native.flight', self.console.events)
             return next(answers)
-        self.camera_monitor.sample.side_effect = sample
+        self.camera_monitor.sample_startup.side_effect = sample
         self.start()
-        self.assertEqual(self.camera_monitor.sample.call_count, 4)
+        self.assertEqual(self.camera_monitor.sample_startup.call_count, 4)
+        self.camera_monitor.close.assert_called_once()
+
+    def test_camera_ready_does_not_pause_before_stock_hud_takeover_ends(self):
+        counts = iter((1, 0, 1, 0, 0))
+        def sample():
+            self.assertNotIn('demo_pause', self.console.events)
+            self.assertNotIn('native.flight', self.console.events)
+            self.console.tick += 1
+            count = next(counts)
+            return {'coherent': True, 'camera_ready': True,
+                    'hud_takeover_count': count, 'ready': count == 0}
+        self.camera_monitor.sample_startup.side_effect = sample
+        self.start()
+        self.assertEqual(self.camera_monitor.sample_startup.call_count, 5)
+        self.assertEqual(self.controller._startup_evidence['replay_camera']['hud_takeover_count'], 0)
+        self.assertTrue(self.console.paused)
+
+    def test_replay_identity_change_during_hud_wait_never_pauses_or_arms(self):
+        def sample():
+            self.console.demo_name = 'another.dem'
+            return {'coherent': True, 'camera_ready': True,
+                    'hud_takeover_count': 1, 'ready': False}
+        self.camera_monitor.sample_startup.side_effect = sample
+        with self.assertRaises(RuntimeError):
+            self.start()
+        self.assertNotIn('demo_pause', self.console.events)
+        self.assertNotIn('native.flight', self.console.events)
         self.camera_monitor.close.assert_called_once()
 
     def test_cancel_intro_wait_never_pauses_or_arms(self):
@@ -402,7 +429,7 @@ class AutoStartupTests(unittest.TestCase):
         def sample():
             cancelled.set()
             return {'coherent': True, 'ready': False}
-        self.camera_monitor.sample.side_effect = sample
+        self.camera_monitor.sample_startup.side_effect = sample
         with self.assertRaisesRegex(RuntimeError, 'cancelled'):
             self.start(cancel_event=cancelled)
         self.assertNotIn('demo_pause', self.console.events)
@@ -410,7 +437,7 @@ class AutoStartupTests(unittest.TestCase):
         self.camera_monitor.close.assert_called_once()
 
     def test_camera_read_failure_closes_monitor_without_pausing(self):
-        self.camera_monitor.sample.side_effect = RuntimeError('changed camera build')
+        self.camera_monitor.sample_startup.side_effect = RuntimeError('changed camera build')
         with self.assertRaisesRegex(RuntimeError, 'changed camera build'):
             self.start()
         self.assertNotIn('demo_pause', self.console.events)

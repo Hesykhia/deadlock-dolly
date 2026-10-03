@@ -490,6 +490,7 @@ void stress_game_buffer_lifetimes(IDXGISwapChain* chain, ID3D11Device* device,
 }
 }
 static ImGuiContext* screenshot_context = nullptr;
+static bool framebuffer_scale_probe = false;
 namespace dolly {
 EditorSnapshot editor_snapshot() noexcept {
     return snapshot;
@@ -568,6 +569,16 @@ void editor_text_input_active(bool) noexcept {
         for (int i = 0; i < 5; ++i)
             observed_mouse_down[i] = io.MouseDown[i];
         present_keeps_os_cursor = (io.ConfigFlags & ImGuiConfigFlags_NoMouseCursorChange) != 0;
+        if (framebuffer_scale_probe && ImGui::GetCurrentContext()->WithinFrameScope) {
+            // Use client-coordinate geometry and a tight clip near the bottom
+            // right. A smaller swapchain must scale BOTH viewport and scissors.
+            auto* draw = ImGui::GetForegroundDrawList();
+            const ImVec2 low(io.DisplaySize.x * .88f, io.DisplaySize.y * .88f);
+            const ImVec2 high(io.DisplaySize.x * .98f, io.DisplaySize.y * .98f);
+            draw->PushClipRect(low, ImVec2(io.DisplaySize.x * .93f, high.y));
+            draw->AddRectFilled(low, high, IM_COL32(255, 0, 255, 255));
+            draw->PopClipRect();
+        }
     }
 }
 void editor_attach_window(HWND value) noexcept {
@@ -1049,6 +1060,40 @@ int main(int argc, char** argv) {
                 "Overlay retained a backbuffer reference across ResizeBuffers");
         require(SUCCEEDED(chain->Present(0, 0)) && available,
                 "Overlay did not recover after resize");
+        framebuffer_scale_probe = true;
+        require(SUCCEEDED(chain->GetBuffer(0, __uuidof(ID3D11Texture2D),
+                                           reinterpret_cast<void**>(&backbuffer))),
+                "Resized backbuffer unavailable");
+        require(SUCCEEDED(device->CreateRenderTargetView(backbuffer, nullptr, &target)),
+                "Resized render target unavailable");
+        const float black[] = {0, 0, 0, 1};
+        context->ClearRenderTargetView(target, black);
+        require(SUCCEEDED(chain->Present(0, 0)), "Scaled panel Present failed");
+        backbuffer->GetDesc(&texture);
+        texture.Usage = D3D11_USAGE_STAGING;
+        texture.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        texture.BindFlags = texture.MiscFlags = 0;
+        staging = nullptr;
+        require(SUCCEEDED(device->CreateTexture2D(&texture, nullptr, &staging)),
+                "Scaled panel readback texture failed");
+        context->CopyResource(staging, backbuffer);
+        require(SUCCEEDED(context->Map(staging, 0, D3D11_MAP_READ, 0, &pixels)),
+                "Scaled panel readback failed");
+        const auto* inside = static_cast<const unsigned char*>(pixels.pData) +
+                             UINT(texture.Height * .94f) * pixels.RowPitch +
+                             UINT(texture.Width * .90f) * 4;
+        const auto* clipped = static_cast<const unsigned char*>(pixels.pData) +
+                              UINT(texture.Height * .94f) * pixels.RowPitch +
+                              UINT(texture.Width * .96f) * 4;
+        const bool fitted = inside[0] > 240 && inside[1] < 8 && inside[2] > 240;
+        const bool scissors = clipped[0] < 8 && clipped[1] < 8 && clipped[2] < 8;
+        context->Unmap(staging, 0);
+        staging->Release();
+        target->Release();
+        backbuffer->Release();
+        framebuffer_scale_probe = false;
+        require(fitted, "Client-sized panel was clipped by a smaller render buffer");
+        require(scissors, "Panel clip rectangles did not scale with the render buffer");
         dolly::shutdown_overlay();
         require(!available && attached == nullptr, "Shutdown did not release editor ownership");
         require(GetWindowLongPtrW(window, GWLP_WNDPROC) == before_proc,

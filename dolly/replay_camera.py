@@ -98,6 +98,42 @@ class ReplayCameraMonitor:
                 'camera_vtable_rva': hex(current_type-self.base),
                 'ready': state == 7 and not blend and current_type == self.base+GAMEPLAY_CAMERA_VTABLE}
 
+    def sample_startup(self):
+        """Wait for both camera and stock HUD handoff before the initial pause.
+
+        The match-start cinematic can keep the HUD taken over after its camera
+        blend ends. Pausing there freezes hidden replay controls. Observe the
+        root's reviewed takeover count; never clear it or advance by a timer.
+        Health/Follow callers of sample() retain their camera-only contract.
+        """
+        camera = self.sample()
+        result = dict(camera, camera_ready=bool(camera.get('ready')),
+                      hud_takeover_count=None, ready=False)
+        if not camera.get('coherent') or not camera.get('ready'):
+            return result
+        m = self.memory
+        try:
+            root = m.pointer(self.base+_profile.HUD_ROOT)
+            if not root:
+                return result
+            root_type = m.pointer(root)
+            count_bytes = m.read(root+_profile.HUD_TAKEOVER_COUNT, 4)
+            if (m.pointer(self.base+_profile.HUD_ROOT) != root
+                    or m.pointer(root) != root_type
+                    or m.read(root+_profile.HUD_TAKEOVER_COUNT, 4) != count_bytes):
+                return dict(result, coherent=False)
+        except PreloadError:
+            return dict(result, coherent=False)
+        if root_type != self.base+_profile.HUD_ROOT_VTABLE:
+            raise PreloadError('Replay HUD object type differs from the reviewed build.')
+        count = struct.unpack('<i', count_bytes)[0]
+        if not 0 <= count <= 16:
+            raise PreloadError('Replay HUD takeover count differs from the reviewed range.')
+        if self.sample() != camera:
+            return dict(result, coherent=False)
+        self._owned()
+        return dict(result, hud_takeover_count=count, ready=count == 0)
+
     def close(self):
         if self.memory is not None:
             self.memory.close()

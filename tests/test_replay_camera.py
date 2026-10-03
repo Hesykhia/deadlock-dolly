@@ -100,3 +100,63 @@ class ReplayCameraTests(unittest.TestCase):
             return data[:size]
         m.memory.read.side_effect = read
         self.assertFalse(m.sample()['coherent'])
+
+    def startup_monitor(self, count=0):
+        m, blocks, pointers = self.monitor()
+        pointers[m.base+0x3c33c18] = 0x400000
+        pointers[0x400000] = m.base+0x2adea98
+        blocks[0x400284] = struct.pack('<i', count)
+        return m, blocks, pointers
+
+    def test_startup_waits_for_cinematic_hud_after_camera_is_ready(self):
+        m, blocks, _ = self.startup_monitor(count=1)
+        self.assertTrue(m.sample()['ready'])  # Health/Follow camera contract unchanged.
+        before = m.sample_startup()
+        self.assertTrue(before['camera_ready'])
+        self.assertFalse(before['ready'])
+        self.assertEqual(before['hud_takeover_count'], 1)
+        blocks[0x400284] = struct.pack('<i', 0)
+        self.assertTrue(m.sample_startup()['ready'])
+
+    def test_missing_hud_does_not_admit_startup(self):
+        m, _, pointers = self.startup_monitor()
+        pointers[m.base+0x3c33c18] = 0
+        self.assertFalse(m.sample_startup()['ready'])
+
+    def test_wrong_hud_type_and_invalid_counter_fail_closed(self):
+        m, _, pointers = self.startup_monitor()
+        pointers[0x400000] += 8
+        with self.assertRaisesRegex(PreloadError, 'HUD object type'):
+            m.sample_startup()
+        for count in (-1, 17):
+            m, _, _ = self.startup_monitor(count)
+            with self.assertRaisesRegex(PreloadError, 'takeover count'):
+                m.sample_startup()
+
+    def test_hud_transition_during_read_is_not_ready(self):
+        m, blocks, _ = self.startup_monitor(count=1)
+        reads = 0
+        def read(address, size):
+            nonlocal reads
+            if address == 0x400284:
+                reads += 1
+                if reads == 2:
+                    return struct.pack('<i', 0)
+            return bytes(blocks[address])[:size]
+        m.memory.read.side_effect = read
+        self.assertFalse(m.sample_startup()['ready'])
+
+    def test_unreadable_hud_never_admits_startup(self):
+        m, _, pointers = self.startup_monitor()
+        def pointer(address):
+            if address == m.base+0x3c33c18:
+                raise PreloadError('unmapped HUD')
+            return pointers[address]
+        m.memory.pointer.side_effect = pointer
+        self.assertFalse(m.sample_startup()['ready'])
+
+    def test_camera_change_across_hud_read_invalidates_startup_sample(self):
+        m, _, _ = self.startup_monitor()
+        with patch.object(m, 'sample', side_effect=[{'coherent': True, 'ready': True},
+                                                   {'coherent': True, 'ready': False}]):
+            self.assertFalse(m.sample_startup()['coherent'])

@@ -34,12 +34,15 @@ inline constexpr std::uintptr_t MANAGER_VTABLE = 0x2649aa0;
 inline constexpr std::uintptr_t GAMEPLAY_CAMERA_VTABLE = 0x26514f8;
 inline constexpr std::uintptr_t RULES_GLOBAL = 0x3c17ae0;
 inline constexpr std::uintptr_t RULES_VTABLE = 0x26859b0;
-inline constexpr CodeSpan CODE_SPANS[] = {{0x5d1c60, 685}, {0x5b4260, 181}, {0x1808640, 261}, {0x181d680, 5}, {0x18217a0, 6}, {0x1b0a3a0, 1642}, {0x18ac600, 88}};
+inline constexpr CodeSpan CODE_SPANS[] = {{0x5d1c60, 685}, {0x5b4260, 181}, {0x1808640, 261}, {0x181d680, 5}, {0x18217a0, 6}, {0x1b0a3a0, 1642}, {0x18ac600, 88}, {0x1ab80a0, 17}, {0x1aeaae1, 112}, {0x1b03580, 91}, {0x1b0a050, 118}};
 inline constexpr std::uintptr_t RULES_STATE = 0x74;
 inline constexpr std::uintptr_t MANAGER_SIZE = 0x48;
 inline constexpr std::uintptr_t CURRENT_CAMERA = 0x28;
 inline constexpr std::uintptr_t BLENDING = 0x38;
 inline constexpr std::uintptr_t BLEND_WEIGHT = 0x44;
+inline constexpr std::uintptr_t HUD_ROOT = 0x3c33c18;
+inline constexpr std::uintptr_t HUD_ROOT_VTABLE = 0x2adea98;
+inline constexpr std::uintptr_t HUD_TAKEOVER_COUNT = 0x284;
 }
 namespace FollowCapabilities {
 inline constexpr char TIER0_SHA256[] = "6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332";

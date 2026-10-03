@@ -155,6 +155,25 @@ class NativeFlightControllerTests(unittest.TestCase):
         self.assertTrue(self.bridge.editor_enabled)
         self.assertEqual(self.bridge.owner, "disabled")
 
+    def test_preload_console_close_does_not_open_editor_before_probe(self):
+        self.controller._invalidate_probe()
+        self.bridge.configure_editor(enabled=True, owner="disabled")
+        self.controller.toggle_console(False)
+        self.assertIn("hideconsole", self.console.events)
+        self.assertEqual(self.bridge.owner, "disabled")
+        self.assertTrue(self.bridge.editor_enabled)  # F7 recovery remains available.
+        self.assertNotIn("native.flight", self.console.events)
+
+    def test_already_closed_console_without_hide_command_keeps_loading_owner(self):
+        self.controller._invalidate_probe()
+        self.bridge.configure_editor(enabled=True, owner="disabled")
+        self.controller._console_open = False
+        with patch.object(self.console, "supports", return_value=False):
+            self.controller.toggle_console(False)
+        self.assertEqual(self.bridge.owner, "disabled")
+        self.assertTrue(self.bridge.editor_enabled)
+        self.assertEqual(self.console.events, [])
+
     def test_player_view_detaches_after_seed_and_returns_on_f9(self):
         self.console.values["citadel_spectator_mode"] = 3
         selected_view = list(self.bridge.original)
@@ -458,6 +477,19 @@ class NativeFlightControllerTests(unittest.TestCase):
         self.controller.toggle_game_ui(False)
         self.assertEqual(self.controller._paused_pose["z"], 900)
         self.assertFalse(self.console.values["citadel_hud_visible"])
+
+    def test_startup_stop_keeps_editor_closed_before_camera_probe(self):
+        self.controller._probe_result = {}
+        self.bridge.editor_status = lambda: {"enabled": True, "console_open": False}
+        self.controller.stop()
+        self.assertEqual(self.bridge.owner, "disabled")
+        self.assertFalse(self.controller._native_active)
+
+    def test_unprobed_stop_preserves_open_console_for_recovery(self):
+        self.controller._probe_result = {}
+        self.bridge.editor_status = lambda: {"enabled": True, "console_open": True}
+        self.controller.stop()
+        self.assertEqual(self.bridge.owner, "console")
 
     def test_explicit_stop_opens_controls_instead_of_leaving_inert_flight_input(self):
         self.controller.begin_paused_camera()
