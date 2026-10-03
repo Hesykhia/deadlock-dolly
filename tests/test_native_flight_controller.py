@@ -20,6 +20,7 @@ class FlightBridge:
         self.events = console.events
         self.phase = 0.0
         self.owner = "panel"
+        self.editor_enabled = False
 
     def status(self):
         self.frames += int(self.advance)
@@ -51,6 +52,8 @@ class FlightBridge:
 
     def configure_editor(self, **values):
         self.owner = values.get("owner", self.owner)
+        if "enabled" in values:
+            self.editor_enabled = bool(values["enabled"])
 
     def prepare(self, project, start, speed, frozen, demo_name):
         self.events.append("native.prepare")
@@ -123,6 +126,12 @@ class NativeFlightControllerTests(unittest.TestCase):
 
     def setUp(self):
         self.controller, self.console, self.bridge = configured_controller()
+
+    def test_connect_enables_f8_f9_before_any_camera(self):
+        with patch("dolly.controller.ConsoleClient", return_value=self.console):
+            self.controller.connect()
+        self.assertTrue(self.bridge.editor_enabled)
+        self.assertEqual(self.bridge.owner, "disabled")
 
     def test_player_view_detaches_after_seed_and_returns_on_f9(self):
         self.console.values["citadel_spectator_mode"] = 3

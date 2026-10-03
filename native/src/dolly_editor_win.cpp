@@ -311,6 +311,11 @@ void dispatch_key_press(unsigned vk) noexcept {
         // and panel toggle are editor shortcuts in that mode.
         if (owner == EditorOwner::GameUI && i != 9 && i != 10)
             continue;
+        // Before the first camera exists the editor is enabled in Disabled
+        // owner mode: F8/F9 work so the replay can be scrubbed and a hero
+        // selected, while every other control passes to the game.
+        if (owner == EditorOwner::Disabled && i != 9 && i != 10)
+            continue;
         if (c->bindings[i].vk == vk && binding_down(c->bindings[i])) {
             gMouseX = 0;
             gMouseY = 0;

@@ -606,6 +606,15 @@ class Controller:
                 console.close()
                 self._console = None
                 raise RuntimeError("Could not establish the game console connection. Wait for loading to finish and retry. If it still fails, export diagnostics; this build's console launch flags need checking.") from None
+            bridge = self._native_bridge()
+            if bridge is not None:
+                try:
+                    # F8/F9 must work before the first camera exists so the
+                    # replay can be scrubbed and a hero selected from the
+                    # start. "disabled" keeps ordinary controls with the game.
+                    bridge.configure_editor(enabled=True, owner="disabled")
+                except (RuntimeError, ValueError, OSError):
+                    LOG.warning("Could not enable in-game editor input before camera setup")
             ready = self._unlocker_pid == self._session.pid
             self._message("Connected. The unlocker was initialized in this game process; load your replay or check camera support." if ready else "Connected. Once you are in the fully loaded hideout, click Initialize unlocker before loading the replay.",
                           connected=True, startup_stage=("loading_replay" if self._replay_requested else "unlocker_ready") if ready else "connected")
