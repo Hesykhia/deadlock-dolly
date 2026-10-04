@@ -18,7 +18,7 @@ class FollowTargetTests(unittest.TestCase):
         put(controller + 0x3ef, 1, '<B')
         put(pawn + 0x3ef, 1, '<B')
         for vtable, slot, getter in ((0x262d2b8, 0x500, 0x52c8a0),
-                                    (0x2639da0, 0x4e0, 0x15f1340),
+                                    (0x2639da0, 0x4e0, 0x15f1440),
                                     (0x2639da0, 0xad8, 0x587ea0),
                                     (0x26b05a8, 0x4e8, 0x709c70)):
             put(m.base + vtable + slot, m.base + getter)
@@ -127,9 +127,9 @@ class FollowTargetTests(unittest.TestCase):
         def put(address, value, fmt='<Q'):
             blocks[address] = struct.pack(fmt, value)
         system, chunk, controller, pawn, services, target = range(0x10000, 0x70000, 0x10000)
-        put(m.base + 0x3425fb8, system)
+        put(m.base + 0x3426038, system)
         put(system, chunk)
-        put(m.base + 0x3bd0eb0, controller)
+        put(m.base + 0x3bd0f30, controller)
         put(controller, m.base + 0x26b05a8)
         put(controller + 0x6bc, 0x8001, '<I')
         for handle, instance, vt in ((0x8001, pawn, 0x262d2b8), (0x10002, target, 0x2639da0)):
@@ -204,7 +204,7 @@ class FollowTargetTests(unittest.TestCase):
 
     def test_hotfix_base_observer_type_and_getters(self):
         m, blocks, _, services, _ = self.fixture()
-        table = m.base + 0x2a52388
+        table = m.base + 0x2a523b8
         blocks[services] = struct.pack('<Q', table)
         blocks[table + 0xf0] = struct.pack('<Q', m.base + 0x864ad0)
         blocks[table + 0x100] = struct.pack('<Q', m.base + 0x864ae0)
