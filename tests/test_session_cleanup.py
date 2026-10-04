@@ -1,8 +1,10 @@
 """Session mount cleanup boundaries and the UI-to-process-waiter handoff."""
+from dolly import game_processes
 import ctypes
 import json
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -28,11 +30,11 @@ class CleanupTests(unittest.TestCase):
         process.pid = 9876
         process._handle = 1234
         process.poll.return_value = None
-        with patch.object(launcher, "_check_runtime"), patch.object(launcher, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.package), patch.object(launcher.subprocess, "Popen", return_value=process), patch.object(launcher.threading, "Thread"):
+        with patch.object(launcher, "_check_runtime"), patch.object(game_processes, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.package), patch.object(launcher.subprocess, "Popen", return_value=process), patch.object(launcher.threading, "Thread"):
             self.session = launcher.launch(self.paths.root)
 
     def recover(self, root=None):
-        with patch.object(launcher, "_check_runtime"), patch.object(launcher, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", root or self.package):
+        with patch.object(launcher, "_check_runtime"), patch.object(game_processes, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", root or self.package):
             return launcher.recover_pending(self.paths.root)
 
     def test_restored_journal_is_retried_after_ui_closed_first(self):
@@ -72,7 +74,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_recover_without_game_argument_discovers_old_version_mounts(self):
         self.session.restore_gameinfo()
-        with patch.object(launcher, "_check_runtime"), patch.object(launcher, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.folder / "New Dolly"), patch.object(launcher, "discover_game", return_value=self.paths.root):
+        with patch.object(launcher, "_check_runtime"), patch.object(game_processes, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.folder / "New Dolly"), patch.object(launcher, "discover_game", return_value=self.paths.root):
             launcher.recover_pending()
         self.assertFalse(self.session.overlay_dir.exists())
 
@@ -131,7 +133,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(demo.read_bytes(), b"preserve unknown replay bytes")
         process = MagicMock()
         process.pid = 9877
-        with patch.object(launcher, "_check_runtime"), patch.object(launcher, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.package), patch.object(launcher.subprocess, "Popen", return_value=process), patch.object(launcher.threading, "Thread"):
+        with patch.object(launcher, "_check_runtime"), patch.object(game_processes, "running_processes", return_value={"steam.exe"}), patch.object(launcher, "PACKAGE_ROOT", self.package), patch.object(launcher.subprocess, "Popen", return_value=process), patch.object(launcher.threading, "Thread"):
             next_session = launcher.launch(self.paths.root)
         self.assertNotEqual(next_session.overlay_dir, self.session.overlay_dir)
         self.assertIn("-dev", next_session.command)
@@ -187,12 +189,22 @@ class CleanupTests(unittest.TestCase):
         shutil.rmtree(child)
         try:
             child.symlink_to(outside, target_is_directory=True)
-        except OSError:
-            self.skipTest("Symbolic links are not available")
+        except OSError as exc:
+            if sys.platform != "win32" or exc.winerror != 1314:
+                raise
+            # Non-elevated Windows can create junctions without the symlink
+            # privilege. Exercise a real directory reparse point rather than
+            # skipping the cleanup boundary or mocking its path checks.
+            import _winapi
+            _winapi.CreateJunction(str(outside), str(child))
+            self.addCleanup(child.rmdir)
+            self.assertEqual(child.lstat().st_reparse_tag, stat.IO_REPARSE_TAG_MOUNT_POINT)
         with self.assertRaisesRegex(launcher.LaunchError, "link"):
             self.recover()
         self.assertEqual(protected.read_bytes(), b"keep me")
-        self.assertTrue(child.is_symlink())
+        self.assertTrue(child.is_symlink() or (
+            getattr(child.lstat(), "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)))
 
     def test_marker_for_another_installation_does_not_authorize_cleanup(self):
         self.session.restore_gameinfo()
@@ -247,7 +259,7 @@ class CleanupTests(unittest.TestCase):
         self.session.restore_gameinfo()
         self.assertFalse(self.session.close())
         self.assertTrue(self.session.overlay_dir.exists())
-        with patch.object(launcher, "_check_runtime"), patch.object(launcher, "running_processes", return_value={"deadlock.exe"}), self.assertRaisesRegex(launcher.LaunchError, "Exit Deadlock"):
+        with patch.object(launcher, "_check_runtime"), patch.object(game_processes, "running_processes", return_value={"deadlock.exe"}), self.assertRaisesRegex(launcher.LaunchError, "Exit Deadlock"):
             launcher.recover_pending(self.paths.root)
         self.assertTrue(self.session.overlay_dir.exists())
 
@@ -318,7 +330,7 @@ class CleanupTests(unittest.TestCase):
             self.assertTrue(self.session.overlay_dir.exists())
             return 0
         api.WaitForSingleObject.side_effect = wait
-        with patch.object(cleanup.sys, "platform", "win32"), patch.object(ctypes, "WinDLL", return_value=api, create=True), patch.object(launcher, "running_processes", return_value={"steam.exe"}):
+        with patch.object(cleanup.sys, "platform", "win32"), patch.object(ctypes, "WinDLL", return_value=api, create=True), patch.object(game_processes, "running_processes", return_value={"steam.exe"}):
             self.assertEqual(cleanup.wait_and_cleanup(self.session.session_dir, 5678), 0)
         api.CloseHandle.assert_called_once_with(5678)
         self.assertFalse(self.session.overlay_dir.exists())
@@ -335,7 +347,7 @@ class CleanupTests(unittest.TestCase):
         self.session.restore_gameinfo()
         api = MagicMock()
         api.WaitForSingleObject.return_value = 0
-        with patch.object(cleanup.sys, "platform", "win32"), patch.object(ctypes, "WinDLL", return_value=api, create=True), patch.object(launcher, "running_processes", return_value={"deadlock.exe"}):
+        with patch.object(cleanup.sys, "platform", "win32"), patch.object(ctypes, "WinDLL", return_value=api, create=True), patch.object(game_processes, "running_processes", return_value={"deadlock.exe"}):
             self.assertEqual(cleanup.wait_and_cleanup(self.session.session_dir, 5678), 0)
         self.assertTrue(self.session.overlay_dir.exists())
 

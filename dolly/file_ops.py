@@ -1,0 +1,54 @@
+"""Atomic file replacement and ordinary-path guards for local configuration IO.
+
+Callers own file bounds, transaction policy, ownership and recovery decisions.
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import stat
+import tempfile
+
+
+def _atomic_write(path: Path, data: bytes, mode: int | None = None) -> None:
+    """Replace one file atomically after flushing its new contents to disk.
+
+    Steam validation and modding guides can leave gameinfo.gi read-only, and
+    Windows refuses to replace a read-only destination. Clear exactly that
+    attribute for the swap, then apply the recorded mode to the final file.
+    """
+    descriptor, name = tempfile.mkstemp(prefix=".dolly-write-", suffix=".tmp", dir=path.parent)
+    temp = Path(name)
+    writable = stat.S_IWRITE | stat.S_IREAD
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.replace(temp, path)
+        except PermissionError:
+            if os.name != "nt" or not path.exists():
+                raise
+            os.chmod(path, writable)
+            os.replace(temp, path)
+        if mode is not None:
+            os.chmod(path, mode)
+    finally:
+        if temp.exists():
+            try:
+                os.chmod(temp, writable)
+                temp.unlink()
+            except OSError:
+                pass  # A locked leftover must not hide the real write result.
+
+
+def _plain_path(path: Path) -> bool:
+    """Do not traverse symbolic links, Windows junctions or other reparse points."""
+    info = path.lstat()
+    return not stat.S_ISLNK(info.st_mode) and not (
+        getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _plain_ancestors(path: Path) -> bool:
+    return all(_plain_path(parent) for parent in (path, *path.parents))

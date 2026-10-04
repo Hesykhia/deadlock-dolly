@@ -20,13 +20,18 @@ import socket
 import stat
 import struct
 import subprocess
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
 import uuid
 from .assert_watcher import dismiss_assert_dialogs
+from . import gameinfo_transaction, game_processes, session_recovery
+from .game_installation import GamePaths, GAME_EXECUTABLE_NAMES, _find_game_executable, validate_game
+# Compatibility exports for existing launcher callers.
+from .launch_errors import LaunchError
+from .file_ops import _atomic_write
+from .keyvalues import _Token, _Entry, _tokens, _parse, _named
 from .runtime import application_root, resource_root, external_program_environment
 from .native_bridge import NativeBridge, ABI as NATIVE_ABI
 from . import __version__ as DOLLY_VERSION
@@ -52,7 +57,6 @@ try:
 except CompatibilityError:
     NATIVE_GAME_SHA256 = {}
 STEAM_APP_ID = "1422450"
-GAME_EXECUTABLE_NAMES = ("deadlock.exe", "citadel.exe")
 # Mod managers (Deadlock Mod Manager, Grimoire, the manual guide) mount their
 # addon folders with ordinary SearchPaths entries. The reviewed editing baseline
 # intentionally omits those retired mounts, so the launcher carries only the
@@ -66,132 +70,6 @@ ADDON_MOUNT_KEYS = {
 }
 ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons)(?:/.*)?$", re.IGNORECASE)
 ADDON_WRITE_PATHS = {"citadel", "core"}
-
-
-class LaunchError(RuntimeError):
-    """Actionable launch failure; suitable for display in the GUI."""
-
-
-@dataclass(frozen=True)
-class GamePaths:
-    root: Path
-    game_dir: Path
-    citadel_dir: Path
-    executable: Path
-    gameinfo: Path
-
-
-@dataclass(frozen=True)
-class _Token:
-    value: str
-    start: int
-    end: int
-    kind: str = "text"
-
-
-@dataclass
-class _Entry:
-    key: _Token
-    value: _Token | None = None
-    children: list["_Entry"] | None = None
-    opening: _Token | None = None
-    closing: _Token | None = None
-    end: int = 0
-
-
-def _tokens(text: str) -> list[_Token]:
-    """Tokenize Valve KeyValues, retaining offsets for localized edits."""
-    out: list[_Token] = []
-    pos = 0
-    while pos < len(text):
-        if text[pos].isspace() or text[pos] == "\ufeff":
-            pos += 1
-            continue
-        if text.startswith("//", pos):
-            end = text.find("\n", pos + 2)
-            pos = len(text) if end < 0 else end + 1
-            continue
-        if text.startswith("/*", pos):
-            end = text.find("*/", pos + 2)
-            if end < 0:
-                raise LaunchError("gameinfo.gi contains an unterminated block comment.")
-            pos = end + 2
-            continue
-        start = pos
-        if text[pos] in "{}":
-            out.append(_Token(text[pos], pos, pos + 1, "brace"))
-            pos += 1
-        elif text[pos] == '"':
-            pos += 1
-            value = []
-            while pos < len(text) and text[pos] != '"':
-                if text[pos] == "\\" and pos + 1 < len(text) and text[pos + 1] in '\\"':
-                    pos += 1
-                value.append(text[pos])
-                pos += 1
-            if pos == len(text):
-                raise LaunchError("gameinfo.gi contains an unterminated quoted value.")
-            pos += 1
-            out.append(_Token("".join(value), start, pos))
-        elif text[pos] == "[":
-            end = text.find("]", pos + 1)
-            if end < 0:
-                raise LaunchError("gameinfo.gi contains an unterminated condition.")
-            pos = end + 1
-            out.append(_Token(text[start:pos], start, pos, "condition"))
-        else:
-            while pos < len(text) and not text[pos].isspace() and text[pos] not in '{}"':
-                if text.startswith("//", pos) or text.startswith("/*", pos):
-                    break
-                pos += 1
-            if pos == start:
-                raise LaunchError("Unsupported gameinfo.gi syntax.")
-            out.append(_Token(text[start:pos], start, pos))
-    return out
-
-
-def _parse(text: str) -> list[_Entry]:
-    tokens = _tokens(text)
-    index = 0
-
-    def block(nested: bool = False) -> tuple[list[_Entry], _Token | None]:
-        nonlocal index
-        entries: list[_Entry] = []
-        while index < len(tokens):
-            key = tokens[index]
-            if key.value == "}" and key.kind == "brace":
-                if not nested:
-                    raise LaunchError("gameinfo.gi has an unmatched closing brace.")
-                index += 1
-                return entries, key
-            if key.kind != "text":
-                raise LaunchError("Unsupported gameinfo.gi key syntax.")
-            index += 1
-            if index >= len(tokens):
-                raise LaunchError("gameinfo.gi ends before a key's value.")
-            value = tokens[index]
-            index += 1
-            if value.value == "{" and value.kind == "brace":
-                children, closing = block(True)
-                assert closing is not None
-                entry = _Entry(key, children=children, opening=value, closing=closing, end=closing.end)
-            elif value.kind == "text":
-                entry = _Entry(key, value=value, end=value.end)
-            else:
-                raise LaunchError("Unsupported gameinfo.gi value syntax.")
-            while index < len(tokens) and tokens[index].kind == "condition":
-                entry.end = tokens[index].end
-                index += 1
-            entries.append(entry)
-        if nested:
-            raise LaunchError("gameinfo.gi has an unclosed block.")
-        return entries, None
-
-    return block()[0]
-
-
-def _named(entries: list[_Entry], name: str) -> list[_Entry]:
-    return [entry for entry in entries if entry.key.value.casefold() == name.casefold()]
 
 
 def _quote(value: str) -> str:
@@ -401,55 +279,8 @@ def merge_addon_mounts(original: str, editing: str) -> str:
     return result
 
 
-def _find_game_executable(directory: Path) -> Path | None:
-    """Prefer the current executable name when a folder was selected."""
-    # Windows filenames are case-insensitive. Retain their actual spelling when
-    # inspecting an installation copied onto a case-sensitive filesystem too.
-    if directory.is_dir():
-        files = {entry.name.casefold(): entry for entry in directory.iterdir() if entry.is_file()}
-        for name in GAME_EXECUTABLE_NAMES:
-            if name in files:
-                return files[name]
-    return None
-
-
-def validate_game(path: str | os.PathLike[str]) -> GamePaths:
-    value = Path(path).expanduser().resolve()
-    if any(c in str(value) for c in '\r\n\x00";+'):
-        raise LaunchError("The game path contains console separators. Use a Steam library path without quotes, semicolons, or plus signs.")
-    selected_executable = value if value.suffix.casefold() == ".exe" else None
-    if selected_executable is not None:
-        if selected_executable.name.casefold() not in GAME_EXECUTABLE_NAMES:
-            raise LaunchError("Select Deadlock's deadlock.exe or legacy citadel.exe from game/bin/win64, or select the Deadlock installation folder.")
-        if not selected_executable.is_file():
-            raise LaunchError(f"The selected Deadlock executable is missing: {selected_executable}. Browse to the installed deadlock.exe or legacy citadel.exe in game/bin/win64.")
-    candidates = [value, *list(value.parents)[:5]]
-    missing: list[str] = []
-    for root in candidates:
-        game = root / "game"
-        executable_dir = game / "bin" / "win64"
-        if selected_executable is not None and selected_executable.parent != executable_dir:
-            continue
-        executable = selected_executable or _find_game_executable(executable_dir)
-        gameinfo = game / "citadel" / "gameinfo.gi"
-        if executable is not None and gameinfo.is_file():
-            if not (game / "citadel" / "bin" / "win64" / "server.dll").is_file():
-                raise LaunchError(f"Deadlock server.dll is missing: {game / 'citadel/bin/win64/server.dll'}. Verify the game's installed files in Steam.")
-            return GamePaths(root, game, game / "citadel", executable, gameinfo)
-        if executable is not None or executable_dir.is_dir() or (game / "citadel").is_dir():
-            absent = []
-            if executable is None:
-                absent.append(f"game executable (deadlock.exe or legacy citadel.exe) in {executable_dir}")
-            if not gameinfo.is_file():
-                absent.append(f"gameinfo.gi at {gameinfo}")
-            missing.append("Missing Deadlock " + " and ".join(absent) + ". Verify the game's installed files in Steam.")
-    if missing:
-        raise LaunchError(missing[0])
-    raise LaunchError("Select the Deadlock installation folder containing game/bin/win64/deadlock.exe (or legacy citadel.exe) and game/citadel/gameinfo.gi, or browse directly to that executable.")
-
-
 def _game_is_running(processes: set[str]) -> bool:
-    return any(name.casefold() in GAME_EXECUTABLE_NAMES for name in processes)
+    return game_processes._game_is_running(processes)
 
 
 def _steam_roots() -> list[Path]:
@@ -512,46 +343,7 @@ def discover_game() -> Path | None:
 
 
 def running_processes() -> set[str]:
-    """Enumerate process names without localized tasklist parsing or shell use."""
-    if os.name != "nt":
-        raise LaunchError("Deadlock Dolly's game launcher requires 64-bit Windows Python.")
-    from ctypes import wintypes
-
-    class PROCESSENTRY32W(ctypes.Structure):
-        _fields_ = [
-            ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
-            ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
-            ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
-            ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
-            ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260),
-        ]
-
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
-    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    for name in ("Process32FirstW", "Process32NextW"):
-        getattr(kernel, name).argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
-        getattr(kernel, name).restype = wintypes.BOOL
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel.CloseHandle.restype = wintypes.BOOL
-    snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
-    if snapshot == ctypes.c_void_p(-1).value:
-        raise LaunchError("Could not inspect running processes; launch was refused.")
-    try:
-        entry = PROCESSENTRY32W()
-        entry.dwSize = ctypes.sizeof(entry)
-        if not kernel.Process32FirstW(snapshot, ctypes.byref(entry)):
-            raise LaunchError("Could not inspect running processes; launch was refused.")
-        names = set()
-        while True:
-            names.add(entry.szExeFile.casefold())
-            if not kernel.Process32NextW(snapshot, ctypes.byref(entry)):
-                if ctypes.get_last_error() not in (0, 18):  # ERROR_NO_MORE_FILES
-                    raise LaunchError("Process enumeration was incomplete; launch was refused.")
-                break
-        return names
-    finally:
-        kernel.CloseHandle(snapshot)
+    return game_processes.running_processes()
 
 
 def _check_runtime() -> None:
@@ -762,111 +554,24 @@ def _verified_confetti_pack() -> Path:
     return CONFETTI_PACK
 
 
-def _atomic_write(path: Path, data: bytes, mode: int | None = None) -> None:
-    """Replace one file atomically after flushing its new contents to disk.
-
-    Steam validation and modding guides can leave gameinfo.gi read-only, and
-    Windows refuses to replace a read-only destination. Clear exactly that
-    attribute for the swap, then apply the recorded mode to the final file.
-    """
-    descriptor, name = tempfile.mkstemp(prefix=".dolly-write-", suffix=".tmp", dir=path.parent)
-    temp = Path(name)
-    writable = stat.S_IWRITE | stat.S_IREAD
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        try:
-            os.replace(temp, path)
-        except PermissionError:
-            if os.name != "nt" or not path.exists():
-                raise
-            os.chmod(path, writable)
-            os.replace(temp, path)
-        if mode is not None:
-            os.chmod(path, mode)
-    finally:
-        if temp.exists():
-            try:
-                os.chmod(temp, writable)
-                temp.unlink()
-            except OSError:
-                pass  # A locked leftover must not hide the real write result.
-
-
 def _save_record(session_dir: Path, record: dict[str, Any]) -> None:
-    _atomic_write(session_dir / "session.json", (json.dumps(record, indent=2) + "\n").encode("utf-8"))
+    gameinfo_transaction.save_record(session_dir, record, atomic_write=_atomic_write)
 
 
 def _load_record(session_dir: Path) -> dict[str, Any]:
-    try:
-        from .session_cleanup import _plain_path, _plain_ancestors
-        if not _plain_ancestors(session_dir) or not _plain_path(session_dir / "session.json"):
-            raise ValueError("linked session directory or journal")
-        record = json.loads((session_dir / "session.json").read_text(encoding="utf-8"))
-        if not isinstance(record, dict) or record.get("owner") != "Deadlock Dolly" or Path(record["session_dir"]).resolve() != session_dir.resolve():
-            raise ValueError("unrecognized session owner or directory")
-        paths = validate_game(Path(record["original_gameinfo"]).parent)
-        if paths.gameinfo.resolve() != Path(record["original_gameinfo"]).resolve():
-            raise ValueError("unexpected gameinfo target")
-        overlay = Path(record["overlay_dir"])
-        if overlay.parent.resolve() != paths.game_dir.resolve() or not re.fullmatch(r"citadel_dolly_[a-z0-9_]+", overlay.name):
-            raise ValueError("unexpected plugin mount directory")
-        if record["backup_name"] != "original.gameinfo.gi":
-            raise ValueError("unexpected backup name")
-        if not all(re.fullmatch(r"[0-9a-f]{64}", record[key]) for key in ("original_sha256", "patched_sha256")):
-            raise ValueError("invalid content hashes")
-        return record
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise LaunchError(f"Could not read Dolly's recovery journal at {session_dir}: {exc}") from exc
+    return gameinfo_transaction.load_record(session_dir, validate_game=validate_game)
 
 
 def _restore_record(session_dir: Path) -> bool:
-    record = _load_record(session_dir)
-    if record.get("config_state") == "restored":
-        return True
-    target = Path(record["original_gameinfo"])
-    backup = session_dir / record["backup_name"]
-    try:
-        from .session_cleanup import _plain_path
-        if not _plain_path(backup) or not _plain_path(target):
-            raise LaunchError("Linked game configuration or backup left untouched during recovery.")
-        original = backup.read_bytes()
-        if hashlib.sha256(original).hexdigest() != record["original_sha256"]:
-            raise LaunchError(f"Dolly's original gameinfo backup failed its hash check. Nothing was overwritten. Backup: {backup}")
-        current = target.read_bytes()
-        digest = hashlib.sha256(current).hexdigest()
-        if digest == record["original_sha256"]:
-            record["config_state"] = "restored"
-        elif digest == record["patched_sha256"]:
-            _atomic_write(target, original, record.get("original_mode"))
-            record["config_state"] = "restored"
-        else:
-            record["config_state"] = "conflict"
-            _save_record(session_dir, record)
-            raise LaunchError(f"Deadlock gameinfo.gi changed after Dolly mounted its plugin. Dolly left those newer bytes untouched. Original backup: {backup}\nCompare the current file with this backup before another Dolly launch; recovery remains pending.")
-        record["restored_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        _save_record(session_dir, record)
-        return True
-    except OSError as exc:
-        raise LaunchError(f"Could not restore Deadlock gameinfo.gi: {exc}\nOriginal backup: {backup}. Exit Deadlock, then use File > Recover game configuration in Dolly.") from exc
+    return gameinfo_transaction.restore_record(
+        session_dir, load_record=_load_record, save_record=_save_record,
+        atomic_write=_atomic_write)
 
 
 def _restore_session_configs(session_dir: Path) -> None:
-    """Attempt both independent restorations, even if either has a conflict."""
-    from . import graphics_profiles
-    errors = []
-    for restore in (_restore_record, graphics_profiles.restore):
-        try:
-            if restore is graphics_profiles.restore and graphics_profiles.pending(session_dir):
-                if _game_is_running(running_processes()):
-                    raise LaunchError("Exit Deadlock before restoring this session's graphics settings.")
-            restore(session_dir)
-        except (OSError, LaunchError) as exc:
-            errors.append(str(exc))
-    if errors:
-        raise LaunchError("\n".join(errors))
+    session_recovery.restore_session_configs(
+        session_dir, restore_gameinfo=_restore_record,
+        game_is_running=lambda: _game_is_running(running_processes()))
 
 
 def recover_pending(game_path: str | os.PathLike[str] | None = None) -> list[str]:

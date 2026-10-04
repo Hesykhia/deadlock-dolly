@@ -8,10 +8,14 @@ import logging
 import os
 from pathlib import Path
 import re
-import stat
 import subprocess
 import sys
 import time
+
+from .launch_errors import LaunchError
+# Compatibility exports for existing cleanup callers.
+from .file_ops import _plain_path, _plain_ancestors
+from .keyvalues import _parse, _named
 
 
 OWNER = "Deadlock Dolly"
@@ -37,19 +41,7 @@ GENERATED_FILES = frozenset({
 GENERATED_DIRS = frozenset({"cvar_unlocker", "cvar_unlocker/bin", "cvar_unlocker/bin/win64"})
 
 
-def _plain_path(path: Path) -> bool:
-    """Do not traverse symbolic links, Windows junctions or other reparse points."""
-    info = path.lstat()
-    return not stat.S_ISLNK(info.st_mode) and not (
-        getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
-
-
-def _plain_ancestors(path: Path) -> bool:
-    return all(_plain_path(parent) for parent in (path, *path.parents))
-
-
 def _marker(overlay: Path, paths, session_dir: Path | None = None) -> dict:
-    from .launcher import LaunchError
     try:
         if (not overlay.is_absolute() or overlay.parent.resolve() != paths.game_dir.resolve()
                 or re.fullmatch(r"citadel_dolly_[a-z0-9_]+", overlay.name) is None
@@ -78,7 +70,6 @@ def _marker(overlay: Path, paths, session_dir: Path | None = None) -> dict:
 
 def _mount_is_referenced(paths, overlay: Path) -> bool:
     """Read actual SearchPaths, including conditions and wildcard mounts."""
-    from .launcher import LaunchError, _parse, _named
     if not _plain_path(paths.gameinfo):
         raise LaunchError("Linked gameinfo.gi was left untouched during temporary-file cleanup.")
     roots = _named(_parse(paths.gameinfo.read_text(encoding="utf-8-sig")), "GameInfo")
@@ -100,7 +91,6 @@ def _mount_is_referenced(paths, overlay: Path) -> bool:
 
 def remove_overlay(overlay: Path, paths, session_dir: Path | None = None) -> bool:
     """Caller must first establish game exit. Unknown contents are never deleted."""
-    from .launcher import LaunchError
     if not overlay.exists() and not overlay.is_symlink():
         return False
     try:
@@ -173,7 +163,8 @@ def remove_overlay(overlay: Path, paths, session_dir: Path | None = None) -> boo
 
 def recover_orphans(paths) -> list[str]:
     """Find mounts made by an older/moved copy of Dolly in this installation."""
-    from .launcher import LaunchError, _load_record, _restore_session_configs
+    from .gameinfo_transaction import load_record as _load_record
+    from .session_recovery import restore_session_configs as _restore_session_configs
     recovered = []
     for overlay in sorted(paths.game_dir.glob(PREFIX + "*")):
         try:
@@ -247,7 +238,10 @@ def start_waiter(session) -> None:
 
 def wait_and_cleanup(session_dir: Path, handle: int) -> int:
     """Internal helper entry; no injection, console connection, or GUI startup."""
-    from .launcher import LaunchError, _load_record, _restore_session_configs, validate_game, running_processes, _game_is_running
+    from .gameinfo_transaction import load_record as _load_record
+    from .session_recovery import restore_session_configs as _restore_session_configs
+    from .game_installation import validate_game
+    from .game_processes import running_processes, _game_is_running
     try:
         if sys.platform != "win32" or handle <= 0:
             raise LaunchError("Invalid detached cleanup process handle.")

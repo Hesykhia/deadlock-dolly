@@ -1,4 +1,5 @@
 """Graphics library, file ownership and actual launcher/recovery boundaries."""
+from dolly import game_processes
 from copy import deepcopy
 import json
 import os
@@ -170,7 +171,7 @@ class GraphicsLaunchTests(unittest.TestCase):
         self.patch(launcher, "EDITING_ROOT", new=editing_fixture(self.paths, self.root))
         self.patch(launcher, "PACKAGE_ROOT", new=self.package)
         self.patch(launcher, "_check_runtime")
-        self.processes = self.patch(launcher, "running_processes", return_value={"steam.exe"})
+        self.processes = self.patch(game_processes, "running_processes", return_value={"steam.exe"})
         self.thread = self.patch(launcher.threading, "Thread")
         self.process = MagicMock()
         self.process.pid = 12345

@@ -15,8 +15,11 @@ import re
 import stat
 import uuid
 
-from .launcher import LaunchError, _atomic_write, _load_record, _parse, _tokens
-from .session_cleanup import _plain_ancestors
+from .launch_errors import LaunchError
+from .convar_response import read_cvar_value
+from .keyvalues import _parse, _tokens
+from .gameinfo_transaction import load_record as _load_record
+from .file_ops import _atomic_write, _plain_ancestors
 from .settings import _unique_object, settings_path
 
 MAX_BYTES = 128 * 1024
@@ -69,8 +72,8 @@ def excluded_fields(data: bytes, profile: dict) -> list[str]:
 
 def capture_source() -> Path:
     """Resolve saved graphics only when Deadlock has finished writing them."""
-    from . import launcher
-    if launcher._game_is_running(launcher.running_processes()):
+    from . import game_processes
+    if game_processes._game_is_running(game_processes.running_processes()):
         raise ValueError("Close Deadlock before saving its graphics profile, so the file contains its final saved settings.")
     return current_video()
 
@@ -365,7 +368,6 @@ def audit_runtime(session: Path, query) -> dict | None:
     """
     if not (session / JOURNAL).exists():
         return None
-    from .controller import read_cvar_value
     record, _target, _original, _applied = _transaction(session)
     values = record["profile"]["values"]
     names = {key.removeprefix("setting."): value for key, value in values.items() if key.startswith("setting.r_")}

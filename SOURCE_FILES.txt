@@ -42,6 +42,7 @@ dolly/preload.py
 dolly/replay_camera.py
 dolly/console.py
 dolly/controller.py
+dolly/convar_response.py
 dolly/follow_camera.py
 dolly/follow_capabilities.py
 dolly/follow_target.py
@@ -63,6 +64,13 @@ dolly/gui.py
 dolly/ui_theme.py
 dolly/hotkey.py
 dolly/launcher.py
+dolly/launch_errors.py
+dolly/keyvalues.py
+dolly/file_ops.py
+dolly/gameinfo_transaction.py
+dolly/game_installation.py
+dolly/game_processes.py
+dolly/session_recovery.py
 dolly/native_bridge.py
 dolly/native_capabilities.py
 dolly/_runtime_generated.py
@@ -202,6 +210,7 @@ tests/test_compatibility.py
 tests/test_dialogs.py
 tests/test_console.py
 tests/test_controller.py
+tests/test_convar_response.py
 tests/test_follow_camera.py
 tests/test_follow_capabilities.py
 tests/test_follow_target.py
@@ -219,6 +228,10 @@ tests/test_graphics_profiles.py
 tests/test_gui_capture.py
 tests/test_hotkey.py
 tests/test_launcher.py
+tests/test_keyvalues.py
+tests/test_file_ops.py
+tests/test_gameinfo_transaction.py
+tests/test_session_recovery.py
 tests/test_layer_modes.py
 tests/test_launch_recovery.py
 tests/test_clip_audio.py

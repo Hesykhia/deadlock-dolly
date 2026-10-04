@@ -20,8 +20,10 @@ import time
 import zipfile
 
 from . import __version__
+# Compatibility exports shared with graphics runtime diagnostics.
+from .convar_response import NUMBER, read_cvar_value
 from .path import (Project, Keyframe, validate_cvar_name, STANDARD_ASPECT, ASPECT_MIN, ASPECT_MAX,
-                   CVAR_COMPONENTS, validate_cvar_value, parse_cvar_value, format_cvar_value)
+                   validate_cvar_value, format_cvar_value)
 from .console import ConsoleClient, ConsoleError, ConsoleTimeout, error_text, parse_demo_info, parse_demo_tick
 from .replays import same_replay_name
 from .demo_packets import packet_index, replay_header
@@ -38,7 +40,6 @@ from .replay_camera import ReplayCameraMonitor
 
 ROOT = application_root(Path(__file__).resolve().parents[1])
 LOG = logging.getLogger("dolly")
-NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 ASPECT_CVAR = "r_aspectratio"
 LEGACY_FOV_CONTROLS = {"citadel_camera_fov", "citadel_camera_spectator_fov"}
 DOF_RANGES = {
@@ -150,36 +151,6 @@ def _tail_file(path, limit=2_000_000):
         stream.seek(0, 2)
         stream.seek(max(0, stream.tell() - limit))
         return stream.read(limit)
-
-
-def read_cvar_value(name, output):
-    """Parse the current value, never a value from the default/range description."""
-    escaped = re.escape(name)
-    for line in output.splitlines():
-        if name in CVAR_COMPONENTS:
-            # Read all components from the current-value field. Never accept a
-            # short vector, a fifth component, or numbers in a default caption.
-            prefix = re.search(r'(?<![\w])"?' + escaped + r'"?\s*(?:=|:)\s*', line, re.I)
-            if not prefix:
-                continue
-            raw = line[prefix.end():].strip()
-            if raw.startswith('"'):
-                if '"' not in raw[1:]:
-                    continue
-                raw = raw[1:raw.find('"', 1)]
-            else:
-                raw = re.split(r'\s*(?:\(|\[|//)', raw, maxsplit=1)[0].strip()
-            try:
-                return parse_cvar_value(name, raw)
-            except ValueError:
-                continue
-        match = re.search(r'(?<![\w])"?' + escaped + r'"?\s*(?:=|:)\s*"?(' + NUMBER + r'|true|false)(?=["\s,)\]]|$)', line, re.I)
-        if match:
-            raw = match.group(1).lower()
-            value = 1.0 if raw == "true" else 0.0 if raw == "false" else float(raw)
-            if math.isfinite(value):
-                return value
-    raise ValueError(f"Could not read the current value of {name}. Export diagnostics.")
 
 
 def parse_camera(output, fov=90.0, roll=0.0, *, aspect_ratio=STANDARD_ASPECT):

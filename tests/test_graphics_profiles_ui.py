@@ -1,4 +1,5 @@
 """Graphics panel behavior with isolated files, dialogs and process inventory."""
+from dolly import game_processes
 from pathlib import Path
 import tempfile
 import tkinter as tk
@@ -80,8 +81,8 @@ class GraphicsPanelTests(unittest.TestCase):
         self.assertEqual(self.panel.status.get(), str(self.errors[0][1]))
 
     def test_active_game_refuses_capture_before_resolving_or_reading_video(self):
-        self.patch(launcher, 'running_processes', return_value=['fixture'])
-        guard = self.patch(launcher, '_game_is_running', return_value=True)
+        self.patch(game_processes, 'running_processes', return_value=['fixture'])
+        guard = self.patch(game_processes, '_game_is_running', return_value=True)
         current = self.patch(profiles, 'current_video')
         self.panel.run(self.panel.capture)
         guard.assert_called_once_with(['fixture'])
@@ -90,8 +91,8 @@ class GraphicsPanelTests(unittest.TestCase):
         self.assertFalse(self.library.exists())
 
     def test_stopped_game_capture_resolves_current_source_then_adds_it(self):
-        self.patch(launcher, 'running_processes', return_value=[])
-        self.patch(launcher, '_game_is_running', return_value=False)
+        self.patch(game_processes, 'running_processes', return_value=[])
+        self.patch(game_processes, '_game_is_running', return_value=False)
         self.patch(profiles, 'current_video', return_value=self.video)
         add = self.patch(self.panel, 'add')
         self.panel.capture()
