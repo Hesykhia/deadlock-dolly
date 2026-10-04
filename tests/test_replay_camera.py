@@ -103,8 +103,8 @@ class ReplayCameraTests(unittest.TestCase):
 
     def startup_monitor(self, count=0):
         m, blocks, pointers = self.monitor()
-        pointers[m.base+0x3c33c18] = 0x400000
-        pointers[0x400000] = m.base+0x2adea98
+        pointers[m.base+0x3c33c98] = 0x400000
+        pointers[0x400000] = m.base+0x2adeac8
         blocks[0x400284] = struct.pack('<i', count)
         return m, blocks, pointers
 
@@ -120,7 +120,7 @@ class ReplayCameraTests(unittest.TestCase):
 
     def test_missing_hud_does_not_admit_startup(self):
         m, _, pointers = self.startup_monitor()
-        pointers[m.base+0x3c33c18] = 0
+        pointers[m.base+0x3c33c98] = 0
         self.assertFalse(m.sample_startup()['ready'])
 
     def test_wrong_hud_type_and_invalid_counter_fail_closed(self):
@@ -149,7 +149,7 @@ class ReplayCameraTests(unittest.TestCase):
     def test_unreadable_hud_never_admits_startup(self):
         m, _, pointers = self.startup_monitor()
         def pointer(address):
-            if address == m.base+0x3c33c18:
+            if address == m.base+0x3c33c98:
                 raise PreloadError('unmapped HUD')
             return pointers[address]
         m.memory.pointer.side_effect = pointer
