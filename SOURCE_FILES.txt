@@ -528,9 +528,12 @@ third_party/cvar_unlocker/unlocker-build-6745.patch
 
 native/profiles/deadlock-2026-10-04-6746-complete.json
 third_party/cvar_unlocker/unlocker-build-6746.patch
-
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
+
 docs/RELEASE_NOTES_0.6.14-alpha.md
+
 docs/RELEASE_NOTES_0.6.15-alpha.md
+
+docs/RELEASE_NOTES_0.6.16-alpha.md
