@@ -57,6 +57,24 @@ def _read(path: Path) -> bytes:
     return data
 
 
+def read_video(path: Path) -> bytes:
+    """Read bounded, ordinary local video settings for a profile preview."""
+    return _read(path)
+
+
+def excluded_fields(data: bytes, profile: dict) -> list[str]:
+    """Names kept from the destination rather than saved in this profile."""
+    return sorted(_values(data).keys() - profile["values"].keys())
+
+
+def capture_source() -> Path:
+    """Resolve saved graphics only when Deadlock has finished writing them."""
+    from . import launcher
+    if launcher._game_is_running(launcher.running_processes()):
+        raise ValueError("Close Deadlock before saving its graphics profile, so the file contains its final saved settings.")
+    return current_video()
+
+
 def _document(data: bytes):
     try:
         if len(data) > MAX_BYTES:

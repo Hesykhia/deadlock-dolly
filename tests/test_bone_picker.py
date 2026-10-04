@@ -12,6 +12,8 @@ from dolly.path import AttachKey, Keyframe, Project
 
 class BonePickerTests(unittest.TestCase):
     def setUp(self):
+        from dolly import editor_session
+        self.publish = lambda: editor_session.configure(self.app)
         self.key = Keyframe(0, 1, 2, 3, 4, 5, 6, source="attach",
                            attach=AttachKey(handle=11, entity_id=11,
                                             model="models/heroes/astro/astro.vmdl",
@@ -29,11 +31,36 @@ class BonePickerTests(unittest.TestCase):
         self.result = dict(request=42, finishing=True, ready=True, selected=600, name="hand_R",
                            handle=11, entity_id=11, model=model_token(self.key.attach.model))
 
+    def test_open_publishes_before_reading_new_request_sequence(self):
+        self.app._bone_picker_context = None
+        self.controller._recorder_active.return_value = False
+        self.bridge.editor_status.return_value = dict(ready=True, flight_active=True, paused=True)
+        def publish():
+            self.assertIsNotNone(self.app._bone_picker_context)
+            self.bridge._editor_attach_sequence = 73
+        picker.open_picker(self.app, publish=publish)
+        _, work, done = self.app._submit.call_args.args
+        done(work())
+        self.assertEqual(self.app._bone_picker_context["request"], 73)
+
+    def test_cancel_publishes_restored_preview_before_submitting_resume(self):
+        self.context["resume"] = True
+        self.context["preview"] = True
+        order = []
+        def publish():
+            self.assertIsNone(self.app._bone_picker_context)
+            self.assertTrue(self.app.preview_attach)
+            order.append("publish")
+        self.app._submit.side_effect = lambda *args: order.append("resume")
+        picker.close_picker(self.app, publish=publish)
+        self.assertEqual(order, ["publish", "resume"])
+        self.app._submit.assert_called_once_with("Resuming replay after Bone Picker", self.controller.toggle_replay)
+
     @patch("dolly.editor_session.configure")
     def test_cancel_preserves_entire_shot_and_preview(self, configure):
         original = copy.deepcopy(self.app.project)
         self.context["preview"] = True
-        picker.close_picker(self.app)
+        picker.close_picker(self.app, publish=self.publish)
         self.assertEqual(self.app.project, original)
         self.app._commit_camera.assert_not_called()
         self.assertTrue(self.app.preview_attach)
@@ -41,7 +68,7 @@ class BonePickerTests(unittest.TestCase):
 
     @patch("dolly.editor_session.configure")
     def test_done_only_changes_named_point_and_enables_preview(self, configure):
-        picker.close_picker(self.app, result=self.result)
+        picker.close_picker(self.app, result=self.result, publish=self.publish)
         keys, at = self.app._commit_camera.call_args.args
         expected = copy.deepcopy(self.key)
         expected.attach.point, expected.attach.bone = "bone", "hand_R"
@@ -55,27 +82,27 @@ class BonePickerTests(unittest.TestCase):
         for change in ({"handle": 12}, {"entity_id": 12}, {"model": 456},
                        {"request": 40}, {"ready": False}, {"finishing": False}):
             with self.subTest(change=change), self.assertRaises(ValueError):
-                picker.close_picker(self.app, result={**self.result, **change})
+                picker.close_picker(self.app, result={**self.result, **change}, publish=self.publish)
             self.app._commit_camera.assert_not_called()
         self.app.project.keyframes[0].yaw += 1
         with self.assertRaises(ValueError):
-            picker.close_picker(self.app, result=self.result)
+            picker.close_picker(self.app, result=self.result, publish=self.publish)
         self.app._commit_camera.assert_not_called()
 
     def test_finish_waits_for_corresponding_worker_publication(self):
         self.bridge.editor_bone_picker.return_value = None
         event = dict(action="finish_bone_picker", value=600, pose=(42,))
-        self.assertFalse(picker.dispatch(self.app, event, self.bridge))
+        self.assertFalse(picker.dispatch(self.app, event, self.bridge, publish=self.publish))
         self.app._commit_camera.assert_not_called()
         self.bridge.editor_bone_picker.return_value = self.result
         with patch("dolly.editor_session.configure"):
-            self.assertTrue(picker.dispatch(self.app, event, self.bridge))
+            self.assertTrue(picker.dispatch(self.app, event, self.bridge, publish=self.publish))
         self.app._commit_camera.assert_called_once()
 
     def test_finish_retries_a_contended_result_read(self):
         from dolly.native_bridge import NativeBridgeError
         self.bridge.editor_bone_picker.side_effect = NativeBridgeError("The Bone Picker is updating; retry in a moment.")
-        self.assertFalse(picker.dispatch(self.app, dict(action="finish_bone_picker", value=600, pose=(42,)), self.bridge))
+        self.assertFalse(picker.dispatch(self.app, dict(action="finish_bone_picker", value=600, pose=(42,)), self.bridge, publish=self.publish))
         self.assertIs(self.app._bone_picker_context, self.context)
         self.app._commit_camera.assert_not_called()
 
@@ -92,7 +119,7 @@ class BonePickerTests(unittest.TestCase):
         self.controller.capture_at_replay.return_value = copy.deepcopy(self.key)
         self.controller.status.return_value = {"tick": 1234}
         mutate = Mock()
-        picker.start_attached_view(self.app, mutate)
+        picker.start_attached_view(self.app, mutate, publish=self.publish)
         _, work, done = self.app._submit.call_args.args
         done(work())
         self.assertEqual(self.app.project.start_tick, 1234)
@@ -100,13 +127,13 @@ class BonePickerTests(unittest.TestCase):
         self.assertEqual(len(self.app.project.keyframes), 1)
         self.controller.capture_at_replay.assert_called_once_with(None, 60)
         mutate.assert_called_once()
-        opened.assert_called_once_with(self.app)
+        opened.assert_called_once_with(self.app, publish=self.publish)
 
     @patch("dolly.bone_picker.open_picker")
     def test_player_first_start_rejects_changed_shot(self, opened):
         self.app.project = Project()
         self.app._resolve_replay_tick_rate = Mock(return_value=60)
-        picker.start_attached_view(self.app, Mock())
+        picker.start_attached_view(self.app, Mock(), publish=self.publish)
         done = self.app._submit.call_args.args[2]
         self.app.project = Project(name="Replacement")
         with self.assertRaisesRegex(ValueError, "changed"):
@@ -119,7 +146,7 @@ class BonePickerTests(unittest.TestCase):
         self.app._resolve_replay_tick_rate = Mock(return_value=32)
         self.controller._follow_active = True
         self.controller.status.return_value = {"tick": 1234}
-        picker.start_attached_view(self.app, Mock())
+        picker.start_attached_view(self.app, Mock(), publish=self.publish)
         work = self.app._submit.call_args.args[1]
         work()
         names = [call[0] for call in self.controller.method_calls]
@@ -131,7 +158,7 @@ class BonePickerTests(unittest.TestCase):
         self.controller._follow_active = True
         self.controller._recorder_active.return_value = False
         self.bridge.editor_status.return_value = dict(ready=True, flight_active=False, paused=True)
-        picker.open_picker(self.app)
+        picker.open_picker(self.app, publish=self.publish)
         self.controller.enter_native_flight.assert_not_called()
         self.app._submit.call_args.args[1]()
         self.controller.enter_native_flight.assert_called_once_with(owner="panel")
@@ -141,7 +168,7 @@ class BonePickerTests(unittest.TestCase):
         self.app._resolve_replay_tick_rate = Mock(return_value=32)
         self.controller._follow_active = True
         self.controller.enter_native_flight.side_effect = RuntimeError("Restoration failed")
-        picker.start_attached_view(self.app, Mock())
+        picker.start_attached_view(self.app, Mock(), publish=self.publish)
         with self.assertRaisesRegex(RuntimeError, "Restoration failed"):
             self.app._submit.call_args.args[1]()
         self.controller.capture_at_replay.assert_not_called()
@@ -188,7 +215,7 @@ class BonePickerTests(unittest.TestCase):
         self.context["finish_wait"] = 10
         with patch("dolly.bone_picker.time.monotonic", return_value=16):
             with self.assertRaisesRegex(ValueError, "did not finish"):
-                picker.dispatch(self.app, dict(action="finish_bone_picker", value=600, pose=(42,)), self.bridge)
+                picker.dispatch(self.app, dict(action="finish_bone_picker", value=600, pose=(42,)), self.bridge, publish=self.publish)
         self.app._commit_camera.assert_not_called()
         self.assertIsNone(self.app._bone_picker_context)
 

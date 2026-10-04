@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.14 alpha - Editor maintenance
+
+**0.6.14-alpha**
+
+- **Familiar controls, easier upkeep.** *Before:* Shared controls and editor actions were maintained in several large, connected files. *After:* They have clearer shared owners, while your layouts, shortcuts, camera tools and saved settings stay the same.
+- **In-game tools kept together.** *Before:* Panel and Bone Picker drawing shared a file with the graphics hook lifecycle. *After:* Their presentation is separated, with the existing input, resizing and cleanup behavior retained and checked against the previous version.
+
+Full details: [0.6.14 release notes](RELEASE_NOTES_0.6.14-alpha.md).
+
 ## 0.6.13 alpha - Mods load with Dolly again
 
 **0.6.13-alpha**

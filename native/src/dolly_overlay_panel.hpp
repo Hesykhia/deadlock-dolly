@@ -1,0 +1,59 @@
+// ImGui presentation only. Called with the overlay context current and its render lock held.
+#pragma once
+#include "dolly_editor.hpp"
+#include "dolly_bone_picker.hpp"
+#include "dolly_visualization.hpp"
+#include "imgui.h"
+#include <memory>
+
+namespace dolly {
+// Borrowed renderer operations; the panel never creates/releases a GPU resource.
+struct PickerPortrait {
+    void (*reset)() noexcept;
+    void (*update)(const PickerFrame&) noexcept;
+    ImTextureID (*texture)() noexcept;
+};
+
+// One presentation owner per overlay context; existing per-widget static edit
+// caches remain process-lived to preserve device-loss behavior.
+class OverlayPanel {
+public:
+    void style_panel();
+    void load_panel_fonts(float scale);
+    // Font pointers borrow the current ImGui atlas. Guide preference and widget
+    // edit caches deliberately survive device recreation, as they did before.
+    void reset_fonts() noexcept {
+        panel_font = heading_font = title_font = nullptr;
+        panel_scale = 1.0f;
+    }
+    bool guides_visible(const EditorSnapshot& state) noexcept;
+    void draw_path_guides(const EditorSnapshot& state,
+                          const std::shared_ptr<const VisualizationPath>& path);
+    void draw_panel(const EditorSnapshot& state);
+    void draw_bone_picker(const EditorSnapshot& state, const PickerPortrait& portrait);
+    void reset_guides() noexcept { guide_geometry.line_count = guide_geometry.label_count = 0; }
+    std::size_t guide_lines() const noexcept { return guide_geometry.line_count; }
+    std::size_t guide_labels() const noexcept { return guide_geometry.label_count; }
+
+private:
+    static void roster_label(const EditorRosterEntry& entry, char* out, std::size_t capacity);
+    struct SliderRow {
+        bool committed = false, active = false;
+    };
+    void action_button(const char* label, EditorAction action, float width = 0, double value = 0,
+                       bool primary = false);
+    SliderRow slider_row(const char* id, const char* label, float* value, float minimum,
+                         float maximum, const char* format, float label_width = 58.0f,
+                         const VisualizationPath* timeline = nullptr);
+    void section_title(const char* title, const char* detail = nullptr);
+    bool begin_panel_card(const char* name);
+    void end_panel_card();
+    void replay_badge(const EditorSnapshot& state);
+    ImFont* panel_font = nullptr;
+    ImFont* heading_font = nullptr;
+    ImFont* title_font = nullptr;
+    float panel_scale = 1.0f;
+    bool show_path_guides = true;
+    VisualizationGeometry guide_geometry;
+};
+} // namespace dolly

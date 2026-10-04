@@ -1,5 +1,12 @@
-// Included inside the overlay's anonymous namespace. No engine access here.
-void draw_bone_picker(const EditorSnapshot& state) {
+// Bone Picker ImGui presentation; GPU resources belong to the overlay renderer.
+#include "dolly_overlay_panel.hpp"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+namespace dolly {
+// Picker presentation uses the renderer's borrowed portrait interface.
+void OverlayPanel::draw_bone_picker(const EditorSnapshot& state, const PickerPortrait& portrait) {
     static PickerFrame snapshot;
     static char search[96]{};
     static bool common_only = true;
@@ -23,10 +30,7 @@ void draw_bone_picker(const EditorSnapshot& state) {
         common_only = true;
         candidate_count = 0;
         stable_marker_ready.fill(false);
-        release(picker_portrait_view);
-        release(picker_portrait_texture);
-        picker_portrait_format = DXGI_FORMAT_UNKNOWN;
-        picker_portrait_captured_request = 0;
+        portrait.reset();
     }
     if (snapshot.ready && snapshot.selected < 0 && state.attach_bone[0] && snapshot.catalog) {
         for (std::size_t i = 0; i < snapshot.catalog->bones.size(); ++i)
@@ -46,7 +50,7 @@ void draw_bone_picker(const EditorSnapshot& state) {
         marker_display = io.DisplaySize;
     }
     if (snapshot.ready && !snapshot.preview)
-        update_picker_portrait(snapshot);
+        portrait.update(snapshot);
     const float margin = 24 * panel_scale;
     const float width = std::min(350 * panel_scale, io.DisplaySize.x * .42f);
     const float left = io.DisplaySize.x - width - margin;
@@ -73,9 +77,9 @@ void draw_bone_picker(const EditorSnapshot& state) {
     auto* panel_draw = ImGui::GetWindowDrawList();
     panel_draw->AddRectFilled(portrait_min, portrait_max, IM_COL32(37, 55, 57, 255),
                               7 * panel_scale);
-    if (picker_portrait_view)
-        panel_draw->AddImage(reinterpret_cast<ImTextureID>(picker_portrait_view), portrait_min,
-                             portrait_max);
+    const auto portrait_texture = portrait.texture();
+    if (portrait_texture)
+        panel_draw->AddImage(portrait_texture, portrait_min, portrait_max);
     panel_draw->AddRect(portrait_min, portrait_max, IM_COL32(114, 177, 164, 255), 7 * panel_scale);
     ImGui::TextColored(ImVec4(.51f, .94f, .81f, 1), "DOLLY / BONE PICKER");
     ImGui::PushFont(heading_font);
@@ -289,3 +293,5 @@ void draw_bone_picker(const EditorSnapshot& state) {
     }
     ImGui::End();
 }
+
+} // namespace dolly

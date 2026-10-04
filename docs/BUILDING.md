@@ -71,6 +71,31 @@ The portable ZIP contains a `DeadlockDolly` folder with `Dolly.exe`, `_internal`
 only need to extract the folder and launch `Dolly.exe`; they do not run the
 build commands or install Python.
 
+## Refreshing the bundled FFmpeg pin
+
+`tools/fetch_ffmpeg.py` pins the download URL, archive filename and SHA-256.
+If a clean build fails because the dated upstream asset has disappeared, choose
+an available **Windows x64 LGPL shared** asset from
+[BtbN FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds/releases), download it,
+verify its SHA-256 against the release checksum, and update all three constants.
+Keep the shared runtime DLLs and license notices; do not substitute a GPL build
+or use the rolling `latest` URL with a stale checksum.
+
+Prove the new pin using a fresh, empty cache directory so a local cached ZIP
+cannot conceal a broken URL. For example (choose unused output directories):
+
+```powershell
+.\build\venv-build\Scripts\python.exe tools\fetch_ffmpeg.py --cache build\ffmpeg-pin-check-cache --destination build\ffmpeg-pin-check
+.\build\ffmpeg-pin-check\bin\ffmpeg.exe -version
+```
+
+Confirm the expected version/build configuration and notices, then verify the
+packaged runtime during the normal release build. Preserve older verified cache
+archives. Dated autobuilds can be pruned; a durable alternative is a publisher-
+managed immutable mirror of the same verified archive. Changing the URL to that
+mirror must retain the verified hash. Uploading a dependency asset is a separate
+manual publishing action.
+
 ## Generating a compatibility profile after a Deadlock update
 
 `native/profiles/manifest.json` and `native/src/dolly_compat_generated.hpp` are

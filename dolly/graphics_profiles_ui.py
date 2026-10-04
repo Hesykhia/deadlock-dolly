@@ -5,13 +5,14 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from . import graphics_profiles as profiles, launcher
+from . import graphics_profiles as profiles
 
 
 class GraphicsProfiles:
-    def __init__(self, app, parent):
-        from .gui_layout import actions, field
-        self.app = app
+    def __init__(self, parent, *, root, on_error):
+        from .ui.widgets import actions, field
+        self.root = root
+        self.on_error = on_error
         self.library = None
         self.selection = tk.StringVar(value=profiles.CURRENT)
         self.status = tk.StringVar()
@@ -28,18 +29,18 @@ class GraphicsProfiles:
         ttk.Label(parent, textvariable=self.status, wraplength=700, style="CardMuted.TLabel").pack(fill="x", pady=(8, 0))
         try:
             self.refresh()
-        except (OSError, ValueError, launcher.LaunchError) as exc:
+        except (OSError, ValueError, profiles.LaunchError) as exc:
             # Settings is built before the main log widget. Show the error
             # after construction so a damaged library cannot prevent startup.
             self.status.set(str(exc))
-            self.app.root.after_idle(lambda error=exc: self.app._error("Graphics profiles", error))
+            self.root.after_idle(lambda error=exc: self.on_error("Graphics profiles", error))
 
     def run(self, action):
         try:
             action()
-        except (OSError, ValueError, launcher.LaunchError) as exc:
+        except (OSError, ValueError, profiles.LaunchError) as exc:
             self.status.set(str(exc))
-            self.app._error("Graphics profiles", exc)
+            self.on_error("Graphics profiles", exc)
 
     def refresh(self):
         self.library = profiles.load_library()
@@ -57,7 +58,7 @@ class GraphicsProfiles:
             return ""
         selected = next((p for p in library["profiles"] if p["name"] == name), None)
         if selected is None:
-            raise launcher.LaunchError("Graphics profile changed outside this window. Reopen Settings and choose a profile.")
+            raise profiles.LaunchError("Graphics profile changed outside this window. Reopen Settings and choose a profile.")
         return selected["id"]
 
     def select(self):
@@ -76,24 +77,22 @@ class GraphicsProfiles:
         return library, profile
 
     def capture(self):
-        if launcher._game_is_running(launcher.running_processes()):
-            raise ValueError("Close Deadlock before saving its graphics profile, so the file contains its final saved settings.")
-        self.add(profiles.current_video())
+        self.add(profiles.capture_source())
 
     def import_file(self):
-        name = filedialog.askopenfilename(parent=self.app.root, title="Import graphics from video.txt",
+        name = filedialog.askopenfilename(parent=self.root, title="Import graphics from video.txt",
                                          filetypes=(("Video settings", "*.txt"),))
         if name:
             self.add(Path(name))
 
     def add(self, path):
-        data = profiles._read(path)
-        name = simpledialog.askstring("Save graphics profile", "Profile name (for example, Recording):", parent=self.app.root)
+        data = profiles.read_video(path)
+        name = simpledialog.askstring("Save graphics profile", "Profile name (for example, Recording):", parent=self.root)
         if name is None:
             return
         profile = profiles.profile_from_bytes(name.strip(), data)
         kept = "\n".join(f"{profiles.QUALITY_FIELDS[k]}: {v}" for k, v in profile["values"].items())
-        excluded = sorted(profiles._values(data).keys() - profile["values"].keys())
+        excluded = profiles.excluded_fields(data, profile)
         text = f"Source: {path}\n\nQuality values to save:\n{kept}\n\nExcluded fields (kept from the destination):\n" + "\n".join(excluded)
         def save():
             library = profiles.load_library()
@@ -106,16 +105,16 @@ class GraphicsProfiles:
     def preview(self):
         _library, profile = self.chosen()
         target = profiles.current_video()
-        _data, changes = profiles.preview(profile, profiles._read(target))
+        _data, changes = profiles.preview(profile, profiles.read_video(target))
         text = f"Steam video settings: {target}\nProfile: {profile['name']}\n\n" + "\n".join(changes)
         text += "\n\nNo game files are changed by this preview. All fields not listed above are kept. "
         text += "The actual pre-launch file is backed up for each session. Unexpected later edits require manual review."
         self.show_preview("Next-launch graphics preview", text)
 
     def show_preview(self, title, text, save=None):
-        dialog = tk.Toplevel(self.app.root)
+        dialog = tk.Toplevel(self.root)
         dialog.title(title)
-        dialog.transient(self.app.root)
+        dialog.transient(self.root)
         dialog.geometry("740x540")
         body = ttk.Frame(dialog, padding=16)
         body.pack(fill="both", expand=True)
@@ -137,7 +136,7 @@ class GraphicsProfiles:
 
     def rename(self):
         library, profile = self.chosen()
-        name = simpledialog.askstring("Rename graphics profile", "New name:", initialvalue=profile["name"], parent=self.app.root)
+        name = simpledialog.askstring("Rename graphics profile", "New name:", initialvalue=profile["name"], parent=self.root)
         if name is not None:
             profile["name"] = name.strip()
             profiles.save_library(library)
@@ -145,7 +144,7 @@ class GraphicsProfiles:
 
     def delete(self):
         library, profile = self.chosen()
-        if messagebox.askyesno("Delete graphics profile", f"Delete '{profile['name']}' from Dolly's local library?", parent=self.app.root):
+        if messagebox.askyesno("Delete graphics profile", f"Delete '{profile['name']}' from Dolly's local library?", parent=self.root):
             library["profiles"].remove(profile)
             library["selected"] = ""
             profiles.save_library(library)

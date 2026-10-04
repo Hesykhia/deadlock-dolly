@@ -51,6 +51,9 @@ dolly/dialogs.py
 dolly/display.py
 dolly/editor_actions.py
 dolly/editor_session.py
+dolly/editor_view.py
+dolly/editor_publication.py
+dolly/editor_dispatch.py
 dolly/editor_wire.py
 dolly/export_audit.py
 dolly/graphics_diagnostics.py
@@ -121,6 +124,9 @@ native/src/dolly_compat_runtime.hpp
 native/src/dolly_editor_win.cpp
 native/src/dolly_effects.cpp
 native/src/dolly_overlay_win.cpp
+native/src/dolly_overlay_panel.cpp
+native/src/dolly_overlay_panel.hpp
+native/src/dolly_bone_picker_ui.cpp
 native/src/dolly_path.cpp
 native/src/dolly_player_capture.cpp
 native/src/dolly_renderer_diagnostics_win.cpp
@@ -182,6 +188,12 @@ tests/test_auto_startup.py
 tests/test_preload.py
 tests/test_replay_camera.py
 tests/test_ui_theme.py
+tests/test_ui_widgets.py
+tests/test_ui_operations.py
+tests/test_ui_layer_pipeline.py
+tests/test_ui_shot_commands.py
+tests/test_ui_pages.py
+tests/test_graphics_profiles_ui.py
 tests/test_bindings.py
 tests/test_bootstrap.py
 tests/test_branding.py
@@ -198,6 +210,7 @@ tests/test_pov_export.py
 tests/test_curve.py
 tests/test_editor_bridge.py
 tests/test_editor_session.py
+tests/test_editor_view.py
 tests/test_editor_settings.py
 tests/test_endpoint_playback.py
 tests/test_game_ui_handoff.py
@@ -389,6 +402,14 @@ native/include/dolly_depth_live.hpp
 native/tests/depth_live_tests.cpp
 docs/internal/UI_CLEANUP_PROPOSAL.md
 dolly/gui_layout.py
+dolly/ui/__init__.py
+dolly/ui/widgets.py
+dolly/ui/operations.py
+dolly/ui/shot_commands.py
+dolly/ui/layer_pipeline.py
+dolly/ui/library_page.py
+dolly/ui/settings_page.py
+dolly/ui/export_page.py
 tests/test_desktop_layout.py
 
 dolly/updater.py
@@ -405,7 +426,6 @@ dolly/bone_picker.py
 tests/test_bone_picker.py
 native/include/dolly_bone_picker.hpp
 native/src/dolly_bone_picker.cpp
-native/src/dolly_bone_picker_ui.hpp
 native/tests/bone_picker_tests.cpp
 tools/derive_attach_fields.py
 tests/test_attach_camera.py
@@ -496,3 +516,4 @@ third_party/cvar_unlocker/unlocker-build-6745.patch
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
+docs/RELEASE_NOTES_0.6.14-alpha.md

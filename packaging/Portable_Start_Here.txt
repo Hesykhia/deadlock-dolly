@@ -134,6 +134,12 @@ Deadlock. The loaded DLL remains resident until the editing game exits.
 
 COMPATIBILITY AND UPDATES
 
+0.6.14-alpha is an editor maintenance update. Shared controls, theme setup,
+background operations and in-game panel rendering have clearer ownership while
+preserving the familiar controls, shortcuts, settings and export features.
+The 0.6.13 mod-loading repair remains included. See Release_Notes.md for the
+complete changes and offline validation limits.
+
 0.6.13-alpha restores mod loading during Dolly sessions. Dolly now carries your
 installed addon mounts (Deadlock Mod Manager, Grimoire or a manual setup) into
 its temporary game configuration and still restores your original gameinfo.gi

@@ -9,6 +9,107 @@ import zlib
 from . import ui_theme
 
 
+def initialize(root):
+    """Initialize Dolly's current desktop theme in its established order.
+
+    Base ttk styles precede selection handling, rounded assets and wheel guards.
+    Call once per Tk root, before constructing the desktop views.
+    """
+    _F = ui_theme.FONT_SIZES
+    FAMILY = ui_theme.FONT_FAMILY
+    BG = ui_theme.TOKENS["bg"]
+    PANEL = ui_theme.TOKENS["panel"]
+    PANEL_ALT = ui_theme.TOKENS["panel_alt"]
+    FIELD = ui_theme.TOKENS["field"]
+    EDGE = ui_theme.TOKENS["edge"]
+    TEXT = ui_theme.TOKENS["text"]
+    MUTED = ui_theme.TOKENS["muted"]
+    ACCENT = ui_theme.TOKENS["accent"]
+    ACCENT_HOVER = ui_theme.TOKENS["accent_hover"]
+    ACCENT_INK = ui_theme.TOKENS["accent_ink"]
+    BUTTON = ui_theme.TOKENS["button"]
+    BUTTON_HOVER = ui_theme.TOKENS["button_hover"]
+    DISABLED_BG = ui_theme.TOKENS["disabled_bg"]
+    DISABLED_FG = ui_theme.TOKENS["disabled_fg"]
+    SELECTED = ui_theme.TOKENS["selected"]
+    SELECTED_INK = ui_theme.TOKENS["selected_ink"]
+    TRACK = ui_theme.TOKENS["track"]
+    WARN = ui_theme.TOKENS["warn"]
+    WARN_BG = ui_theme.TOKENS["warn_bg"]
+    root.configure(bg=BG)
+    style = ttk.Style(root)
+    style.theme_use("clam")
+    style.configure(".", background=BG, foreground=TEXT, font=(FAMILY, _F["body"]))
+    style.configure("TFrame", background=BG)
+    style.configure("Card.TFrame", background=PANEL)
+    style.configure("TLabel", background=BG, foreground=TEXT)
+    style.configure("Muted.TLabel", foreground=MUTED)
+    style.configure("Card.TLabel", background=PANEL)
+    style.configure("CardMuted.TLabel", background=PANEL, foreground=MUTED)
+    style.configure("Title.TLabel", font=(FAMILY, _F["title"], "bold"))
+    style.configure("Section.TLabel", font=(FAMILY, _F["section"], "bold"), foreground=MUTED)
+    style.configure("CardTitle.TLabel", background=PANEL, font=(FAMILY, _F["card_title"], "bold"))
+    style.configure("Accent.TLabel", foreground=ACCENT)
+    style.configure("Pill.TLabel", background=SELECTED, foreground=ACCENT,
+                    font=(FAMILY, _F["small"], "bold"), padding=(9, 3))
+    style.configure("PillConsole.TLabel", background=WARN_BG, foreground=WARN,
+                    font=(FAMILY, _F["small"], "bold"), padding=(9, 3))
+    style.configure("TButton", background=BUTTON, foreground=TEXT, padding=(10, 6), borderwidth=0)
+    style.map("TButton", background=[("active", BUTTON_HOVER), ("disabled", DISABLED_BG)],
+              foreground=[("disabled", DISABLED_FG)])
+    style.configure("Primary.TButton", background=ACCENT, foreground=ACCENT_INK, font=(FAMILY, _F["body"], "bold"))
+    style.map("Primary.TButton", background=[("active", ACCENT_HOVER), ("disabled", DISABLED_BG)],
+              foreground=[("disabled", DISABLED_FG)])
+    style.configure("Quiet.TButton", background=PANEL, padding=(8, 5))
+    style.configure("TMenubutton", background=PANEL, foreground=MUTED, padding=(5, 2), borderwidth=0)
+    style.configure("TEntry", fieldbackground=FIELD, foreground=TEXT, insertcolor=TEXT,
+                    bordercolor=EDGE, lightcolor=EDGE, darkcolor=EDGE, padding=5)
+    style.configure("TCombobox", fieldbackground=FIELD, background=BUTTON, foreground=TEXT,
+                    arrowcolor=MUTED, borderwidth=0, padding=4)
+    style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", TEXT)])
+    style.configure("TCheckbutton", background=BG, foreground=MUTED, padding=0)
+    style.map("TCheckbutton", background=[("active", BG)], foreground=[("active", TEXT)])
+    style.configure("TNotebook", background=BG, borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG, tabmargins=(0, 0, 0, 6))
+    style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(17, 9), borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG)
+    style.map("TNotebook.Tab", background=[("selected", PANEL)], foreground=[("selected", ACCENT)])
+    style.layout("TNotebook.Tab", [("Notebook.padding", {"sticky": "nswe", "children": [("Notebook.label", {"sticky": "nswe"})]})])
+    style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT,
+                    rowheight=31, borderwidth=0, lightcolor=PANEL, darkcolor=PANEL)
+    style.configure("Treeview.Heading", background=PANEL_ALT, foreground=MUTED, bordercolor=PANEL_ALT, lightcolor=PANEL_ALT, darkcolor=PANEL_ALT, padding=(8, 7),
+                    relief="flat", borderwidth=0, font=(FAMILY, _F["small"]))
+    style.map("Treeview", background=[("selected", SELECTED)], foreground=[("selected", SELECTED_INK)])
+    style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=PANEL, arrowcolor=MUTED,
+                    borderwidth=0, arrowsize=12, relief="flat")
+    style.configure("Horizontal.TScale", background=BG, troughcolor=TRACK, sliderlength=16,
+                    sliderthickness=14, borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
+    style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor=TRACK, bordercolor=PANEL,
+                    lightcolor=ACCENT, darkcolor=ACCENT, thickness=5, borderwidth=0)
+    style.configure("TLabelframe", background=BG, bordercolor=EDGE)
+    style.configure("TLabelframe.Label", foreground=MUTED)
+    root.option_add("*TCombobox*Listbox.background", FIELD)
+    root.option_add("*TCombobox*Listbox.foreground", TEXT)
+    root.bind_class("TCombobox", "<<ComboboxSelected>>",
+                         _clear_committed_combobox_selection, add="+")
+
+    apply(root)
+    install_wheel_guard(root)
+
+
+def _clear_committed_combobox_selection(event):
+    """Remove Tk's automatic text highlight after choosing a dropdown item.
+
+    Leave focus, the insertion cursor, and ordinary typing/drag selection
+    alone. Waiting for idle lets the platform's combobox binding finish.
+    """
+    widget = event.widget
+    def clear():
+        try:
+            widget.selection_clear()
+        except tk.TclError:
+            pass  # The option's callback may have closed its dialog.
+    widget.after_idle(clear)
+
+
 def _rgb(color):
     return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
 

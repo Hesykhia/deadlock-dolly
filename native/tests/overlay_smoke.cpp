@@ -909,6 +909,9 @@ int main(int argc, char** argv) {
             auto catalog = std::make_shared<dolly::PickerCatalog>();
             catalog->sequence = 42;
             catalog->total = 4;
+            catalog->portrait.width = catalog->portrait.height = 2;
+            catalog->portrait.bgra = {11, 22, 33, 255, 11, 22, 33, 255,
+                                      11, 22, 33, 255, 11, 22, 33, 255};
             dolly::PickerSample sample{};
             sample.count = 4;
             const char* names[] = {"head", "pelvis", "hand_R", "ankle_L"};
@@ -925,7 +928,7 @@ int main(int argc, char** argv) {
             snapshot.bone_picker = true;
             auto render_picker = [&] {
                 dolly::picker_camera(
-                    42, 10, true, true, pose, 90, {},
+                    catalog->sequence, 10, true, true, pose, 90, {},
                     [](void* p, dolly::PickerSample& out, const char*&) noexcept {
                         out = *static_cast<dolly::PickerSample*>(p);
                         return true;
@@ -935,6 +938,50 @@ int main(int argc, char** argv) {
             };
             render_picker();
             render_picker();
+            // The UI borrows the renderer's portrait; validate the actual GPU
+            // pixels and request-change clearing, not an implementation mock.
+            auto portrait_view = [&]() -> ID3D11ShaderResourceView* {
+                auto* picker = ImGui::FindWindowByName("Bone Picker");
+                require(picker != nullptr, "Picker panel missing");
+                for (const auto& command : picker->DrawList->CmdBuffer)
+                    if (command.GetTexID() && command.GetTexID() != ImGui::GetIO().Fonts->TexID)
+                        return reinterpret_cast<ID3D11ShaderResourceView*>(command.GetTexID());
+                return nullptr;
+            };
+            auto check_portrait = [&](unsigned char expected_blue) {
+                auto* view = portrait_view();
+                require(view != nullptr, "Portrait image missing from picker draw data");
+                ID3D11Resource* resource = nullptr;
+                view->GetResource(&resource);
+                ID3D11Texture2D* image = nullptr;
+                require(SUCCEEDED(resource->QueryInterface(__uuidof(ID3D11Texture2D),
+                                                           reinterpret_cast<void**>(&image))),
+                        "Portrait is not a texture");
+                resource->Release();
+                D3D11_TEXTURE2D_DESC description{};
+                image->GetDesc(&description);
+                require(description.Width == 2 && description.Height == 2 &&
+                            description.Format == DXGI_FORMAT_B8G8R8A8_UNORM,
+                        "Portrait texture dimensions/format changed");
+                description.Usage = D3D11_USAGE_STAGING;
+                description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                description.BindFlags = description.MiscFlags = 0;
+                ID3D11Texture2D* readback = nullptr;
+                require(SUCCEEDED(device->CreateTexture2D(&description, nullptr, &readback)),
+                        "Portrait readback creation failed");
+                context->CopyResource(readback, image);
+                D3D11_MAPPED_SUBRESOURCE pixels{};
+                require(SUCCEEDED(context->Map(readback, 0, D3D11_MAP_READ, 0, &pixels)),
+                        "Portrait readback failed");
+                const auto* pixel = static_cast<const unsigned char*>(pixels.pData);
+                const bool matches = pixel[0] == expected_blue && pixel[1] == 22 &&
+                                     pixel[2] == 33 && pixel[3] == 255;
+                context->Unmap(readback, 0);
+                readback->Release();
+                image->Release();
+                require(matches, "Picker displayed stale or altered portrait pixels");
+            };
+            check_portrait(11);
             dolly::PickerFrame frame{};
             require(dolly::picker_snapshot(frame) && frame.ready, "Synthetic picker not ready");
             ImGui::SetCurrentContext(screenshot_context);
@@ -1009,6 +1056,26 @@ int main(int argc, char** argv) {
             require(dolly::picker_snapshot(frame) && frame.view == before_panel_drag,
                     "Losing focus must cancel a held middle drag");
             dolly::picker_camera(42, 10, false, true, pose, 90, {}, nullptr, nullptr);
+            // A new request without artwork must not retain the old hero image.
+            catalog = std::make_shared<dolly::PickerCatalog>(*catalog);
+            catalog->sequence = 43;
+            catalog->portrait = {};
+            dolly::picker_publish(catalog);
+            render_picker();
+            render_picker();
+            require(portrait_view() == nullptr, "New empty portrait retained the previous image");
+            catalog = std::make_shared<dolly::PickerCatalog>(*catalog);
+            dolly::picker_camera(43, 10, false, true, pose, 90, {}, nullptr, nullptr);
+            catalog->sequence = 44;
+            catalog->portrait.width = catalog->portrait.height = 2;
+            catalog->portrait.bgra = {99, 22, 33, 255, 99, 22, 33, 255,
+                                      99, 22, 33, 255, 99, 22, 33, 255};
+            dolly::picker_publish(catalog);
+            render_picker();
+            render_picker();
+            check_portrait(99);
+            std::puts("Picker portrait: GPU pixels and request-change clearing/replacement passed.");
+            dolly::picker_camera(44, 10, false, true, pose, 90, {}, nullptr, nullptr);
             snapshot.bone_picker = false;
             require(SUCCEEDED(chain->Present(0, 0)), "Picker cleanup Present failed");
         }

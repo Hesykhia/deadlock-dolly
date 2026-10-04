@@ -7,8 +7,7 @@ from .native_effects import model_token
 from .path import AttachKey
 
 
-def open_picker(app):
-    from . import editor_session
+def open_picker(app, *, publish):
     if app.busy or app.playing:
         raise ValueError("Finish the current operation before opening Bone Picker.")
     if getattr(app, "_bone_picker_context", None):
@@ -46,7 +45,7 @@ def open_picker(app):
             raise ValueError("The selected camera changed while opening Bone Picker.")
         app._bone_picker_context = context
         app.status_text.set("Bone Picker is open in the game. Choose a joint, then preview its attached view.")
-        editor_session.configure(app)
+        publish()
         context["request"] = bridge._editor_attach_sequence
 
     app._submit("Opening Bone Picker", start, ready)
@@ -60,8 +59,7 @@ def still_current(app, context):
             app.project.keyframes[index] == context["key"])
 
 
-def close_picker(app, *, result=None, resume=True):
-    from . import editor_session
+def close_picker(app, *, publish, result=None, resume=True):
     context = getattr(app, "_bone_picker_context", None)
     if not context:
         return
@@ -87,17 +85,17 @@ def close_picker(app, *, result=None, resume=True):
         app._bone_picker_context = None
         app.preview_attach = context["preview"] if still_current(app, context) else False
         app.status_text.set("Bone Picker cancelled. Your saved camera is unchanged.")
-    editor_session.configure(app)
+    publish()
     if context["resume"] and resume:
         app._submit("Resuming replay after Bone Picker", app.controller.toggle_replay)
 
 
-def dispatch(app, event, bridge):
+def dispatch(app, event, bridge, *, publish):
     action = event["action"]
     if action == "open_bone_picker":
-        open_picker(app)
+        open_picker(app, publish=publish)
     elif action == "cancel_bone_picker":
-        close_picker(app)
+        close_picker(app, publish=publish)
     else:
         context = getattr(app, "_bone_picker_context", None)
         if not context:
@@ -107,7 +105,7 @@ def dispatch(app, event, bridge):
             result = bridge.editor_bone_picker()
         except NativeBridgeError as exc:
             if "updating" not in str(exc):
-                close_picker(app, resume=False)
+                close_picker(app, resume=False, publish=publish)
                 raise
             result = None
         pose = event.get("pose") or ()
@@ -116,20 +114,20 @@ def dispatch(app, event, bridge):
         # The native worker publishes the result asynchronously after Present.
         if not result or result.get("request") != pose[0] or not result.get("finishing"):
             if time.monotonic() - context.setdefault("finish_wait", time.monotonic()) > 5:
-                close_picker(app, resume=False)
+                close_picker(app, resume=False, publish=publish)
                 raise ValueError("Bone Picker did not finish responding. Reopen it and try again.")
             return False
         if result["selected"] != event["value"]:
             raise ValueError("The Bone Picker selection changed before it was applied.")
         try:
-            close_picker(app, result=result)
+            close_picker(app, result=result, publish=publish)
         except ValueError:
-            close_picker(app, resume=False)
+            close_picker(app, resume=False, publish=publish)
             raise
     return True
 
 
-def start_attached_view(app, mutate):
+def start_attached_view(app, mutate, *, publish):
     """Create the first attached view through the normal paused capture gate."""
     if app.busy or app.playing or app.project.keyframes:
         raise ValueError("Finish the current operation before starting a bone camera.")
@@ -167,7 +165,7 @@ def start_attached_view(app, mutate):
         app._mark_dirty()
         app._refresh_keys(key.time)
         app._set_time(key.time)
-        open_picker(app)
+        open_picker(app, publish=publish)
 
     app._submit("Starting bone camera", capture, ready)
 

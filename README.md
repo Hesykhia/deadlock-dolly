@@ -5,7 +5,7 @@
 A camera-path editor for local Deadlock replays. Capture the free camera,
 shape a shot and play it back with animated framing and camera variables.
 
-**Current source: 0.6.13-alpha.** The portable Windows build opens through
+**Current source: 0.6.14-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.
 
 **THIS MOD INJECTS CODE INTO DEADLOCK — USE AT YOUR OWN RISK.**
@@ -48,6 +48,15 @@ Deadlock normally.
 - Optional ReShade color effects, its in-game menu on a configurable F11 key, and the verified scene depth published to ReShade for depth-based effects.
 - Startup update check with manual checks in Settings.
 - Optional game-only audio for real-time video, plus a separate advanced reconstructed-audio workflow.
+
+### 0.6.14 highlights
+
+Maintenance across the desktop and in-game editors: shared controls and theme
+setup, clearer page and operation ownership, separated native editor publication
+and panel rendering. Existing layouts, shortcuts, camera/export features and
+settings remain intact, including the 0.6.13 mod-loading repair. Clean source
+builds use a refreshed, checksum-pinned LGPL FFmpeg runtime. See the
+[release notes](docs/RELEASE_NOTES_0.6.14-alpha.md) for changes and offline validation limits.
 
 ### 0.6.13 fixes
 

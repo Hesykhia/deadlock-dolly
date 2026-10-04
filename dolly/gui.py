@@ -21,6 +21,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer, ui_theme
+from .ui import shot_commands
 from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, EDITOR_KEY_CHOICES, EditorBinding, default_action_bindings, validate_action_bindings
 from dolly.replays import discover_replays, find_replay_folder, parse_launch_options
 from dolly.bindings import CaptureBinding, DEFAULT_BINDING, KEY_CHOICES
@@ -30,6 +31,8 @@ from dolly.clip_audio import ClipAudioCapture
 from dolly.curve import AspectCurve, RotationCurve, TimelineView
 from dolly.display import focus_window
 from dolly.hotkey import CaptureHotkey
+# Compatibility import for existing callback users.
+from .gui_theme import _clear_committed_combobox_selection
 from dolly.launcher import discover_game, recover_pending, validate_game
 from dolly.launcher import discover_game, recover_pending
 from dolly.memory_watch import PausedMemoryWatch
@@ -98,21 +101,6 @@ def _finite(value: str, label: str) -> float:
     return number
 
 
-def _clear_committed_combobox_selection(event):
-    """Remove Tk's automatic text highlight after choosing a dropdown item.
-
-    Leave focus, the insertion cursor, and ordinary typing/drag selection
-    alone. Waiting for idle lets the platform's combobox binding finish.
-    """
-    widget = event.widget
-    def clear():
-        try:
-            widget.selection_clear()
-        except tk.TclError:
-            pass  # The option's callback may have closed its dialog.
-    widget.after_idle(clear)
-
-
 def _binding_event_key(event):
     number = getattr(event, "num", None)
     if isinstance(number, int):
@@ -127,10 +115,135 @@ def _binding_event_key(event):
 
 # Bound pending UI events so a chatty failure loop cannot grow memory without
 # limit. Log lines may be dropped (and are reported); command results never are.
-EVENT_QUEUE_LIMIT = 4096
+from .ui.operations import EVENT_QUEUE_LIMIT, OperationQueue
+from .ui.layer_pipeline import LayerPipeline, recover_export_failure
 
 
 class DollyApp:
+    @property
+    def layer_pipeline(self):
+        if "_layer_pipeline" not in self.__dict__:
+            self._layer_pipeline = LayerPipeline()
+        return self._layer_pipeline
+
+    @property
+    def _pending_auto_play(self):
+        return self.layer_pipeline.pending_auto_play
+
+    @_pending_auto_play.setter
+    def _pending_auto_play(self, value):
+        self.layer_pipeline.pending_auto_play = value
+
+    @property
+    def _auto_finish_layered(self):
+        return self.layer_pipeline.auto_finish_layered
+
+    @_auto_finish_layered.setter
+    def _auto_finish_layered(self, value):
+        self.layer_pipeline.auto_finish_layered = value
+
+    @property
+    def _take_playing_seen(self):
+        return self.layer_pipeline.take_playing_seen
+
+    @_take_playing_seen.setter
+    def _take_playing_seen(self, value):
+        self.layer_pipeline.take_playing_seen = value
+
+    @property
+    def _pending_combine(self):
+        return self.layer_pipeline.pending_combine
+
+    @_pending_combine.setter
+    def _pending_combine(self, value):
+        self.layer_pipeline.pending_combine = value
+
+    @property
+    def _pending_capture(self):
+        return self.layer_pipeline.pending_capture
+
+    @_pending_capture.setter
+    def _pending_capture(self, value):
+        self.layer_pipeline.pending_capture = value
+
+    @property
+    def _pipeline_advance(self):
+        return self.layer_pipeline.advance_pending
+
+    @_pipeline_advance.setter
+    def _pipeline_advance(self, value):
+        self.layer_pipeline.advance_pending = value
+
+    @property
+    def _base_capture(self):
+        return self.layer_pipeline.base_capture
+
+    @_base_capture.setter
+    def _base_capture(self, value):
+        self.layer_pipeline.base_capture = value
+
+    @property
+    def _layer_queue(self):
+        return self.layer_pipeline.queue
+
+    @_layer_queue.setter
+    def _layer_queue(self, value):
+        self.layer_pipeline.queue = value
+
+    @property
+    def _active_layer_take(self):
+        return self.layer_pipeline.active_take
+
+    @_active_layer_take.setter
+    def _active_layer_take(self, value):
+        self.layer_pipeline.active_take = value
+
+    @property
+    def operations(self):
+        if "_operations" not in self.__dict__:
+            self._operations = OperationQueue()
+        return self._operations
+
+    @property
+    def events(self):
+        return self.operations.events
+
+    @events.setter
+    def events(self, value):
+        self.operations.events = value
+
+    @property
+    def jobs(self):
+        return self.operations.jobs
+
+    @jobs.setter
+    def jobs(self, value):
+        self.operations.jobs = value
+
+    @property
+    def _dropped_logs(self):
+        return self.operations.dropped_logs
+
+    @_dropped_logs.setter
+    def _dropped_logs(self, value):
+        self.operations.dropped_logs = value
+
+    @property
+    def closed(self):
+        return self.operations.closed
+
+    @closed.setter
+    def closed(self, value):
+        self.operations.closed = value
+
+    @property
+    def busy(self):
+        return self.operations.busy
+
+    @busy.setter
+    def busy(self, value):
+        self.operations.busy = value
+
     def __init__(self, root: tk.Tk):
         self.root = root
         apply_window_icon(root)
@@ -138,9 +251,7 @@ class DollyApp:
         self.ui_scale = max(1.0, float(self.root.tk.call("tk", "scaling")) / (96 / 72))
         self.root.geometry(self._window_size(1180, 800))
         self.root.minsize(*self._window_dimensions(1000, 700))
-        self.events: queue.Queue = queue.Queue(maxsize=EVENT_QUEUE_LIMIT)
-        self.jobs: queue.Queue = queue.Queue()
-        self._dropped_logs = 0
+        self._operations = OperationQueue()
         self._memory_watch = PausedMemoryWatch()
         self._take_audit_seen: set[str] = set()
         self._take_audit_reported = False
@@ -152,8 +263,7 @@ class DollyApp:
         self.shot_history = ShotHistory(self.project)
         self.controller = Controller(log_callback=self._enqueue_log)
         self.video_export = VideoExport(self.controller)
-        self.worker = threading.Thread(target=self._worker_loop, name="dolly-ui-operations", daemon=True)
-        self.worker.start()
+        self.worker = self.operations.start(self._operation_failure_kind)
         self.game_path = tk.StringVar()
         self.demo_path = tk.StringVar()
         self.protocol = tk.StringVar(value="Netconsole")
@@ -296,64 +406,8 @@ class DollyApp:
         return f"{width}x{height}"
 
     def _style(self):
-        self.root.configure(bg=BG)
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
-        style.configure(".", background=BG, foreground=TEXT, font=(FAMILY, _F["body"]))
-        style.configure("TFrame", background=BG)
-        style.configure("Card.TFrame", background=PANEL)
-        style.configure("TLabel", background=BG, foreground=TEXT)
-        style.configure("Muted.TLabel", foreground=MUTED)
-        style.configure("Card.TLabel", background=PANEL)
-        style.configure("CardMuted.TLabel", background=PANEL, foreground=MUTED)
-        style.configure("Title.TLabel", font=(FAMILY, _F["title"], "bold"))
-        style.configure("Section.TLabel", font=(FAMILY, _F["section"], "bold"), foreground=MUTED)
-        style.configure("CardTitle.TLabel", background=PANEL, font=(FAMILY, _F["card_title"], "bold"))
-        style.configure("Accent.TLabel", foreground=ACCENT)
-        style.configure("Pill.TLabel", background=SELECTED, foreground=ACCENT,
-                        font=(FAMILY, _F["small"], "bold"), padding=(9, 3))
-        style.configure("PillConsole.TLabel", background=WARN_BG, foreground=WARN,
-                        font=(FAMILY, _F["small"], "bold"), padding=(9, 3))
-        style.configure("TButton", background=BUTTON, foreground=TEXT, padding=(10, 6), borderwidth=0)
-        style.map("TButton", background=[("active", BUTTON_HOVER), ("disabled", DISABLED_BG)],
-                  foreground=[("disabled", DISABLED_FG)])
-        style.configure("Primary.TButton", background=ACCENT, foreground=ACCENT_INK, font=(FAMILY, _F["body"], "bold"))
-        style.map("Primary.TButton", background=[("active", ACCENT_HOVER), ("disabled", DISABLED_BG)],
-                  foreground=[("disabled", DISABLED_FG)])
-        style.configure("Quiet.TButton", background=PANEL, padding=(8, 5))
-        style.configure("TMenubutton", background=PANEL, foreground=MUTED, padding=(5, 2), borderwidth=0)
-        style.configure("TEntry", fieldbackground=FIELD, foreground=TEXT, insertcolor=TEXT,
-                        bordercolor=EDGE, lightcolor=EDGE, darkcolor=EDGE, padding=5)
-        style.configure("TCombobox", fieldbackground=FIELD, background=BUTTON, foreground=TEXT,
-                        arrowcolor=MUTED, borderwidth=0, padding=4)
-        style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", TEXT)])
-        style.configure("TCheckbutton", background=BG, foreground=MUTED, padding=0)
-        style.map("TCheckbutton", background=[("active", BG)], foreground=[("active", TEXT)])
-        style.configure("TNotebook", background=BG, borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG, tabmargins=(0, 0, 0, 6))
-        style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(17, 9), borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG)
-        style.map("TNotebook.Tab", background=[("selected", PANEL)], foreground=[("selected", ACCENT)])
-        style.layout("TNotebook.Tab", [("Notebook.padding", {"sticky": "nswe", "children": [("Notebook.label", {"sticky": "nswe"})]})])
-        style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT,
-                        rowheight=31, borderwidth=0, lightcolor=PANEL, darkcolor=PANEL)
-        style.configure("Treeview.Heading", background=PANEL_ALT, foreground=MUTED, bordercolor=PANEL_ALT, lightcolor=PANEL_ALT, darkcolor=PANEL_ALT, padding=(8, 7),
-                        relief="flat", borderwidth=0, font=(FAMILY, _F["small"]))
-        style.map("Treeview", background=[("selected", SELECTED)], foreground=[("selected", SELECTED_INK)])
-        style.configure("Vertical.TScrollbar", background=EDGE, troughcolor=PANEL, arrowcolor=MUTED,
-                        borderwidth=0, arrowsize=12, relief="flat")
-        style.configure("Horizontal.TScale", background=BG, troughcolor=TRACK, sliderlength=16,
-                        sliderthickness=14, borderwidth=0, lightcolor=ACCENT, darkcolor=ACCENT)
-        style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor=TRACK, bordercolor=PANEL,
-                        lightcolor=ACCENT, darkcolor=ACCENT, thickness=5, borderwidth=0)
-        style.configure("TLabelframe", background=BG, bordercolor=EDGE)
-        style.configure("TLabelframe.Label", foreground=MUTED)
-        self.root.option_add("*TCombobox*Listbox.background", FIELD)
-        self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
-        self.root.bind_class("TCombobox", "<<ComboboxSelected>>",
-                             _clear_committed_combobox_selection, add="+")
-
-        from dolly import gui_theme
-        gui_theme.apply(self.root)
-        gui_theme.install_wheel_guard(self.root)
+        from . import gui_theme
+        gui_theme.initialize(self.root)
 
     def _build_menu(self):
         menu = tk.Menu(self.root)
@@ -766,31 +820,12 @@ class DollyApp:
             audit = status.get("audit") if isinstance(status, dict) else None
             if isinstance(audit, dict):
                 self._report_take_audit(audit.get("findings", ()))
-            taken = getattr(self, "_active_layer_take", None)
-            if taken is not None:
-                self._active_layer_take = None
-                if taken[1] == "capture":
-                    # The native players-only capture rides the take; the
-                    # alpha master is built from the capture bundle next.
-                    self._pending_capture = taken[0]
-                elif taken[1] == "white":
-                    # Both matte passes are in; the alpha combine runs before
-                    # the queue advances to the next layer.
-                    self._pending_combine = taken[0]
-            self._pipeline_advance = True
-            if (taken is None and self._base_capture is not None and self._layer_queue
-                    and not status.get("master")):
+            if self.layer_pipeline.completed(status):
                 # The color take of a layered run just landed. Say so, because
                 # the selected pass takes start immediately afterwards.
                 self.status_text.set("Color take saved. Recording the selected passes…")
         elif state in ("failed", "cancelled"):
-            layered = self._base_capture is not None or self._layer_queue
-            self._pending_combine = None
-            self._pending_capture = None
-            self._pipeline_advance = False
-            self._base_capture = None
-            self._layer_queue = []
-            self._active_layer_take = None
+            layered = self.layer_pipeline.failed()
             if layered:
                 self._submit("Restoring scene layers", self._restore_scene_state,
                              lambda _: None)
@@ -824,61 +859,23 @@ class DollyApp:
             LOG.warning("Scene classes could not all be restored: %s", exc)
 
     def _clear_layer_pipeline(self):
-        """UI-thread reset after an interrupted export, including prep errors."""
-        self._pending_auto_play = False
-        self._auto_finish_layered = False
-        self._take_playing_seen = False
-        self._pending_combine = None
-        self._pending_capture = None
-        self._pipeline_advance = False
-        self._base_capture = None
-        self._layer_queue = []
-        self._active_layer_take = None
+        self.layer_pipeline.clear()
 
     def _recover_export_failure(self):
-        """Worker cleanup before presenting an error; retain completed outputs."""
-        for label, restore in (("recording", self.video_export.stop),
-                               ("camera control", self.controller.stop),
-                               ("scene layers", self._restore_scene_state)):
-            try:
-                restore()
-            except Exception:
-                LOG.exception("Could not restore %s after export failure", label)
+        recover_export_failure(self.video_export.stop, self.controller.stop, self._restore_scene_state)
 
     def _advance_layer_pipeline(self):
-        """Poll-driven layer queue: alpha combine, next take, then restore.
-
-        ``_submit`` refuses while another operation is busy, so the pipeline
-        retries on the next poll instead of dropping the combine.
-        """
-        if not getattr(self, "_pipeline_advance", False) or self.busy:
-            return
-        if getattr(self, "_pending_capture", None) is not None:
-            layer, self._pending_capture = self._pending_capture, None
-            self._pipeline_advance = False
-            self._submit("Building players layer", lambda: self._finish_player_capture(layer),
-                         self._video_operation_done)
-            return
-        if getattr(self, "_pending_combine", None) is not None:
-            layer, self._pending_combine = self._pending_combine, None
-            self._pipeline_advance = False
-            self._submit("Building layer alpha", lambda: self._combine_layer(layer),
-                         self._video_operation_done)
-            return
-        if self._layer_queue:
-            # Never start a take while the recorder is still active; a poll
-            # between the submit and the worker would otherwise fire again.
-            if self.video_export.status().get("state") in ACTIVE_STATES:
-                return
-            self._pipeline_advance = False
-            self._submit("Recording layer take", self._start_next_layer_take,
-                         self._video_operation_done)
-            return
-        self._pipeline_advance = False
-        if self._base_capture is not None:
-            self._audit_finished_layers(self._base_capture)
-            self._base_capture = None
-            self._submit("Restoring scene layers", self._restore_scene_state, lambda _: None)
+        self.layer_pipeline.advance(
+            busy=self.busy,
+            recorder_active=lambda: self.video_export.status().get("state") in ACTIVE_STATES,
+            submit=self._submit,
+            finish_capture=self._finish_player_capture,
+            combine=self._combine_layer,
+            start_next=self._start_next_layer_take,
+            complete=self._video_operation_done,
+            audit=self._audit_finished_layers,
+            restore=self._restore_scene_state,
+        )
 
     def _report_take_audit(self, findings, *, final=False):
         """Log new take-validation findings once, and one pass line per run.
@@ -2704,22 +2701,13 @@ class DollyApp:
         ttk.Label(self.smoothing_row, text="Light 80 ms / Balanced 160 ms / Strong 280 ms", style="Muted.TLabel").pack(side="left", padx=12)
 
     def _worker_loop(self):
-        while True:
-            job = self.jobs.get()
-            if job is None:
-                return
-            label, function, callback = job
-            try:
-                result = function()
-            except Exception as exc:
-                LOG.exception("Operation failed: %s", label)
-                kind = "error"
-                if getattr(self, "_base_capture", None) is not None:
-                    self._recover_export_failure()
-                    kind = "export_error"
-                self.events.put((kind, label, exc))
-            else:
-                self.events.put(("done", label, (result, callback)))
+        self.operations.run(self._operation_failure_kind)
+
+    def _operation_failure_kind(self):
+        if getattr(self, "_base_capture", None) is not None:
+            self._recover_export_failure()
+            return "export_error"
+        return "error"
 
     def _recover_game_config(self):
         def complete(restored):
@@ -2731,24 +2719,15 @@ class DollyApp:
         self._submit("Recovering game configuration", recover_pending, complete)
 
     def _submit(self, label, function, callback=None):
-        if self.closed:
-            return False
-        if getattr(self, "_bone_picker_context", None):
-            self.status_text.set("Finish or cancel Bone Picker before starting another operation.")
-            return False
-        if self.busy:
-            self.status_text.set("Please wait for the current operation to finish.")
-            return False
-        self.busy = True
-        self.busy_text.set(label + "…")
-        self.jobs.put((label, function, callback))
-        return True
+        return self.operations.submit(
+            label, function, callback,
+            blocked=bool(getattr(self, "_bone_picker_context", None)),
+            started=lambda name: self.busy_text.set(name + "\u2026"),
+            rejected=lambda message: self.status_text.set(message),
+        )
 
     def _enqueue_log(self, *parts):
-        try:
-            self.events.put_nowait(("log", "", " ".join(str(part) for part in parts)))
-        except queue.Full:
-            self._dropped_logs = getattr(self, "_dropped_logs", 0) + 1
+        self.operations.enqueue_log(*parts)
 
     def _log(self, text):
         self.log_widget.configure(state="normal")
@@ -2772,11 +2751,7 @@ class DollyApp:
     def _poll_once(self):
         if self.closed:
             return
-        for _ in range(100):
-            try:
-                kind, label, payload = self.events.get_nowait()
-            except queue.Empty:
-                break
+        for kind, label, payload in self.operations.pending_events():
             if kind == "capture_hotkey":
                 self._handle_capture_hotkey(payload)
             elif kind == "log":
@@ -3165,12 +3140,7 @@ class DollyApp:
             return
 
         def operation():
-            keys = copy.deepcopy(self.project.keyframes)
-            changed = False
-            for key in keys:
-                if getattr(key, "curve_" + channel) is not None:
-                    setattr(key, "curve_" + channel, None)
-                    changed = True
+            keys, changed = shot_commands.reset_rotation(self.project.keyframes, channel)
             if changed:
                 self._commit_camera(keys)
                 self.status_text.set(f"Reset the {channel} curve to the camera keys.")
@@ -3189,8 +3159,7 @@ class DollyApp:
             if index is None:
                 raise ValueError("Select a camera to reset its framing.")
             self._sync_options()
-            keys = copy.deepcopy(self.project.keyframes)
-            keys[index].aspect_ratio = self.project.standard_aspect
+            keys = shot_commands.reset_aspect(self.project, index)
             self._commit_camera(keys, keys[index].time)
             self.status_text.set("Selected camera reset to normal aspect.")
         self._guard("Reset framing", operation)
@@ -3261,19 +3230,14 @@ class DollyApp:
         return candidate
 
     def _selection_index(self, tree):
-        selected = tree.selection()
-        return int(selected[0]) if selected else None
+        return shot_commands.selection_index(tree.selection())
 
     def _read_key(self):
         values = {field: _finite(self.key_vars[field].get(), label) for field, label in zip(FIELDS, FIELD_LABELS)}
         return Keyframe(**values)
 
     def _commit_camera(self, keys, select_time=None):
-        candidate = copy.deepcopy(self.project)
-        candidate.keyframes = sorted(keys, key=lambda key: key.time)
-        if candidate.keyframes:
-            candidate.validate()
-        self.project = candidate
+        self.project = shot_commands.commit_camera(self.project, keys)
         self._mark_dirty()
         self._refresh_keys(select_time)
         history = getattr(self, "shot_history", None)
@@ -3855,19 +3819,7 @@ class DollyApp:
                             "Replace the current camera path with this captured view? Existing lens and depth-of-field tracks will be kept.",
                             parent=self.root):
                         return
-                    candidate.keyframes = [key]
-                    if tick is not None:
-                        candidate.start_tick = int(tick)
-                    candidate.interpolation = "smooth"
-                elif action == "replace":
-                    candidate.keyframes[selected] = key
-                else:
-                    if any(existing.time == key.time for existing in candidate.keyframes):
-                        raise ValueError("This replay moment already has a view. Advance the replay, use Replace selected camera, "
-                                         "or choose Timed shot to add several views while paused.")
-                    candidate.keyframes.append(key)
-                candidate.keyframes.sort(key=lambda item: item.time)
-                candidate.validate()
+                shot_commands.finish_capture(candidate, action, key, tick, selected)
                 self.project = candidate
                 self.start_tick.set(_number(candidate.start_tick))
                 self.tick_rate.set(_number(candidate.tick_rate))
@@ -4339,14 +4291,14 @@ class DollyApp:
         return "break"
 
     def _move_shot_history(self, redo=False):
-        if not self._shot_edit_ready():
-            return
-        # Commit valid desktop option edits before Undo; a no-op must preserve Redo.
-        self._sync_options()
-        state = self.shot_history.move(redo)
-        if state is None:
-            self.status_text.set("Nothing to redo." if redo else "Nothing to undo.")
-            return
+        shot_commands.move_history(
+            redo, ready=self._shot_edit_ready, sync=self._sync_options,
+            move=lambda direction: self.shot_history.move(direction),
+            restore=self._restore_shot_history,
+            empty=lambda direction: self.status_text.set("Nothing to redo." if direction else "Nothing to undo."),
+        )
+
+    def _restore_shot_history(self, state, redo):
         self.project = state.project
         self.dirty = self.shot_history.is_dirty(self.project)
         self._native_editor_config_cache = None
@@ -4505,7 +4457,7 @@ class DollyApp:
                 LOG.exception("Capture shortcut cleanup failed during editor shutdown")
             self.capture_hotkey = None
         self.closed = True
-        self.jobs.put(None)
+        self.operations.shutdown()
         self.root.destroy()
 
 
