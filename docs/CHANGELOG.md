@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.13 alpha - Mods load with Dolly again
+
+**0.6.13-alpha**
+
+- **Mods load with Dolly again.** *Before:* launching through Dolly replaced `gameinfo.gi` with Dolly's own configuration and dropped every mod mount, so skin and HUD mods were missing for the whole session. *After:* Dolly carries your installed mod mounts (Deadlock Mod Manager, Grimoire or a manual setup) into its temporary configuration, and your original file is still restored exactly on exit.
+- **Uncompiled HUD files are still caught early.** *Before:* a stale loose Panorama file inside a mounted mod folder could crash the game before Dolly connected. *After:* Dolly names the exact file and refuses before changing anything.
+
+Full details: [0.6.13 release notes](RELEASE_NOTES_0.6.13-alpha.md).
+
 ## 0.6.12 alpha - F9 startup, panel timing and display scaling
 
 **0.6.12-alpha**

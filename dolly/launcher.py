@@ -53,6 +53,19 @@ except CompatibilityError:
     NATIVE_GAME_SHA256 = {}
 STEAM_APP_ID = "1422450"
 GAME_EXECUTABLE_NAMES = ("deadlock.exe", "citadel.exe")
+# Mod managers (Deadlock Mod Manager, Grimoire, the manual guide) mount their
+# addon folders with ordinary SearchPaths entries. The reviewed editing baseline
+# intentionally omits those retired mounts, so the launcher carries only the
+# installed entries listed here into its temporary session file.
+ADDON_MOUNT_KEYS = {
+    "game": "Game",
+    "mod": "Mod",
+    "write": "Write",
+    "addonroot": "AddonRoot",
+    "officialaddonroot": "OfficialAddonRoot",
+}
+ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons)(?:/.*)?$", re.IGNORECASE)
+ADDON_WRITE_PATHS = {"citadel", "core"}
 
 
 class LaunchError(RuntimeError):
@@ -274,6 +287,116 @@ def make_gameinfo(original: str, overlay_name: str) -> str:
     # Replacement precedes insertion at identical start positions.
     for start, end, value in sorted(edits, key=lambda edit: (edit[0], edit[1]), reverse=True):
         result = result[:start] + value + result[end:]
+    _parse(result)
+    return result
+
+
+def _search_paths_entries(entries: list[_Entry]) -> list[_Entry]:
+    roots = _named(entries, "GameInfo")
+    if len(roots) != 1 or roots[0].children is None:
+        raise LaunchError("Expected one GameInfo block in the current gameinfo.gi.")
+    filesystems = _named(roots[0].children, "FileSystem")
+    if len(filesystems) != 1 or filesystems[0].children is None:
+        raise LaunchError("Expected one FileSystem block in the current gameinfo.gi.")
+    searches = _named(filesystems[0].children, "SearchPaths")
+    if len(searches) != 1 or searches[0].children is None:
+        raise LaunchError("Expected one FileSystem/SearchPaths block in gameinfo.gi.")
+    if any(entry.children is not None for entry in searches[0].children):
+        raise LaunchError("Nested SearchPaths entries are not supported; original file was not changed.")
+    return searches[0].children
+
+
+def mod_search_paths(text: str) -> list[tuple[str, str]]:
+    """Addon mounts a mod manager installed into the live gameinfo.gi.
+
+    Deadlock Mod Manager, Grimoire and the manual modding guide append
+    ``citadel/addons`` shards, ``citadel/grimoire`` or
+    ``citadel/deadworks_addons/vpks`` game mounts along with their Mod/Write
+    paths and addon roots. Only these entries are carried into Dolly's session
+    file; everything else still comes from the reviewed editing baseline.
+    """
+    mounts: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in _search_paths_entries(_parse(text)):
+        if entry.value is None:
+            raise LaunchError("Could not read a game search path from the installed gameinfo.gi.")
+        key = entry.key.value.casefold()
+        if key not in ADDON_MOUNT_KEYS:
+            continue
+        path = entry.value.value.replace("\\", "/").strip("/")
+        if key == "game" and ADDON_GAME_MOUNTS.fullmatch(path) is None:
+            continue
+        if key in ("mod", "write") and path.casefold() not in ADDON_WRITE_PATHS:
+            continue
+        mount = (ADDON_MOUNT_KEYS[key], path)
+        if mount not in seen:
+            seen.add(mount)
+            mounts.append(mount)
+    return mounts
+
+
+def _addon_config_block(text: str) -> str | None:
+    roots = _named(_parse(text), "GameInfo")
+    if len(roots) != 1 or roots[0].children is None:
+        return None
+    for entry in roots[0].children:
+        if entry.key.value.casefold() == "addonconfig" and entry.children is not None:
+            return text[entry.key.start:entry.end]
+    return None
+
+
+def merge_addon_mounts(original: str, editing: str) -> str:
+    """Carry the installed gameinfo.gi's addon mounts into Dolly's baseline.
+
+    The reviewed baseline stays byte-identical on disk; only the temporary
+    session file receives the user's own mount lines, so their mods keep loading
+    while competitive rendering settings still come from the reviewed file.
+    """
+    mounts = mod_search_paths(original)
+    config = _addon_config_block(original)
+    if not mounts and config is None:
+        return editing
+    newline = "\r\n" if "\r\n" in editing else "\n"
+    result = editing
+    if config is not None:
+        children = _named(_parse(result), "GameInfo")[0].children
+        assert children is not None
+        if not any(entry.key.value.casefold() == "addonconfig" for entry in children):
+            filesystem = _named(children, "FileSystem")[0]
+            block = config.strip().replace("\r\n", "\n").replace("\n", newline)
+            result = result[:filesystem.key.start] + block + newline + result[filesystem.key.start:]
+    entries = _search_paths_entries(_parse(result))
+    existing = {(entry.key.value.casefold(), entry.value.value.replace("\\", "/").strip("/").casefold())
+                for entry in entries if entry.value is not None}
+    additions: list[str] = []
+    mounted_addons = False
+    for key, path in mounts:
+        if (key.casefold(), path.casefold()) in existing:
+            continue
+        existing.add((key.casefold(), path.casefold()))
+        mounted_addons = mounted_addons or key.casefold() == "game"
+        additions.append(f'{key}\t{_quote(path)}')
+    if mounted_addons:
+        # Mounting folders ahead of citadel without these write paths reproduces
+        # the game's "Unable to read default keybinding configuration" startup
+        # failure that all three mod managers avoid by declaring them.
+        for key, path in (("Mod", "citadel"), ("Write", "citadel"), ("Mod", "core"), ("Write", "core")):
+            if (key.casefold(), path.casefold()) in existing:
+                continue
+            existing.add((key.casefold(), path.casefold()))
+            additions.append(f'{key}\t{_quote(path)}')
+    if not additions:
+        _parse(result)
+        return result
+    game_entries = [entry for entry in entries if entry.key.value.casefold() == "game"]
+    if not game_entries:
+        raise LaunchError("Current gameinfo.gi has no Game search path.")
+    first_game = game_entries[0]
+    line_start = result.rfind("\n", 0, first_game.key.start) + 1
+    prefix = result[line_start:first_game.key.start]
+    indent = prefix if not prefix.strip() else "\t\t\t"
+    insertion = (newline + indent).join(additions) + newline + indent
+    result = result[:first_game.key.start] + insertion + result[first_game.key.start:]
     _parse(result)
     return result
 
@@ -505,29 +628,44 @@ def _validate_port(port: int) -> int:
     return port
 
 
-def loose_ui_source_overrides(paths: GamePaths) -> list[Path]:
+def loose_ui_source_overrides(paths: GamePaths, mounts: tuple[tuple[str, str], ...] = ()) -> list[Path]:
     """Uncompiled Panorama files that a development launch loads before the VPK.
 
     Deadlock ships compiled layouts and scripts inside pak01, but development
     mode gives a same-named ``.xml``/``.js`` source precedence. Stale sources
     left behind by a HUD mod or an earlier build can abort startup before the
     console exists, so the launcher can report the real cause instead of only
-    the game's exit code.
+    the game's exit code. Addon mounts a mod manager installed are scanned too:
+    mounting ``citadel/addons`` exposes any loose Panorama files sitting inside.
     """
-    found: list[Path] = []
-    for relative in ("panorama/layout", "panorama/scripts"):
-        root = paths.citadel_dir / relative
+    roots = [paths.citadel_dir]
+    for key, value in mounts:
+        if key.casefold() != "game" or "|" in value:
+            continue
         try:
-            if root.is_dir():
-                found.extend(path for path in root.rglob("*")
-                             if path.is_file() and path.suffix.casefold() in (".xml", ".js"))
-        except OSError:
-            continue  # Best-effort diagnostic; the launch check follows anyway.
+            # SearchPaths are relative to the game directory (game/), so
+            # ``citadel/addons`` is game/citadel/addons.
+            resolved = (paths.game_dir / value).resolve()
+            resolved.relative_to(paths.game_dir.resolve())
+        except (OSError, ValueError):
+            continue
+        if resolved.is_dir() and all(resolved != root for root in roots):
+            roots.append(resolved)
+    found: list[Path] = []
+    for root in roots:
+        for relative in ("panorama/layout", "panorama/scripts"):
+            directory = root / relative
+            try:
+                if directory.is_dir():
+                    found.extend(path for path in directory.rglob("*")
+                                 if path.is_file() and path.suffix.casefold() in (".xml", ".js"))
+            except OSError:
+                continue  # Best-effort diagnostic; the launch check follows anyway.
     return sorted(found)
 
 
-def _refuse_loose_ui_sources(paths: GamePaths) -> None:
-    overrides = loose_ui_source_overrides(paths)
+def _refuse_loose_ui_sources(paths: GamePaths, mounts: tuple[tuple[str, str], ...] = ()) -> None:
+    overrides = loose_ui_source_overrides(paths, mounts)
     if not overrides:
         return
     names = "\n".join("  " + path.relative_to(paths.citadel_dir).as_posix() for path in overrides[:8])
@@ -908,7 +1046,13 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     from .replays import parse_launch_options
     parse_launch_options(launch_options)  # Validate before changing game files.
     paths = validate_game(game_path)
-    _refuse_loose_ui_sources(paths)
+    try:
+        original_data = paths.gameinfo.read_bytes()
+        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
+    except (OSError, UnicodeError) as exc:
+        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
+    addon_mounts = tuple(mod_search_paths(original_text))
+    _refuse_loose_ui_sources(paths, addon_mounts)
     port = _validate_port(port)
     if protocol not in ("vconsole", "netcon"):
         raise LaunchError("Console protocol must be vconsole or netcon.")
@@ -933,15 +1077,10 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     dll = _verified_unlocker()
     process = None
     bridge = None
-    try:
-        original_data = paths.gameinfo.read_bytes()
-        original_data.decode("utf-8")  # Validate before preparing any replacement.
-    except (OSError, UnicodeError) as exc:
-        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
     ident = time.strftime("%Y%m%d_%H%M%S", time.gmtime()) + "_" + uuid.uuid4().hex[:10]
     overlay = paths.game_dir / ("citadel_dolly_" + ident)
     editing = _editing_gameinfo(paths)
-    patched_data = make_gameinfo(editing, overlay.name).encode("utf-8")
+    patched_data = make_gameinfo(merge_addon_mounts(original_text, editing), overlay.name).encode("utf-8")
     session_dir = PACKAGE_ROOT / "logs" / ident
     log_path = session_dir / "launch.log"
     try:
@@ -967,6 +1106,7 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         command = build_command(paths, overlay, port, demo, protocol, launch_options, native=native)
         metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6745", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
         metadata["editing_gameinfo_sha256"] = hashlib.sha256(editing.encode("utf-8")).hexdigest()
+        metadata["carried_addon_mounts"] = [{"key": key, "path": path} for key, path in addon_mounts]
         if native:
             metadata["native_camera"] = {"abi": NATIVE_ABI, "game_sha256": NATIVE_GAME_SHA256,
                                          "dll_sha256": hashlib.sha256(native_dll.read_bytes()).hexdigest()}

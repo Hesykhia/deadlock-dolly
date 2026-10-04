@@ -33,6 +33,23 @@ GAMEINFO = '''\ufeff"GameInfo"
 }
 '''
 
+DMM_GAMEINFO = GAMEINFO.replace('Game "citadel"', '''Game "citadel/addons"
+            Mod "citadel"
+            Write "citadel"
+            Game "citadel"
+            Mod "core"
+            Write "core"''')
+
+GRIMOIRE_GAMEINFO = GAMEINFO.replace('Game "citadel"', '''Game "citadel/grimoire"
+            Game "citadel/addons"
+            Game "citadel/addons2"
+            Game "citadel/deadworks_addons/vpks"
+            Mod "citadel"
+            Write "citadel"
+            Game "citadel"
+            Mod "core"
+            Write "core"''')
+
 
 def fake_game(root: Path, executable_name: str = "citadel.exe") -> launcher.GamePaths:
     exe = root / "game/bin/win64" / executable_name
@@ -142,6 +159,69 @@ class GameInfoTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(launcher.LaunchError):
                 launcher.make_gameinfo(GAMEINFO, name)
 
+    def test_mod_manager_mounts_are_carried_into_the_session_file(self):
+        self.assertEqual(launcher.mod_search_paths(DMM_GAMEINFO),
+                         [("Game", "citadel/addons"), ("Mod", "citadel"), ("Write", "citadel"),
+                          ("Mod", "core"), ("Write", "core"), ("AddonRoot", "citadel_addons")])
+        merged = launcher.merge_addon_mounts(DMM_GAMEINFO, GAMEINFO)
+        for mount in ('Game\t"citadel/addons"', 'Mod\t"citadel"', 'Write\t"citadel"',
+                      'Mod\t"core"', 'Write\t"core"'):
+            self.assertIn(mount, merged)
+        self.assertLess(merged.index('Game\t"citadel/addons"'), merged.index('Game "citadel"'))
+        self.assertLess(merged.index('Write\t"core"'), merged.index('Game "citadel"'))
+        self.assertEqual(merged.count('Game "citadel"'), 1)
+        self.assertEqual(merged.count('AddonRoot citadel_addons'), 1)
+
+    def test_grimoire_priority_and_overflow_mounts_keep_their_order(self):
+        merged = launcher.merge_addon_mounts(GRIMOIRE_GAMEINFO, GAMEINFO)
+        for mount in ('Game\t"citadel/grimoire"', 'Game\t"citadel/addons"',
+                      'Game\t"citadel/addons2"', 'Game\t"citadel/deadworks_addons/vpks"'):
+            self.assertIn(mount, merged)
+        self.assertLess(merged.index('Game\t"citadel/grimoire"'), merged.index('Game\t"citadel/addons"'))
+        self.assertLess(merged.index('Game\t"citadel/addons2"'), merged.index('Game "citadel"'))
+        self.assertLess(merged.index('Game\t"citadel/deadworks_addons/vpks"'), merged.index('Game "citadel"'))
+
+    def test_dmm_profile_shard_mounts_are_carried(self):
+        user = DMM_GAMEINFO.replace('Game "citadel/addons"',
+                                    'Game "citadel/addons/profile_x"\n            Game "citadel/addons2/profile_x"')
+        merged = launcher.merge_addon_mounts(user, GAMEINFO)
+        self.assertIn('Game\t"citadel/addons/profile_x"', merged)
+        self.assertIn('Game\t"citadel/addons2/profile_x"', merged)
+
+    def test_addon_mounts_without_write_paths_get_the_manager_defaults(self):
+        user = GAMEINFO.replace('Game "citadel"', 'Game "citadel/addons"\n            Game "citadel"', 1)
+        merged = launcher.merge_addon_mounts(user, GAMEINFO)
+        for mount in ('Game\t"citadel/addons"', 'Mod\t"citadel"', 'Write\t"citadel"',
+                      'Mod\t"core"', 'Write\t"core"'):
+            self.assertIn(mount, merged)
+
+    def test_stock_gameinfo_leaves_the_reviewed_baseline_untouched(self):
+        stock = GAMEINFO.replace('            AddonRoot citadel_addons\n', '')
+        self.assertEqual(launcher.mod_search_paths(stock), [])
+        self.assertEqual(launcher.merge_addon_mounts(stock, GAMEINFO), GAMEINFO)
+
+    def test_launch_settings_are_not_carried_from_the_installed_gameinfo(self):
+        user = DMM_GAMEINFO.replace('game "citadel"',
+                                    'game "citadel" ConVars { r_aspectratio "2.5" } RenderSystem { setting "competitive" }')
+        user = user.replace('Game "citadel"', 'Game "|gameinfo_path|./custom"\n            Game "citadel"', 1)
+        merged = launcher.merge_addon_mounts(user, GAMEINFO)
+        self.assertNotIn('r_aspectratio', merged)
+        self.assertNotIn('competitive', merged)
+        self.assertNotIn('|gameinfo_path|', merged)
+        self.assertIn('Game\t"citadel/addons"', merged)
+
+    def test_addon_config_is_carried_when_the_baseline_lacks_it(self):
+        user = GAMEINFO.replace('    Other {', '''    AddonConfig
+    {
+        "UseOfficialAddons" "1"
+    }
+    Other {''')
+        merged = launcher.merge_addon_mounts(user, GAMEINFO)
+        self.assertIn('AddonConfig', merged)
+        self.assertIn('"UseOfficialAddons" "1"', merged)
+        self.assertEqual(merged.count('AddonConfig'), 1)
+        self.assertIn('Game "citadel"', merged)
+
 
 class LauncherTests(unittest.TestCase):
     def setUp(self):
@@ -226,6 +306,59 @@ class LauncherTests(unittest.TestCase):
             self._launched_session()
         self.assertEqual(self.paths.gameinfo.read_bytes(), before)
         self.assertFalse(list(self.paths.game_dir.glob('citadel_dolly_*')))
+
+    def test_loose_panorama_inside_a_mounted_addon_folder_is_reported(self):
+        layout = self.paths.citadel_dir / 'addons/panorama/layout'
+        layout.mkdir(parents=True)
+        (layout / 'hud.xml').write_text('<root/>', encoding='utf-8')
+        mounts = (("Game", "citadel/addons"),)
+        found = launcher.loose_ui_source_overrides(self.paths, mounts)
+        self.assertEqual([path.relative_to(self.paths.citadel_dir).as_posix() for path in found],
+                         ['addons/panorama/layout/hud.xml'])
+        self.assertEqual(launcher.loose_ui_source_overrides(self.paths), [])
+
+    def test_loose_panorama_in_an_unmounted_addons_folder_is_ignored(self):
+        layout = self.paths.citadel_dir / 'addons/panorama/layout'
+        layout.mkdir(parents=True)
+        (layout / 'hud.xml').write_text('<root/>', encoding='utf-8')
+        self.assertEqual(launcher.loose_ui_source_overrides(
+            self.paths, (("AddonRoot", "citadel_addons"),)), [])
+        session = self._launched_session()
+        self.assertTrue(session.overlay_dir.exists())
+        session.restore_gameinfo()
+
+    def test_stale_panorama_inside_mounted_addons_refuses_before_mount(self):
+        before = DMM_GAMEINFO.encode("utf-8")
+        self.paths.gameinfo.write_bytes(before)
+        layout = self.paths.citadel_dir / 'addons/panorama/layout'
+        layout.mkdir(parents=True)
+        (layout / 'hud.xml').write_text('<root/>', encoding='utf-8')
+        with self.assertRaisesRegex(launcher.LaunchError, 'addons/panorama/layout/hud.xml'):
+            self._launched_session()
+        self.assertEqual(self.paths.gameinfo.read_bytes(), before)
+        self.assertFalse(list(self.paths.game_dir.glob('citadel_dolly_*')))
+
+    def test_launch_mounts_installed_mod_paths_and_restores_them(self):
+        original = DMM_GAMEINFO.encode("utf-8")
+        self.paths.gameinfo.write_bytes(original)
+        session = self._launched_session()
+        mounted = self.paths.gameinfo.read_text(encoding="utf-8")
+        self.assertIn('Game\t"citadel/addons"', mounted)
+        self.assertIn('Mod\t"citadel"', mounted)
+        self.assertIn(session.overlay_dir.name, mounted)
+        record = json.loads((session.session_dir / "session.json").read_text())
+        self.assertIn({"key": "Game", "path": "citadel/addons"}, record["carried_addon_mounts"])
+        self.assertEqual((session.session_dir / 'original.gameinfo.gi').read_bytes(), original)
+        session.restore_gameinfo()
+        self.assertEqual(self.paths.gameinfo.read_bytes(), original)
+
+    def test_stock_launch_does_not_invent_mod_mounts(self):
+        session = self._launched_session()
+        mounted = self.paths.gameinfo.read_text(encoding="utf-8")
+        self.assertNotIn('citadel/addons', mounted)
+        record = json.loads((session.session_dir / "session.json").read_text())
+        self.assertEqual([mount for mount in record["carried_addon_mounts"] if mount["key"] == "Game"], [])
+        session.restore_gameinfo()
 
     def test_atomic_write_replaces_read_only_target_and_preserves_mode(self):
         target = self.folder / 'readonly.gi'
