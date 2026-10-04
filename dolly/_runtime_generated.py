@@ -45,11 +45,11 @@ class FollowCapabilities:
     TIER0_SHA256 = '6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332'
     CLIENT_SPANS = ((585728, 3430), (592464, 166), (2306032, 115), (37542304, 129), (2427136, 10), (6323542, 11))
     TIER0_SPANS = ((2161984, 633),)
-    REFS = {'pivot_x_offset': 56861160, 'pivot_y_offset': 56860008, 'pivot_z_offset': 56860720, 'pivot_x_offset_crouching': 56859768, 'pivot_y_offset_crouching': 56860784, 'pivot_z_offset_crouching': 56860736, 'x_offset': 56860752, 'y_offset': 56860528, 'z_offset': 56860544, 'x_worst_case_offset': 56860768, 'y_worst_case_offset': 56860576, 'z_worst_case_offset': 56860592, 'ads_x_offset': 56859624, 'ads_y_offset': 56859608, 'ads_z_offset': 56859656, 'fov': 56859640, 'ads_fov': 56859576}
+    REFS = {'pivot_x_offset': 56860528, 'pivot_y_offset': 56860544, 'pivot_z_offset': 56860560, 'pivot_x_offset_crouching': 56860576, 'pivot_y_offset_crouching': 56860592, 'pivot_z_offset_crouching': 56860608, 'x_offset': 56860624, 'y_offset': 56860640, 'z_offset': 56860656, 'x_worst_case_offset': 56860672, 'y_worst_case_offset': 56860688, 'z_worst_case_offset': 56860704, 'ads_x_offset': 56860720, 'ads_y_offset': 56860736, 'ads_z_offset': 56860752, 'fov': 56860768, 'ads_fov': 56860784}
     OWN_HEALTH_SPANS = ((1805584, 174), (28270000, 803), (28144560, 47))
-    ENABLED_REF = 56860560
-    FOLLOW_AIM_REF = 56860208
-    OWN_HEALTH_REF = 63127968
+    ENABLED_REF = 56860512
+    FOLLOW_AIM_REF = 56859800
+    OWN_HEALTH_REF = 63129080
     CLIENT_IMAGE_SIZE = 68485120
     TIER0_IMAGE_SIZE = 4198400
     CVAR_DATA_SIZE = 92
@@ -60,7 +60,7 @@ class FollowCapabilities:
 
 class FollowTarget:
     TARGET_SPANS = ((23155936, 121), (8800976, 5), (8800992, 92), (8610416, 193), (8478432, 17), (8478464, 17))
-    HEALTH_CONTEXT_SPANS = ((9636576, 33), (23155904, 23), (5741712, 252), (8478432, 17), (8478464, 17), (8801136, 137), (28551776, 297), (28553392, 65), (8472784, 55), (4863024, 5), (7380080, 3), (23008059, 3), (5425312, 3), (5799584, 3), (8709360, 380))
+    HEALTH_CONTEXT_SPANS = ((9636576, 33), (23155904, 23), (5741712, 252), (8478432, 17), (8478464, 17), (8801136, 137), (28551776, 297), (28553392, 65), (8472784, 55), (4863024, 5), (7380080, 3), (23008320, 3), (5425312, 3), (5799584, 3), (8709360, 380))
     CONTROLLER_VTABLE = 40568232
     OBSERVER_PAWN_VTABLE = 40030904
     PLAYER_PAWN_VTABLE = 40082848
@@ -73,7 +73,7 @@ class FollowTarget:
     OBSERVER_PREDICATE = 5425312
     GET_OBSERVER_MODE = 8800976
     GET_OBSERVER_TARGET = 8800992
-    PLAYER_PREDICATE = 23008059
+    PLAYER_PREDICATE = 23008320
     PLAYER_DATA_PREDICATE = 5799584
     CONTROLLER_PREDICATE = 7380080
     IDENTITY_STRIDE = 112

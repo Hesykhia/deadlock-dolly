@@ -48,11 +48,11 @@ namespace FollowCapabilities {
 inline constexpr char TIER0_SHA256[] = "6793cc7306ff40283ba038a784fe96f99f6d38f93c825571ee93ab6b9d9d5332";
 inline constexpr CodeSpan CLIENT_SPANS[] = {{0x8f000, 3430}, {0x90a50, 166}, {0x232ff0, 115}, {0x23cd9a0, 129}, {0x250900, 10}, {0x607d56, 11}};
 inline constexpr CodeSpan TIER0_SPANS[] = {{0x20fd40, 633}};
-inline constexpr NamedRva REFS[] = {{"pivot_x_offset", 0x363a1e8}, {"pivot_y_offset", 0x3639d68}, {"pivot_z_offset", 0x363a030}, {"pivot_x_offset_crouching", 0x3639c78}, {"pivot_y_offset_crouching", 0x363a070}, {"pivot_z_offset_crouching", 0x363a040}, {"x_offset", 0x363a050}, {"y_offset", 0x3639f70}, {"z_offset", 0x3639f80}, {"x_worst_case_offset", 0x363a060}, {"y_worst_case_offset", 0x3639fa0}, {"z_worst_case_offset", 0x3639fb0}, {"ads_x_offset", 0x3639be8}, {"ads_y_offset", 0x3639bd8}, {"ads_z_offset", 0x3639c08}, {"fov", 0x3639bf8}, {"ads_fov", 0x3639bb8}};
+inline constexpr NamedRva REFS[] = {{"pivot_x_offset", 0x3639f70}, {"pivot_y_offset", 0x3639f80}, {"pivot_z_offset", 0x3639f90}, {"pivot_x_offset_crouching", 0x3639fa0}, {"pivot_y_offset_crouching", 0x3639fb0}, {"pivot_z_offset_crouching", 0x3639fc0}, {"x_offset", 0x3639fd0}, {"y_offset", 0x3639fe0}, {"z_offset", 0x3639ff0}, {"x_worst_case_offset", 0x363a000}, {"y_worst_case_offset", 0x363a010}, {"z_worst_case_offset", 0x363a020}, {"ads_x_offset", 0x363a030}, {"ads_y_offset", 0x363a040}, {"ads_z_offset", 0x363a050}, {"fov", 0x363a060}, {"ads_fov", 0x363a070}};
 inline constexpr CodeSpan OWN_HEALTH_SPANS[] = {{0x1b8d10, 174}, {0x1af5db0, 803}, {0x1ad73b0, 47}};
-inline constexpr std::uintptr_t ENABLED_REF = 0x3639f90;
-inline constexpr std::uintptr_t FOLLOW_AIM_REF = 0x3639e30;
-inline constexpr std::uintptr_t OWN_HEALTH_REF = 0x3c341a0;
+inline constexpr std::uintptr_t ENABLED_REF = 0x3639f60;
+inline constexpr std::uintptr_t FOLLOW_AIM_REF = 0x3639c98;
+inline constexpr std::uintptr_t OWN_HEALTH_REF = 0x3c345f8;
 inline constexpr std::uintptr_t CLIENT_IMAGE_SIZE = 0x4150000;
 inline constexpr std::uintptr_t TIER0_IMAGE_SIZE = 0x401000;
 inline constexpr std::uintptr_t CVAR_DATA_SIZE = 0x5c;
@@ -62,7 +62,7 @@ inline constexpr std::uintptr_t CVAR_VALUE = 0x58;
 }
 namespace FollowTarget {
 inline constexpr CodeSpan TARGET_SPANS[] = {{0x16154e0, 121}, {0x864ad0, 5}, {0x864ae0, 92}, {0x836270, 193}, {0x815ee0, 17}, {0x815f00, 17}};
-inline constexpr CodeSpan HEALTH_CONTEXT_SPANS[] = {{0x930ae0, 33}, {0x16154c0, 23}, {0x579c90, 252}, {0x815ee0, 17}, {0x815f00, 17}, {0x864b70, 137}, {0x1b3aa60, 297}, {0x1b3b0b0, 65}, {0x8148d0, 55}, {0x4a3430, 5}, {0x709c70, 3}, {0x15f133b, 3}, {0x52c8a0, 3}, {0x587ea0, 3}, {0x84e4f0, 380}};
+inline constexpr CodeSpan HEALTH_CONTEXT_SPANS[] = {{0x930ae0, 33}, {0x16154c0, 23}, {0x579c90, 252}, {0x815ee0, 17}, {0x815f00, 17}, {0x864b70, 137}, {0x1b3aa60, 297}, {0x1b3b0b0, 65}, {0x8148d0, 55}, {0x4a3430, 5}, {0x709c70, 3}, {0x15f1440, 3}, {0x52c8a0, 3}, {0x587ea0, 3}, {0x84e4f0, 380}};
 inline constexpr std::uintptr_t CONTROLLER_VTABLE = 0x26b05a8;
 inline constexpr std::uintptr_t OBSERVER_PAWN_VTABLE = 0x262d2b8;
 inline constexpr std::uintptr_t PLAYER_PAWN_VTABLE = 0x2639da0;
@@ -75,7 +75,7 @@ inline constexpr std::uintptr_t CONTROLLER = 0x3bd0f30;
 inline constexpr std::uintptr_t OBSERVER_PREDICATE = 0x52c8a0;
 inline constexpr std::uintptr_t GET_OBSERVER_MODE = 0x864ad0;
 inline constexpr std::uintptr_t GET_OBSERVER_TARGET = 0x864ae0;
-inline constexpr std::uintptr_t PLAYER_PREDICATE = 0x15f133b;
+inline constexpr std::uintptr_t PLAYER_PREDICATE = 0x15f1440;
 inline constexpr std::uintptr_t PLAYER_DATA_PREDICATE = 0x587ea0;
 inline constexpr std::uintptr_t CONTROLLER_PREDICATE = 0x709c70;
 inline constexpr std::uintptr_t IDENTITY_STRIDE = 0x70;

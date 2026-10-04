@@ -367,23 +367,23 @@
         "module": "client",
         "kind": "rva_map",
         "value": {
-          "pivot_x_offset": "0x363a1e8",
-          "pivot_y_offset": "0x3639d68",
-          "pivot_z_offset": "0x363a030",
-          "pivot_x_offset_crouching": "0x3639c78",
-          "pivot_y_offset_crouching": "0x363a070",
-          "pivot_z_offset_crouching": "0x363a040",
-          "x_offset": "0x363a050",
-          "y_offset": "0x3639f70",
-          "z_offset": "0x3639f80",
-          "x_worst_case_offset": "0x363a060",
-          "y_worst_case_offset": "0x3639fa0",
-          "z_worst_case_offset": "0x3639fb0",
-          "ads_x_offset": "0x3639be8",
-          "ads_y_offset": "0x3639bd8",
-          "ads_z_offset": "0x3639c08",
-          "fov": "0x3639bf8",
-          "ads_fov": "0x3639bb8"
+          "pivot_x_offset": "0x3639f70",
+          "pivot_y_offset": "0x3639f80",
+          "pivot_z_offset": "0x3639f90",
+          "pivot_x_offset_crouching": "0x3639fa0",
+          "pivot_y_offset_crouching": "0x3639fb0",
+          "pivot_z_offset_crouching": "0x3639fc0",
+          "x_offset": "0x3639fd0",
+          "y_offset": "0x3639fe0",
+          "z_offset": "0x3639ff0",
+          "x_worst_case_offset": "0x363a000",
+          "y_worst_case_offset": "0x363a010",
+          "z_worst_case_offset": "0x363a020",
+          "ads_x_offset": "0x363a030",
+          "ads_y_offset": "0x363a040",
+          "ads_z_offset": "0x363a050",
+          "fov": "0x363a060",
+          "ads_fov": "0x363a070"
         }
       },
       "OWN_HEALTH_SPANS": {
@@ -410,17 +410,17 @@
       "ENABLED_REF": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3639f90"
+        "value": "0x3639f60"
       },
       "FOLLOW_AIM_REF": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3639e30"
+        "value": "0x3639c98"
       },
       "OWN_HEALTH_REF": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3c341a0"
+        "value": "0x3c345f8"
       },
       "CLIENT_IMAGE_SIZE": {
         "kind": "module_size",
@@ -548,7 +548,7 @@
             "sha256": "e18aacce29affcdddaa5f641ac1ec12552e0fe9d066e6408941b1792818b8619"
           },
           {
-            "rva": "0x15f133b",
+            "rva": "0x15f1440",
             "size": 3,
             "sha256": "e18aacce29affcdddaa5f641ac1ec12552e0fe9d066e6408941b1792818b8619"
           },
@@ -635,7 +635,7 @@
       "PLAYER_PREDICATE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x15f133b"
+        "value": "0x15f1440"
       },
       "PLAYER_DATA_PREDICATE": {
         "kind": "rva",
