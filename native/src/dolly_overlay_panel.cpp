@@ -677,16 +677,52 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                             roll_drafts[row] = float(cameras.rows[row].roll);
                         }
                     }
+                    // Bank edits stream during a drag so the placed camera glyph
+                    // follows the field. One send per published revision keeps the
+                    // camera-list guard valid; a release that lands while the
+                    // previous edit is still republishing is retried once the
+                    // revision advances so the final value is never lost.
+                    static bool stream_sent = false;
+                    static std::uint32_t stream_revision = 0;
+                    static double stream_time = 0;
+                    static float stream_value = 0;
+                    static bool release_pending = false;
+                    static std::uint32_t release_index = 0;
+                    static float release_value = 0;
+                    if (release_pending && camera_list_ready &&
+                        (!stream_sent || cameras.revision != stream_revision)) {
+                        release_pending = false;
+                        if (camera_edit(EditorAction::SetCameraRoll, release_index,
+                                        double(release_value))) {
+                            stream_sent = true;
+                            stream_revision = cameras.revision;
+                            stream_time = ImGui::GetTime();
+                            stream_value = release_value;
+                        }
+                    } else if (release_pending &&
+                               (!camera_list_ready || !state.paused || state.playing ||
+                                state.attach_preview)) {
+                        // The table is no longer editable; never apply a stale
+                        // release against a different camera list.
+                        release_pending = false;
+                    }
                     ImGui::BeginDisabled(!camera_list_ready || !state.paused || state.playing ||
                                          state.attach_preview);
                     if (camera_list_ready && cameras.count) {
                         const float table_height = ImGui::GetTextLineHeightWithSpacing() *
                                                    (float(std::min(cameras.count, 6u)) + 1.5f);
-                        // Keep editable cells compact: standard frame padding makes
-                        // table rows taller than the read-only text list was.
+                        // Editable values sit on the row background like the old
+                        // read-only text. Compact padding keeps rows the same
+                        // height and the faint tint is the only field chrome.
                         ImGui::PushStyleVar(
                             ImGuiStyleVar_FramePadding,
                             ImVec2(ImGui::GetStyle().FramePadding.x, 2 * panel_scale));
+                        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+                        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
+                                              panel_color(dolly::ui::FIELD, .5f));
+                        ImGui::PushStyleColor(ImGuiCol_FrameBgActive,
+                                              panel_color(dolly::ui::FIELD, .8f));
                         if (ImGui::BeginTable(
                                 "##camera-list", 4,
                                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
@@ -740,19 +776,52 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                                 ImGui::SetNextItemWidth(-1.0f);
                                 ImGui::DragFloat("##bank", &roll_drafts[row], 0.25f, -180.0f,
                                                  180.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                                const bool roll_active = ImGui::IsItemActive();
                                 const bool roll_edited = ImGui::IsItemDeactivatedAfterEdit();
-                                if (!ImGui::IsItemActive() && ImGui::IsItemHovered())
+                                if (ImGui::IsItemActivated()) {
+                                    stream_sent = false;
+                                    stream_value = roll_drafts[row];
+                                    release_pending = false;
+                                }
+                                if (!roll_active && ImGui::IsItemHovered())
                                     ImGui::SetTooltip(
                                         "Camera %02u bank. Drag to adjust; Ctrl+click to type.",
                                         index + 1);
-                                if (roll_edited && !camera_edit(EditorAction::SetCameraRoll, index,
-                                                                double(roll_drafts[row])))
-                                    roll_drafts[row] = float(key.roll);
+                                if (roll_active && (!stream_sent || cameras.revision != stream_revision) &&
+                                    (!stream_sent || roll_drafts[row] != stream_value) &&
+                                    ImGui::GetTime() - stream_time >= .12 &&
+                                    camera_edit(EditorAction::SetCameraRoll, index,
+                                                double(roll_drafts[row]))) {
+                                    stream_sent = true;
+                                    stream_revision = cameras.revision;
+                                    stream_time = ImGui::GetTime();
+                                    stream_value = roll_drafts[row];
+                                }
+                                if (roll_edited &&
+                                    (!stream_sent || roll_drafts[row] != stream_value)) {
+                                    if (!stream_sent || cameras.revision != stream_revision) {
+                                        if (camera_edit(EditorAction::SetCameraRoll, index,
+                                                        double(roll_drafts[row]))) {
+                                            stream_sent = true;
+                                            stream_revision = cameras.revision;
+                                            stream_time = ImGui::GetTime();
+                                            stream_value = roll_drafts[row];
+                                        } else {
+                                            roll_drafts[row] = float(key.roll);
+                                        }
+                                    } else {
+                                        // Wait for the in-flight republish, then send.
+                                        release_pending = true;
+                                        release_index = index;
+                                        release_value = roll_drafts[row];
+                                    }
+                                }
                                 ImGui::PopID();
                             }
                             ImGui::EndTable();
                         }
-                        ImGui::PopStyleVar();
+                        ImGui::PopStyleColor(3);
+                        ImGui::PopStyleVar(2);
                         if (cameras.total > kEditorCameraListCount) {
                             ImGui::BeginDisabled(!cameras.first);
                             if (ImGui::SmallButton("Earlier"))
