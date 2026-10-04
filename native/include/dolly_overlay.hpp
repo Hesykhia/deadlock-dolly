@@ -9,6 +9,10 @@ struct OverlayDiagnostics {
     std::uint64_t present_last_us = 0, present_max_us = 0, lock_skips = 0;
     std::uint64_t overlay_active_since_ms = 0, present_active_since_ms = 0, guide_lines = 0,
                   guide_labels = 0;
+    // Last drawn Shot-timeline rect (screen coordinates) and committed camera
+    // tick drags. Native-internal diagnostics; not part of any wire ABI.
+    float timeline_x0 = 0, timeline_x1 = 0, timeline_y = 0;
+    std::uint64_t timeline_drags = 0;
 };
 // Independent monotonic counters; sampled off the render thread.
 OverlayDiagnostics overlay_diagnostics() noexcept;

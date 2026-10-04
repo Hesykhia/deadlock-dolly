@@ -1006,23 +1006,28 @@ bool install_overlay_hooks() noexcept {
     }
 }
 OverlayDiagnostics overlay_diagnostics() noexcept {
-    return {diagnostic_present.load(std::memory_order_relaxed),
-            diagnostic_panel.load(std::memory_order_relaxed),
-            diagnostic_init_attempts.load(std::memory_order_relaxed),
-            diagnostic_init_successes.load(std::memory_order_relaxed),
-            diagnostic_releases.load(std::memory_order_relaxed),
-            diagnostic_resizes.load(std::memory_order_relaxed),
-            diagnostic_draw.load(std::memory_order_relaxed),
-            diagnostic_guides.load(std::memory_order_relaxed),
-            diagnostic_overlay_last_us.load(std::memory_order_relaxed),
-            diagnostic_overlay_max_us.load(std::memory_order_relaxed),
-            diagnostic_present_last_us.load(std::memory_order_relaxed),
-            diagnostic_present_max_us.load(std::memory_order_relaxed),
-            diagnostic_lock_skips.load(std::memory_order_relaxed),
-            diagnostic_overlay_active_ms.load(std::memory_order_relaxed),
-            diagnostic_present_active_ms.load(std::memory_order_relaxed),
-            diagnostic_guide_lines.load(std::memory_order_relaxed),
-            diagnostic_guide_labels.load(std::memory_order_relaxed)};
+    OverlayDiagnostics result{diagnostic_present.load(std::memory_order_relaxed),
+                              diagnostic_panel.load(std::memory_order_relaxed),
+                              diagnostic_init_attempts.load(std::memory_order_relaxed),
+                              diagnostic_init_successes.load(std::memory_order_relaxed),
+                              diagnostic_releases.load(std::memory_order_relaxed),
+                              diagnostic_resizes.load(std::memory_order_relaxed),
+                              diagnostic_draw.load(std::memory_order_relaxed),
+                              diagnostic_guides.load(std::memory_order_relaxed),
+                              diagnostic_overlay_last_us.load(std::memory_order_relaxed),
+                              diagnostic_overlay_max_us.load(std::memory_order_relaxed),
+                              diagnostic_present_last_us.load(std::memory_order_relaxed),
+                              diagnostic_present_max_us.load(std::memory_order_relaxed),
+                              diagnostic_lock_skips.load(std::memory_order_relaxed),
+                              diagnostic_overlay_active_ms.load(std::memory_order_relaxed),
+                              diagnostic_present_active_ms.load(std::memory_order_relaxed),
+                              diagnostic_guide_lines.load(std::memory_order_relaxed),
+                              diagnostic_guide_labels.load(std::memory_order_relaxed)};
+    result.timeline_x0 = panel_ui.timeline_x0();
+    result.timeline_x1 = panel_ui.timeline_x1();
+    result.timeline_y = panel_ui.timeline_y();
+    result.timeline_drags = panel_ui.timeline_drags();
+    return result;
 }
 const char* overlay_last_error() noexcept {
     return last_error.load(std::memory_order_acquire);

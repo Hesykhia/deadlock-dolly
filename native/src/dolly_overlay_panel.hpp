@@ -34,6 +34,12 @@ public:
     void reset_guides() noexcept { guide_geometry.line_count = guide_geometry.label_count = 0; }
     std::size_t guide_lines() const noexcept { return guide_geometry.line_count; }
     std::size_t guide_labels() const noexcept { return guide_geometry.label_count; }
+    // Last drawn Shot-timeline rect (screen coordinates) and committed tick
+    // drags; the smoke test reads these through overlay diagnostics.
+    float timeline_x0() const noexcept { return timeline_x0_; }
+    float timeline_x1() const noexcept { return timeline_x1_; }
+    float timeline_y() const noexcept { return timeline_y_; }
+    std::uint64_t timeline_drags() const noexcept { return timeline_drags_; }
 
 private:
     static void roster_label(const EditorRosterEntry& entry, char* out, std::size_t capacity);
@@ -55,5 +61,7 @@ private:
     float panel_scale = 1.0f;
     bool show_path_guides = true;
     VisualizationGeometry guide_geometry;
+    float timeline_x0_ = 0, timeline_x1_ = 0, timeline_y_ = 0;
+    std::uint64_t timeline_drags_ = 0;
 };
 } // namespace dolly

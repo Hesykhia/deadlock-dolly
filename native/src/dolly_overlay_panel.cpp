@@ -234,7 +234,10 @@ void OverlayPanel::roster_label(const EditorRosterEntry& entry, char* out, std::
     std::snprintf(out, capacity, "%s (%u)", readable[0] ? readable : "Unknown", entry.entity_index);
 }
 // Label, ImGui slider and a right-aligned readout. Ctrl+click types an exact
-// value (ImGui built-in), which keeps numeric entry available in game.
+// value (ImGui built-in), which keeps numeric entry available in game. With a
+// timeline, camera ticks can be dragged along the track: the playhead stays
+// pinned while a tick is dragged and the new arrival commits on release with
+// the current camera-list revision, so the list re-sorts safely afterwards.
 OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* label, float* value,
                                                  float minimum, float maximum, const char* format,
                                                  float label_width,
@@ -256,9 +259,14 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
     ImGui::SliderFloat(id, value, minimum, maximum, "", ImGuiSliderFlags_AlwaysClamp);
     result.committed = ImGui::IsItemDeactivatedAfterEdit();
     result.active = ImGui::IsItemActive();
+    const bool deactivated = ImGui::IsItemDeactivated();
     ImGui::PopStyleColor(6);
     ImGui::PopStyleVar(2);
-    if (!(result.active && ImGui::GetIO().WantTextInput)) {
+    // Process-lived like the other per-widget edit caches.
+    static int dragged_tick = -1;
+    static float pinned_value = 0, dragged_time = 0;
+    const auto& io = ImGui::GetIO();
+    if (!(result.active && io.WantTextInput)) {
         const auto lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
         const float y = (lo.y + hi.y) * .5f;
         const float x0 = lo.x + 4 * panel_scale, x1 = hi.x - 4 * panel_scale;
@@ -269,17 +277,88 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
                       ImGui::GetColorU32(panel_color(dolly::ui::TRACK)), 6 * panel_scale);
         draw->AddLine(ImVec2(x0, y), ImVec2(x, y),
                       ImGui::GetColorU32(panel_color(dolly::ui::ACCENT_ACTIVE)), 6 * panel_scale);
+        int hovered_tick = -1;
+        double hovered_time = 0;
         if (timeline && maximum > minimum) {
+            timeline_x0_ = x0;
+            timeline_x1_ = x1;
+            timeline_y_ = y;
+            const float span = maximum - minimum;
+            const unsigned dragged_color = 0xe8c879;
+            const auto marker_x = [&](double time) {
+                return x0 + (x1 - x0) *
+                                std::clamp(float((time - minimum) / span), 0.0f, 1.0f);
+            };
+            // An abandoned drag (panel hidden mid-drag) must never leak into
+            // the next time the timeline is drawn.
+            if (dragged_tick >= 0 && !result.active && !deactivated)
+                dragged_tick = -1;
+            if (!result.active && !io.KeyCtrl && ImGui::IsItemHovered()) {
+                float best = 8 * panel_scale;
+                for (const auto& camera : timeline->cameras()) {
+                    const float distance = std::abs(io.MousePos.x - marker_x(camera.time));
+                    if (distance <= best) {
+                        best = distance;
+                        hovered_tick = int(camera.index);
+                        hovered_time = camera.time;
+                    }
+                }
+                if (hovered_tick >= 0)
+                    ImGui::SetTooltip(
+                        "Camera %02u arrives at %.2f s. Drag the tick to change it.",
+                        hovered_tick + 1, hovered_time);
+            }
+            if (ImGui::IsItemActivated() && !io.KeyCtrl) {
+                const ImVec2 press = io.MouseClickedPos[0];
+                if (press.y >= lo.y - 10 * panel_scale && press.y <= hi.y + 10 * panel_scale) {
+                    float best = 8 * panel_scale;
+                    for (const auto& camera : timeline->cameras()) {
+                        const float distance = std::abs(press.x - marker_x(camera.time));
+                        if (distance <= best) {
+                            best = distance;
+                            dragged_tick = int(camera.index);
+                            dragged_time = float(camera.time);
+                        }
+                    }
+                    if (dragged_tick >= 0)
+                        pinned_value = *value;
+                }
+            }
+            if (dragged_tick >= 0) {
+                // Keep the playhead exactly where it was for the whole drag.
+                *value = pinned_value;
+                const float fraction = std::clamp((io.MousePos.x - x0) / (x1 - x0), 0.0f, 1.0f);
+                dragged_time = minimum + fraction * span;
+                const float ghost = x0 + (x1 - x0) * fraction;
+                draw->AddLine(ImVec2(ghost, y - 11 * panel_scale),
+                              ImVec2(ghost, y + 11 * panel_scale),
+                              ImGui::GetColorU32(panel_color(dragged_color)), 2 * panel_scale);
+                char text[32]{};
+                std::snprintf(text, sizeof(text), "%.2f s", dragged_time);
+                draw->AddText(ImVec2(ghost + 5 * panel_scale, y - 20 * panel_scale),
+                              ImGui::GetColorU32(panel_color(dragged_color)), text);
+                if (deactivated) {
+                    EditorCameraList list{};
+                    if (editor_camera_list(list)) {
+                        CameraPose request{};
+                        request[0] = double(list.revision);
+                        request[1] = double(dragged_time);
+                        if (editor_enqueue(EditorAction::SetCameraTime, double(dragged_tick),
+                                           &request))
+                            ++timeline_drags_;
+                    }
+                    dragged_tick = -1;
+                }
+            }
             for (const auto& camera : timeline->cameras()) {
-                const float marker =
-                    x0 +
-                    (x1 - x0) * std::clamp(float((camera.time - minimum) / (maximum - minimum)),
-                                           0.0f, 1.0f);
-                const auto color =
-                    camera.index == timeline->selected_camera() ? 0xe8c879 : 0x9caeb8;
+                const float marker = marker_x(camera.time);
+                const bool selected = camera.index == timeline->selected_camera();
+                const bool highlighted = int(camera.index) == hovered_tick;
+                const auto color = selected || highlighted ? 0xe8c879 : 0x9caeb8;
+                const float tick_width = highlighted ? 2 * panel_scale : panel_scale;
                 draw->AddLine(ImVec2(marker, y - 8 * panel_scale),
                               ImVec2(marker, y + 8 * panel_scale),
-                              ImGui::GetColorU32(panel_color(color)), panel_scale);
+                              ImGui::GetColorU32(panel_color(color)), tick_width);
             }
         }
         draw->AddRectFilled(ImVec2(x - 2.5f * panel_scale, y - 6 * panel_scale),

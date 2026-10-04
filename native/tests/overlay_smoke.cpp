@@ -30,7 +30,7 @@ bool observed_mouse_down[5]{};
 bool present_keeps_os_cursor = false;
 struct ObservedAction {
     dolly::EditorAction action;
-    double value, revision;
+    double value, revision, time;
 };
 std::vector<ObservedAction> observed_actions;
 void require(bool condition, const char* message) {
@@ -539,7 +539,8 @@ bool editor_roster_snapshot(EditorRoster& out) noexcept {
 }
 bool editor_enqueue(EditorAction action, double value, const CameraPose* pose) noexcept {
     try {
-        observed_actions.push_back({action, value, pose ? (*pose)[0] : 0});
+        observed_actions.push_back({action, value, pose ? (*pose)[0] : 0,
+                                    pose ? (*pose)[1] : 0});
     } catch (...) {
         return false;
     }
@@ -819,6 +820,46 @@ int main(int argc, char** argv) {
             shortcut(ImGuiKey_Y, false, dolly::EditorAction::RedoShot);
             shortcut(ImGuiKey_Z, true, dolly::EditorAction::RedoShot);
             std::puts("Rendered history shortcuts: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z passed.");
+            // Draggable camera ticks: a press on a tick pins the playhead and
+            // commits exactly one revision-bound SetCameraTime on release.
+            {
+                const auto timeline = dolly::visualization_snapshot();
+                require(timeline && timeline->cameras().size() == 2,
+                        "Synthetic timeline missing for the tick drag test");
+                const auto before = dolly::overlay_diagnostics();
+                require(before.timeline_x1 > before.timeline_x0 && before.timeline_y > 0,
+                        "Shot timeline rect was not recorded");
+                const auto& camera = timeline->cameras()[0];
+                const float span = std::max(float(snapshot.duration), .001f);
+                const float tick_x =
+                    before.timeline_x0 +
+                    (before.timeline_x1 - before.timeline_x0) *
+                        std::clamp(float(camera.time) / span, 0.0f, 1.0f);
+                const float target_x = std::min(before.timeline_x1 - 2.0f, tick_x + 40);
+                observed_actions.clear();
+                auto drag = [&](bool down, float x) {
+                    ImGui::GetIO().AddMousePosEvent(x, before.timeline_y);
+                    ImGui::GetIO().AddMouseButtonEvent(0, down);
+                    render();
+                };
+                drag(false, tick_x);
+                drag(true, tick_x);
+                drag(true, target_x);
+                drag(false, target_x);
+                const double expected_time =
+                    double(span) * double((target_x - before.timeline_x0) /
+                                          (before.timeline_x1 - before.timeline_x0));
+                require(observed_actions.size() == 1 &&
+                            observed_actions[0].action == dolly::EditorAction::SetCameraTime &&
+                            observed_actions[0].value == camera.index &&
+                            observed_actions[0].revision == 7 &&
+                            std::abs(observed_actions[0].time - expected_time) < 1e-3,
+                        "Tick drag did not enqueue one revision-bound SetCameraTime");
+                require(dolly::overlay_diagnostics().timeline_drags ==
+                            before.timeline_drags + 1,
+                        "Tick drag was not counted as committed");
+                std::puts("Rendered timeline: tick drag enqueues SetCameraTime passed.");
+            }
             ImGuiTable* cameras = nullptr;
             auto& tables = screenshot_context->Tables;
             for (int index = 0; index < tables.GetMapSize(); ++index) {
