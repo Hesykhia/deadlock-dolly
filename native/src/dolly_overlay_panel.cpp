@@ -655,11 +655,38 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                     const auto camera_action = [&](EditorAction action, double value = 0) {
                         return editor_enqueue(action, value, &camera_request);
                     };
+                    // Inline Arrive/Bank edits carry the new value in pose[1].
+                    const auto camera_edit = [&](EditorAction action, std::uint32_t index,
+                                                 double value) {
+                        CameraPose request = camera_request;
+                        request[1] = value;
+                        return editor_enqueue(action, double(index), &request);
+                    };
+                    // Drafts keep a drag or Ctrl+click text entry stable while the
+                    // snapshot list is republished. Refresh them whenever the
+                    // published page or revision changes; a rejected enqueue
+                    // restores the authored value right away.
+                    static std::uint32_t edit_revision = 0, edit_first = 0;
+                    static float time_drafts[kEditorCameraListCount]{};
+                    static float roll_drafts[kEditorCameraListCount]{};
+                    if (edit_revision != cameras.revision || edit_first != cameras.first) {
+                        edit_revision = cameras.revision;
+                        edit_first = cameras.first;
+                        for (std::uint32_t row = 0; row < cameras.count; ++row) {
+                            time_drafts[row] = float(cameras.rows[row].time);
+                            roll_drafts[row] = float(cameras.rows[row].roll);
+                        }
+                    }
                     ImGui::BeginDisabled(!camera_list_ready || !state.paused || state.playing ||
                                          state.attach_preview);
                     if (camera_list_ready && cameras.count) {
                         const float table_height = ImGui::GetTextLineHeightWithSpacing() *
                                                    (float(std::min(cameras.count, 6u)) + 1.5f);
+                        // Keep editable cells compact: standard frame padding makes
+                        // table rows taller than the read-only text list was.
+                        ImGui::PushStyleVar(
+                            ImGuiStyleVar_FramePadding,
+                            ImVec2(ImGui::GetStyle().FramePadding.x, 2 * panel_scale));
                         if (ImGui::BeginTable(
                                 "##camera-list", 4,
                                 ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
@@ -680,6 +707,7 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                                 ImGui::TableNextColumn();
                                 char name[32]{};
                                 std::snprintf(name, sizeof(name), "Camera %02u", index + 1);
+                                ImGui::SetNextItemAllowOverlap();
                                 if (ImGui::Selectable(name, index == chosen_camera,
                                                       ImGuiSelectableFlags_SpanAllColumns |
                                                           ImGuiSelectableFlags_AllowDoubleClick)) {
@@ -695,15 +723,36 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                                         "%s camera. Click to select; double-click to view.",
                                         key.source ? "Bone / attached" : "Free path");
                                 ImGui::TableNextColumn();
-                                ImGui::Text("%.2f", key.time);
+                                ImGui::SetNextItemWidth(-1.0f);
+                                ImGui::DragFloat("##arrive", &time_drafts[row], 0.01f, 0.0f,
+                                                 1e9f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+                                const bool time_edited = ImGui::IsItemDeactivatedAfterEdit();
+                                if (!ImGui::IsItemActive() && ImGui::IsItemHovered())
+                                    ImGui::SetTooltip(
+                                        "Camera %02u arrival. Drag to adjust; Ctrl+click to type.",
+                                        index + 1);
+                                if (time_edited && !camera_edit(EditorAction::SetCameraTime, index,
+                                                                double(time_drafts[row])))
+                                    time_drafts[row] = float(key.time);
                                 ImGui::TableNextColumn();
                                 ImGui::Text("%.3g", key.aspect);
                                 ImGui::TableNextColumn();
-                                ImGui::Text("%.1f", key.roll);
+                                ImGui::SetNextItemWidth(-1.0f);
+                                ImGui::DragFloat("##bank", &roll_drafts[row], 0.25f, -180.0f,
+                                                 180.0f, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+                                const bool roll_edited = ImGui::IsItemDeactivatedAfterEdit();
+                                if (!ImGui::IsItemActive() && ImGui::IsItemHovered())
+                                    ImGui::SetTooltip(
+                                        "Camera %02u bank. Drag to adjust; Ctrl+click to type.",
+                                        index + 1);
+                                if (roll_edited && !camera_edit(EditorAction::SetCameraRoll, index,
+                                                                double(roll_drafts[row])))
+                                    roll_drafts[row] = float(key.roll);
                                 ImGui::PopID();
                             }
                             ImGui::EndTable();
                         }
+                        ImGui::PopStyleVar();
                         if (cameras.total > kEditorCameraListCount) {
                             ImGui::BeginDisabled(!cameras.first);
                             if (ImGui::SmallButton("Earlier"))

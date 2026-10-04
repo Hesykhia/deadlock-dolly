@@ -650,13 +650,13 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
     if (action == EditorAction::ReShade)
         return configured() && !gReShadeDeferred.load() &&
                reshade_request_overlay(!reshade_overlay_open());
-    if (!std::isfinite(value) || std::uint32_t(action) > std::uint32_t(EditorAction::CameraPage))
+    if (!std::isfinite(value) || std::uint32_t(action) > std::uint32_t(EditorAction::SetCameraRoll))
         return false;
     auto state = editor_snapshot();
     if (!state.enabled)
         return false;
     const bool camera_action =
-        action >= EditorAction::SelectCamera && action <= EditorAction::CameraPage;
+        action >= EditorAction::SelectCamera && action <= EditorAction::SetCameraRoll;
     if (camera_action) {
         EditorCameraList list{};
         if (!pose_override || !state.ready || !state.paused || state.busy || state.playing ||
@@ -667,6 +667,8 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
         for (double component : *pose_override)
             if (!std::isfinite(component))
                 return false;
+        if (action == EditorAction::SetCameraTime && (*pose_override)[1] < 0)
+            return false;
     }
     // While inspecting, only recovery/ownership and picker actions may escape
     // to Python. In particular no capture, seek or recording of this view.

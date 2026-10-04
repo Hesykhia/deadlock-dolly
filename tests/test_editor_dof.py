@@ -135,6 +135,10 @@ class EditorDofTests(unittest.TestCase):
         self.assertEqual(DOF_CONFIG.unpack(packet), (b"DLYDOF01", 2, 1, 1, 0, *values))
         self.assertEqual(EXTRA_ACTIONS.index("set_framing") + 26, 40)
         self.assertEqual(EXTRA_ACTIONS.index("set_dof_10") + 26, 51)
+        self.assertEqual(EXTRA_ACTIONS.index("select_camera") + 26, 89)
+        self.assertEqual(EXTRA_ACTIONS.index("camera_page") + 26, 94)
+        self.assertEqual(EXTRA_ACTIONS.index("set_camera_time") + 26, 95)
+        self.assertEqual(EXTRA_ACTIONS.index("set_camera_roll") + 26, 96)
 
     def test_citadel_edits_author_both_switches_and_value_controls(self):
         from dolly.editor_dof import CITADEL_ACTIONS, citadel_values_at, edited_citadel_project

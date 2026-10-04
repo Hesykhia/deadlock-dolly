@@ -119,6 +119,59 @@ class EditorSessionTests(unittest.TestCase):
         self.app.undo_shot.assert_called_once()
         self.app.redo_shot.assert_called_once()
 
+    def test_inline_camera_time_edit_moves_and_selects_the_camera(self):
+        self.camera_list_app()
+        self.app._commit_camera = Mock()
+        revision = self.app.shot_history.revision
+        event = {'action': 'set_camera_time', 'value': 1,
+                 'pose': (revision, 1.0, 0, 0, 0, 0, 0)}
+        self.assertTrue(session.dispatch(self.app, event, self.bridge))
+        keys, selected_time = self.app._commit_camera.call_args.args
+        self.assertEqual(keys[1].time, 1.0)
+        self.assertEqual(selected_time, 1.0)
+        self.assertEqual(self.app.project.keyframes[1].time, 2)
+        self.app._delete_key.assert_not_called()
+        self.app._submit.assert_not_called()
+
+    def test_inline_camera_time_edit_nudges_off_an_exact_duplicate(self):
+        self.camera_list_app()
+        self.app._commit_camera = Mock()
+        revision = self.app.shot_history.revision
+        session.dispatch(self.app, {'action': 'set_camera_time', 'value': 1,
+                                    'pose': (revision, 0.0, 0, 0, 0, 0, 0)}, self.bridge)
+        keys, selected_time = self.app._commit_camera.call_args.args
+        self.assertAlmostEqual(keys[1].time, 0.001)
+        self.assertAlmostEqual(selected_time, 0.001)
+
+    def test_inline_camera_bank_edit_replaces_only_that_value(self):
+        self.camera_list_app()
+        self.app._commit_camera = Mock()
+        revision = self.app.shot_history.revision
+        session.dispatch(self.app, {'action': 'set_camera_roll', 'value': 0,
+                                    'pose': (revision, 45.5, 0, 0, 0, 0, 0)}, self.bridge)
+        keys, selected_time = self.app._commit_camera.call_args.args
+        self.assertEqual(keys[0].roll, 45.5)
+        self.assertEqual(keys[1].roll, 12)
+        self.assertEqual(selected_time, 0)
+        self.assertIn('bank', self.app.status_text.set.call_args.args[0].lower())
+
+    def test_inline_camera_edits_reject_bad_values_and_stale_lists(self):
+        self.camera_list_app()
+        self.app._commit_camera = Mock()
+        revision = self.app.shot_history.revision
+        for action, value in (('set_camera_time', -1), ('set_camera_time', float('nan')),
+                              ('set_camera_roll', float('inf'))):
+            with self.subTest(action=action, value=value), self.assertRaises(ValueError):
+                session.dispatch(self.app, {'action': action, 'value': 1,
+                                            'pose': (revision, value, 0, 0, 0, 0, 0)}, self.bridge)
+        self.app._commit_camera.assert_not_called()
+        self.app.project.name = 'New edit'
+        self.app.shot_history.record(self.app.project)
+        for action in ('set_camera_time', 'set_camera_roll'):
+            with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'camera list changed'):
+                session.dispatch(self.app, {'action': action, 'value': 0,
+                                            'pose': (revision, 1.0, 0, 0, 0, 0, 0)}, self.bridge)
+
     def test_follow_event_preserves_full_model_identity(self):
         player = {'handle': 0x10002, 'entity_index': 2, 'model': 0xfedcba9876543210,
                   'model_path': 'models/heroes/frank/frank.vmdl'}

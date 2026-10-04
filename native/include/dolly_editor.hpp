@@ -121,7 +121,9 @@ enum class EditorAction : std::uint32_t {
     DeleteCamera,
     UndoShot,
     RedoShot,
-    CameraPage
+    CameraPage,
+    SetCameraTime,
+    SetCameraRoll
 };
 static_assert(static_cast<std::uint32_t>(EditorAction::ResetCameraPath) == 77,
               "Stable camera reset action ID");
@@ -300,6 +302,9 @@ static_assert(kEditorCameraListOffset + sizeof(EditorCameraList) <= 2 * 1024 * 1
               "Camera list fits existing shared mapping");
 static_assert(static_cast<std::uint32_t>(EditorAction::SelectCamera) == 89,
               "Stable camera list action ID");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraTime) == 95 &&
+                  static_cast<std::uint32_t>(EditorAction::SetCameraRoll) == 96,
+              "Stable inline camera edit action IDs");
 inline bool valid_editor_camera_list(const EditorCameraList& list) noexcept {
     if (std::memcmp(list.magic, "DLYCAMS1", 8) || list.abi != 1 || !list.revision ||
         list.reserved || (list.flags & ~3u) || list.count > kEditorCameraListCount ||
@@ -325,6 +330,8 @@ inline bool valid_editor_camera_action(const EditorCameraList& list, EditorActio
     if (action == EditorAction::CameraPage)
         return value >= 0 && value < list.total &&
                std::fmod(value, double(kEditorCameraListCount)) == 0;
+    if (action == EditorAction::SetCameraTime || action == EditorAction::SetCameraRoll)
+        return value >= list.first && value < list.first + list.count;
     return (action == EditorAction::SelectCamera || action == EditorAction::ViewCamera ||
             action == EditorAction::DeleteCamera) &&
            value >= list.first && value < list.first + list.count;

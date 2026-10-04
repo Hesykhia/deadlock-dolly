@@ -110,7 +110,8 @@ def _dispatch(app, event, bridge, *, publish):
             raise ValueError("Stop path playback before resetting the camera path.")
         # The native panel confirms replacement before sending this snapshot.
         app._capture_view("start", native_snapshot=event, replacement_confirmed=True)
-    elif action in ("select_camera", "view_camera", "delete_camera", "undo_shot", "redo_shot", "camera_page"):
+    elif action in ("select_camera", "view_camera", "delete_camera", "undo_shot", "redo_shot",
+                    "camera_page", "set_camera_time", "set_camera_roll"):
         history = getattr(app, "shot_history", None)
         revision = event["pose"][0]
         if history is None or revision != history.revision:
@@ -129,6 +130,11 @@ def _dispatch(app, event, bridge, *, publish):
             if value < 0 or value % CAMERA_LIST_COUNT or value > max(0, len(app.project.keyframes) - 1):
                 raise ValueError("Invalid camera list page")
             app._native_camera_page = int(value)
+            publish()
+        elif action in ("set_camera_time", "set_camera_roll"):
+            if not 0 <= value < len(app.project.keyframes):
+                raise ValueError("Selected in-game camera no longer exists")
+            _edit_camera_value(app, action, int(value), event["pose"][1])
             publish()
         else:
             if not 0 <= value < len(app.project.keyframes):
@@ -598,6 +604,34 @@ def _dispatch(app, event, bridge, *, publish):
     else:
         raise ValueError("The native editor requested an unsupported UI action")
     return True
+
+
+def _edit_camera_value(app, action, index, value):
+    """Apply an in-game inline Arrive/Bank edit to one camera key."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError("Invalid in-game camera edit")
+    keys = copy.deepcopy(app.project.keyframes)
+    key = keys[index]
+    if action == "set_camera_time":
+        if value < 0:
+            raise ValueError("Camera arrival times cannot be negative.")
+        edit = float(value)
+        # Path times stay strictly increasing. A drag that lands exactly on
+        # another camera is nudged forward instead of rejected.
+        for _ in range(16):
+            if not any(i != index and abs(other.time - edit) < 1e-6
+                       for i, other in enumerate(keys)):
+                break
+            edit += 0.001
+        else:
+            raise ValueError("Another camera already arrives at that time.")
+        key.time = edit
+        app._commit_camera(keys, key.time)
+        app.status_text.set(f"Camera {index + 1:02d} arrives at {key.time:.2f} s.")
+    else:
+        key.roll = float(value)
+        app._commit_camera(keys, key.time)
+        app.status_text.set(f"Camera {index + 1:02d} bank set to {key.roll:.1f}°.")
 
 
 def _attach_edit(app, mutate):

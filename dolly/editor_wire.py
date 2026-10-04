@@ -42,6 +42,7 @@ EXTRA_ACTIONS += ("open_bone_picker", "cancel_bone_picker", "finish_bone_picker"
 EXTRA_ACTIONS += ("start_game_follow", "stop_game_follow")
 EXTRA_ACTIONS += ("set_replay_hud",)
 EXTRA_ACTIONS += ("select_camera", "view_camera", "delete_camera", "undo_shot", "redo_shot", "camera_page")
+EXTRA_ACTIONS += ("set_camera_time", "set_camera_roll")
 
 CAMERA_LIST_OFFSET = 2 * 1024 * 1024 + 23360
 CAMERA_LIST_COUNT = 32
