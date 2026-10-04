@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.15 alpha - Session lifecycle maintenance
+
+**0.6.15-alpha**
+
+- **Session maintenance.** *Before:* Launching, configuration recovery and cleanup shared tightly connected code. *After:* These responsibilities are separated and regression-tested, preserving the existing editing workflow.
+- **Windows cleanup checks.** *Before:* A linked-folder safety test could be skipped without Windows symlink privileges. *After:* It also runs with a Windows junction, checking that cleanup leaves linked files untouched.
+
+Full details: [0.6.15 release notes](RELEASE_NOTES_0.6.15-alpha.md).
+
 ## 0.6.14 alpha - Editor maintenance
 
 **0.6.14-alpha**
