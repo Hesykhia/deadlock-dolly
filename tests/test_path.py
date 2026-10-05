@@ -13,8 +13,8 @@ def key(time, x=0, y=0, z=0, pitch=0, yaw=0, roll=0, fov=90):
 
 class PathTests(unittest.TestCase):
     def test_confetti_is_an_opt_in_versioned_shot_setting(self):
-        project = Project(keyframes=[key(0)], confetti_enabled=True,
-                          confetti_spawn_height=1200,
+        project = Project(keyframes=[key(0)], interpolation="linear",
+                          confetti_enabled=True, confetti_spawn_height=1200,
                           confetti_despawn_on_ground=True)
         encoded = project.to_dict()
         self.assertEqual(encoded["version"], 8)
@@ -22,15 +22,16 @@ class PathTests(unittest.TestCase):
         self.assertEqual(encoded["confetti_spawn_height"], 1200)
         self.assertIs(encoded["confetti_despawn_on_ground"], True)
         self.assertEqual(Project.from_dict(encoded), project)
-        self.assertNotIn("confetti_enabled", Project(keyframes=[key(0)]).to_dict())
+        self.assertNotIn("confetti_enabled", Project(keyframes=[key(0)], interpolation="linear").to_dict())
         with self.assertRaisesRegex(ValueError, "true or false"):
             Project(confetti_enabled=1).validate()
         with self.assertRaisesRegex(ValueError, "between 100 and 1500"):
             Project(confetti_spawn_height=50).validate()
 
     def test_particle_preset_and_intensity_are_versioned_settings(self):
-        project = Project(keyframes=[key(0)], confetti_enabled=True,
-                          particles_preset="snow_heavy", particles_intensity=1.5)
+        project = Project(keyframes=[key(0)], interpolation="linear",
+                          confetti_enabled=True, particles_preset="snow_heavy",
+                          particles_intensity=1.5)
         encoded = project.to_dict()
         self.assertEqual(encoded["version"], 8)
         self.assertEqual(encoded["particles_preset"], "snow_heavy")
@@ -57,7 +58,8 @@ class PathTests(unittest.TestCase):
         for bad in ("1", "1 2 3", "1 2 3 4 5", "1 1 1 1; quit", "nan 0 0 0", "1e400 0 0 0"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 parse_cvar_value(name, bad)
-        project = Project(keyframes=[key(0)], setup_values={name: (0, 0, 0, 0)}, tracks=[
+        project = Project(keyframes=[key(0)], interpolation="linear",
+                          setup_values={name: (0, 0, 0, 0)}, tracks=[
             CvarTrack(name, [TrackKey(0, (-100, 0, 180, 2000)), TrackKey(2, (0, 100, 500, 3000))], "linear", (0, 0, 0, 0))])
         encoded = project.to_dict()
         self.assertEqual(encoded["version"], 3)
@@ -333,7 +335,7 @@ class SplineInterpolationTests(unittest.TestCase):
             self.assertAlmostEqual(project.evaluate(timestamp)["pitch"],
                                    project.evaluate(timestamp)["x"], places=12)
 
-    def test_spline_version_and_old_modes_are_preserved(self):
+    def test_spline_version_and_explicit_modes_are_preserved(self):
         keys = [key(0, x=0), key(1, x=1), key(2, x=0)]
         spline = Project(interpolation="spline", keyframes=keys)
         saved = spline.to_dict()
@@ -341,8 +343,22 @@ class SplineInterpolationTests(unittest.TestCase):
         self.assertEqual(saved["interpolation"], "spline")
         self.assertEqual(Project.from_dict(saved), spline)
         smooth = Project(interpolation="smooth", keyframes=keys)
-        self.assertEqual(smooth.to_dict()["version"], 2)
-        self.assertEqual(Project.from_dict(smooth.to_dict()).interpolation, "smooth")
+        saved = smooth.to_dict()
+        self.assertEqual(saved["version"], 10)
+        self.assertEqual(Project.from_dict(saved).interpolation, "smooth")
+        linear = Project(interpolation="linear", keyframes=keys)
+        self.assertEqual(Project.from_dict(linear.to_dict()).interpolation, "linear")
+
+    def test_pre_spline_shots_default_to_the_spline(self):
+        # Version 1-9 files stored the old "smooth" default without an explicit
+        # choice; those now load with the spline. Linear was always deliberate.
+        data = Project(interpolation="linear", keyframes=[key(0, x=0), key(1, x=1)]).to_dict()
+        data["interpolation"] = "smooth"
+        self.assertEqual(Project.from_dict(data).interpolation, "spline")
+        data["interpolation"] = "linear"
+        self.assertEqual(Project.from_dict(data).interpolation, "linear")
+        del data["interpolation"]
+        self.assertEqual(Project.from_dict(data).interpolation, "spline")
 
 
 if __name__ == "__main__":

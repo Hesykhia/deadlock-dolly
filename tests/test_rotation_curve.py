@@ -66,7 +66,8 @@ class RotationModelTests(unittest.TestCase):
         self.assertEqual(compile_project(override), compile_project(authored))
 
     def test_round_trip_uses_version_five_and_keeps_overrides(self):
-        project = Project(keyframes=[camera(0.0, curve_roll=12.5), camera(2.0)])
+        project = Project(keyframes=[camera(0.0, curve_roll=12.5), camera(2.0)],
+                          interpolation="linear")
         data = project.to_dict()
         self.assertEqual(data["version"], ROTATION_FORMAT_VERSION)
         self.assertEqual(data["keyframes"][0]["curve_roll"], 12.5)
@@ -76,7 +77,7 @@ class RotationModelTests(unittest.TestCase):
         self.assertIsNone(restored.keyframes[1].curve_roll)
 
     def test_older_versions_reject_curve_members(self):
-        data = Project(keyframes=[camera(0.0)]).to_dict()
+        data = Project(keyframes=[camera(0.0)], interpolation="linear").to_dict()
         data["version"] = ATTACH_FORMAT_VERSION
         data["keyframes"][0]["curve_pitch"] = 1.0
         with self.assertRaisesRegex(ValueError, "camera keyframe"):

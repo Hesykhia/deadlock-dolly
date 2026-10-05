@@ -50,7 +50,7 @@ def project_with(specs):
         attach = attach_target(**spec[2]) if len(spec) > 2 else attach_target()
         keys.append(Keyframe(time=time, x=float(index), y=2.0, z=3.0, pitch=0.0, yaw=0.0,
                              roll=0.0, source=source, attach=attach if source == "attach" else None))
-    return Project(name="attach", keyframes=keys)
+    return Project(name="attach", keyframes=keys, interpolation="linear")
 
 
 class AttachProjectTests(unittest.TestCase):
@@ -75,7 +75,8 @@ class AttachProjectTests(unittest.TestCase):
                     project.validate()
 
     def test_free_project_json_is_unchanged(self):
-        project = Project(name="free", keyframes=[Keyframe(0.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0)])
+        project = Project(name="free", keyframes=[Keyframe(0.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0)],
+                          interpolation="linear")
         data = project.to_dict()
         self.assertEqual(data["version"], 2)
         self.assertNotIn("source", data["keyframes"][0])
@@ -145,7 +146,8 @@ class AttachProjectTests(unittest.TestCase):
                     Project(name="bad", keyframes=[key]).validate()
 
     def test_attach_members_are_version_gated(self):
-        data = Project(name="free", keyframes=[Keyframe(0.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0)]).to_dict()
+        data = Project(name="free", keyframes=[Keyframe(0.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0)],
+                       interpolation="linear").to_dict()
         data["version"] = 3
         data["keyframes"][0]["source"] = "attach"
         with self.assertRaisesRegex(ValueError, "Unknown camera keyframe field"):

@@ -22,7 +22,7 @@ def camera(time, x=0, y=0, z=0, pitch=0, yaw=0, roll=0, aspect=16 / 9):
 class NativeCompilerTests(unittest.TestCase):
     def test_captured_lens_survives_save_and_compilation(self):
         from dolly.native_path import LENS_HEADER
-        shot = Project(keyframes=[camera(0), camera(1)])
+        shot = Project(keyframes=[camera(0), camera(1)], interpolation="linear")
         shot.keyframes[0].lens_scale = .75
         shot.keyframes[1].lens_scale = math.tan(math.radians(50)) * .75
         saved = shot.to_dict()

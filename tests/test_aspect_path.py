@@ -65,6 +65,7 @@ class AspectPathTests(unittest.TestCase):
 
     def test_v2_roundtrip_preserves_custom_standard_curve_and_other_channels(self):
         project = Project(standard_aspect=4 / 3, lens_interpolation="step",
+                          interpolation="linear",
                           keyframes=[camera(0, 4 / 3, z=421.3), camera(3, 0.9, z=600)],
                           tracks=[CvarTrack("r_dof", [TrackKey(0, 1)], "step", 0)])
         self.assertEqual(Project.from_dict(project.to_dict()), project)
