@@ -63,6 +63,38 @@ class LibraryChoiceTests(unittest.TestCase):
             issue = reshade_setup.library_issue(empty)
             self.assertIn(".fx", issue)
 
+    def test_discover_library_finds_shaders_beside_the_runtime(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = Path(folder) / "app"
+            dll = app / "ReShade64.dll"
+            dll.parent.mkdir(parents=True)
+            dll.write_bytes(b"MZ")
+            shaders = app / "reshade-shaders" / "Shaders"
+            shaders.mkdir(parents=True)
+            (shaders / "LUT.fx").write_text("technique LUT { }\n", encoding="utf-8")
+            self.assertEqual(reshade_setup.discover_library(dll), app / "reshade-shaders")
+
+    def test_discover_library_finds_shaders_one_level_up(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = Path(folder) / "app"
+            nested = app / "runtime"
+            nested.mkdir(parents=True)
+            dll = nested / "ReShade64.dll"
+            dll.write_bytes(b"MZ")
+            shaders = app / "Shaders"
+            shaders.mkdir()
+            (shaders / "Custom.fx").write_text("technique Custom { }\n", encoding="utf-8")
+            self.assertEqual(reshade_setup.discover_library(dll), shaders)
+
+    def test_discover_library_ignores_empty_folders(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app = Path(folder) / "app"
+            dll = app / "ReShade64.dll"
+            dll.parent.mkdir(parents=True)
+            dll.write_bytes(b"MZ")
+            (app / "reshade-shaders" / "Shaders").mkdir(parents=True)
+            self.assertIsNone(reshade_setup.discover_library(dll))
+
     def test_library_paths_find_shaders_and_sibling_textures(self):
         with tempfile.TemporaryDirectory() as folder:
             chosen = self._chosen(Path(folder))

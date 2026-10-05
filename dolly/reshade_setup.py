@@ -72,6 +72,31 @@ def library_paths(root) -> tuple[Path | None, Path | None]:
     return shaders, None
 
 
+def discover_library(runtime_path) -> Path | None:
+    """Find a ReShade shader folder near the selected runtime DLL, or None.
+
+    Portable setups commonly keep ``reshade-shaders`` (or ``Shaders``) beside
+    the DLL or one level up. Only folders that actually contain .fx files
+    count, so this never registers an empty or unrelated directory.
+    """
+    try:
+        base = Path(str(runtime_path)).expanduser().parent
+    except (OSError, ValueError):
+        return None
+    seen: set[str] = set()
+    for root in (base, base.parent):
+        for candidate in (root / "reshade-shaders", root / "reshade_shaders",
+                          root / "Shaders", root):
+            key = _normalize_path(str(candidate))
+            if key in seen:
+                continue
+            seen.add(key)
+            shaders, _ = library_paths(candidate)
+            if shaders is not None:
+                return candidate
+    return None
+
+
 def library_issue(selected) -> str | None:
     """Explain why a chosen ReShade FX library folder cannot be used, or None."""
     candidate = Path(str(selected)).expanduser()

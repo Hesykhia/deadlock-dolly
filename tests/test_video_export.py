@@ -1264,7 +1264,7 @@ class ReShadeGuiTests(unittest.TestCase):
             runtime.write_bytes(b"selected user runtime")
             self.app.app_settings = AppSettings(reshade_runtime_path=str(runtime))
             self.app._configure_reshade(automatic=True)
-            with patch("dolly.reshade_setup.prepare_config", side_effect=lambda *_: order.append("library")), \
+            with patch("dolly.reshade_setup.prepare_config", side_effect=lambda *_, **__: order.append("library")), \
                  patch("dolly.gui.save_settings"):
                 self.app._submit.call_args.args[1]()
         self.assertEqual(order, ["library", "load"])

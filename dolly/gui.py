@@ -1308,8 +1308,8 @@ class DollyApp:
                 bridge = self.controller._native_bridge()
                 if bridge is None or not recording_ready(self.controller.status()):
                     raise RuntimeError("Launch a DirectX 11 replay through Dolly before enabling ReShade.")
-                from dolly.reshade_setup import prepare_config
-                summary = prepare_config(config)
+                from dolly.reshade_setup import discover_library, prepare_config
+                summary = prepare_config(config, library_root=discover_library(path))
                 bridge.configure_reshade(str(path), str(config))
                 save_settings(settings)
                 return summary
