@@ -18,12 +18,14 @@
 #include <dxgi.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_win32.h"
@@ -808,6 +810,20 @@ HRESULT STDMETHODCALLTYPE present_hook(IDXGISwapChain* chain, UINT interval, UIN
     if (enabled.load(std::memory_order_acquire) && !(flags & DXGI_PRESENT_TEST)) {
         diagnostic_present.fetch_add(1, std::memory_order_relaxed);
         std::unique_lock<std::recursive_mutex> lock(render_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            // The game's message thread briefly holds this lock while feeding a
+            // UI event. Retry instead of skipping the frame: a skipped Present
+            // draws no overlay at all, which reads as the panel blinking off
+            // during fast mouse movement. The wait is bounded so a stuck thread
+            // cannot stall the game's Present.
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(2);
+            while (!lock.try_lock()) {
+                if (std::chrono::steady_clock::now() >= deadline)
+                    break;
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+            }
+        }
         if (lock.owns_lock()) {
             DiagnosticTimer timer(diagnostic_overlay_last_us, diagnostic_overlay_max_us,
                                   diagnostic_overlay_active_ms);
