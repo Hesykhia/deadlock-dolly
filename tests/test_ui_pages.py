@@ -72,7 +72,9 @@ class PageBoundaryTests(unittest.TestCase):
         self.assertFalse(view.controls_disclosure.opened)
         self.button('Save paths').invoke()
         self.button('Menu shortcut...').invoke()
-        self.assertEqual([c[0] for c in self.calls], ['build_keybinds', 'save_layout_paths', 'show_reshade_keybinds'])
+        self.button('Browse FX library...').invoke()
+        self.assertEqual([c[0] for c in self.calls],
+                         ['build_keybinds', 'save_layout_paths', 'show_reshade_keybinds', 'browse_reshade_library'])
         self.assertEqual(str(view.reshade_path_entry.cget('textvariable')), str(state.reshade_runtime_path))
         self.assertEqual(str(view.reshade_disable_button.cget('state')), 'disabled')
         self.assertFalse(hasattr(view.graphics_profiles, 'app'))

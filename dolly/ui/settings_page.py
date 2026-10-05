@@ -24,6 +24,7 @@ class SettingsActions:
     browse_game: Callable[..., object]
     browse_replay_folder: Callable[..., object]
     browse_reshade: Callable[..., object]
+    browse_reshade_library: Callable[..., object]
     check_updates: Callable[..., object]
     configure_reshade: Callable[..., object]
     diagnostics: Callable[..., object]
@@ -69,7 +70,9 @@ class SettingsPage:
         self.reshade_path_entry = field(shade, "Runtime DLL", state.reshade_runtime_path)
         self.reshade_path_entry.bind(
             "<Return>", lambda _event: commands.select_reshade_runtime(state.reshade_runtime_path.get()))
-        self.reshade_browse_button = actions(shade, (("Browse runtime...", commands.browse_reshade),), 1)[0]
+        self.reshade_browse_button, self.reshade_library_button = actions(
+            shade, (("Browse runtime...", commands.browse_reshade),
+                    ("Browse FX library...", commands.browse_reshade_library)), 2)
         buttons = actions(shade, (("Enable ReShade", commands.configure_reshade),
                         ("Disable for this session", commands.disable_reshade), ("Forget runtime", commands.forget_reshade)))
         self.reshade_configure_button, self.reshade_disable_button, self.reshade_forget_button = buttons

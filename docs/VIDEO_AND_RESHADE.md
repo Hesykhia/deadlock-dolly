@@ -156,6 +156,11 @@ requirements.
    Open ReShade's menu to adjust its sliders or enable the other bundled effects.
    Existing shader paths, selected presets and edited preset files are preserved.
    You can add other downloaded shader packs through ReShade's settings.
+   If ReShade's menu reports that it cannot find the effect files, press
+   **Browse FX library...** in Dolly's Settings → ReShade and select the folder
+   that contains the `.fx` shaders (for example the bundled
+   `third_party\reshade_shaders\Shaders`). The folder is added to Dolly's private
+   configuration and loads with the next ReShade start.
 
 The optional **Deadlock-AO** preset requires separately installed iMMERSE shaders.
 Those shaders and the ReShade runtime are not bundled. It is not selected

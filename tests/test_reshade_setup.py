@@ -37,6 +37,41 @@ class RuntimeIssueTests(unittest.TestCase):
             self.assertIsNone(reshade_setup.runtime_issue(runtime, application_root=root))
 
 
+class LibraryChoiceTests(unittest.TestCase):
+    def _chosen(self, temp: Path) -> Path:
+        shaders = temp / "reshade-shaders" / "Shaders"
+        textures = temp / "reshade-shaders" / "Textures"
+        shaders.mkdir(parents=True)
+        textures.mkdir(parents=True)
+        (shaders / "LUT.fx").write_text("technique LUT { }\n", encoding="utf-8")
+        return shaders.parent
+
+    def test_library_issue_accepts_the_folder_or_its_shaders_subfolder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            chosen = self._chosen(Path(folder))
+            self.assertIsNone(reshade_setup.library_issue(chosen))
+            self.assertIsNone(reshade_setup.library_issue(chosen / "Shaders"))
+
+    def test_library_issue_reports_a_missing_or_effectless_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            temp = Path(folder)
+            missing = temp / "gone"
+            issue = reshade_setup.library_issue(missing)
+            self.assertIn("missing", issue)
+            empty = temp / "empty"
+            empty.mkdir()
+            issue = reshade_setup.library_issue(empty)
+            self.assertIn(".fx", issue)
+
+    def test_library_paths_find_shaders_and_sibling_textures(self):
+        with tempfile.TemporaryDirectory() as folder:
+            chosen = self._chosen(Path(folder))
+            shaders, textures = reshade_setup.library_paths(chosen)
+            self.assertEqual(shaders, chosen / "Shaders")
+            self.assertEqual(textures, chosen / "Textures")
+            picked, _ = reshade_setup.library_paths(chosen / "Shaders")
+            self.assertEqual(picked, chosen / "Shaders")
+
 class PrepareConfigTests(unittest.TestCase):
     def _paths(self, temp: Path):
         base = temp / "bundle" / "third_party" / "reshade_shaders"
@@ -48,6 +83,44 @@ class PrepareConfigTests(unittest.TestCase):
         preset.parent.mkdir(parents=True)
         preset.write_text("Techniques=\n", encoding="utf-8")
         return shaders, textures, preset
+
+    def _chosen(self, temp: Path) -> Path:
+        shaders = temp / "reshade-shaders" / "Shaders"
+        textures = temp / "reshade-shaders" / "Textures"
+        shaders.mkdir(parents=True)
+        textures.mkdir(parents=True)
+        (shaders / "LUT.fx").write_text("technique LUT { }\n", encoding="utf-8")
+        return shaders.parent
+
+    def test_merges_a_chosen_library(self):
+        with tempfile.TemporaryDirectory() as folder:
+            temp = Path(folder)
+            shaders, textures, preset = self._paths(temp)
+            chosen = self._chosen(temp)
+            config = temp / "ReShade.ini"
+            with patch.object(reshade_setup, "bundled_shader_paths", return_value=(shaders, textures)), \
+                 patch.object(reshade_setup, "bundled_preset", return_value=preset):
+                summary = reshade_setup.prepare_config(config, library_root=chosen)
+            text = config.read_text(encoding="utf-8")
+            self.assertEqual(summary["library_shaders"], chosen / "Shaders")
+            self.assertEqual(summary["library_textures"], chosen / "Textures")
+            self.assertIn(str(shaders), text)
+            self.assertIn(str(chosen / "Shaders"), text)
+            self.assertIn(str(chosen / "Textures"), text)
+
+    def test_chosen_library_replaces_a_missing_bundled_one(self):
+        with tempfile.TemporaryDirectory() as folder:
+            temp = Path(folder)
+            shaders = temp / "Shaders"
+            shaders.mkdir()
+            (shaders / "Custom.fx").write_text("technique Custom { }\n", encoding="utf-8")
+            config = temp / "ReShade.ini"
+            with patch.object(reshade_setup, "bundled_shader_paths", return_value=(None, None)), \
+                 patch.object(reshade_setup, "bundled_preset", return_value=None):
+                summary = reshade_setup.prepare_config(config, library_root=shaders)
+            text = config.read_text(encoding="utf-8")
+            self.assertTrue(summary["changed"])
+            self.assertIn(f"EffectSearchPaths={shaders}", text)
 
     def test_merges_paths_and_fills_missing_preset(self):
         with tempfile.TemporaryDirectory() as folder:

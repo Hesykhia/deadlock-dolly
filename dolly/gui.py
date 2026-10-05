@@ -1256,6 +1256,39 @@ class DollyApp:
                                          "then press Enable ReShade (a live session enables it automatically).")
         return True
 
+    def _browse_reshade_library(self):
+        path = filedialog.askdirectory(parent=self.root, title="Choose the ReShade FX library folder")
+        if path:
+            self._select_reshade_library(path)
+
+    def _select_reshade_library(self, selected):
+        """Point ReShade at a chosen FX library folder.
+
+        The folder is merged into Dolly's private ReShade configuration, so it
+        survives updates and applies the next time the runtime loads. This is
+        the fix ReShade's menu asks for when it cannot find effect files.
+        """
+        from dolly.reshade_setup import library_issue
+        issue = library_issue(selected)
+        if issue:
+            self.reshade_status_text.set("ReShade unavailable: " + issue)
+            self._log("ReShade: " + issue)
+            return
+        def operation():
+            from dolly.reshade_setup import prepare_config
+            from dolly.settings import reshade_config_path
+            return prepare_config(reshade_config_path(), library_root=selected)
+        def complete(summary):
+            if summary.get("library_shaders") is None and summary.get("library_textures") is None:
+                self.reshade_status_text.set(
+                    "No shader files were found in that folder; ReShade was not changed.")
+                return
+            message = ("ReShade FX library saved. It loads with the next ReShade start; "
+                       "restart the replay if ReShade is already open.")
+            self.reshade_status_text.set(message)
+            self._log(message)
+        self._submit("Choosing the ReShade FX library", operation, complete)
+
     def _configure_reshade(self, automatic=False):
         def operation():
             from dolly.reshade_setup import runtime_issue
@@ -1276,12 +1309,18 @@ class DollyApp:
                 if bridge is None or not recording_ready(self.controller.status()):
                     raise RuntimeError("Launch a DirectX 11 replay through Dolly before enabling ReShade.")
                 from dolly.reshade_setup import prepare_config
-                prepare_config(config)
+                summary = prepare_config(config)
                 bridge.configure_reshade(str(path), str(config))
                 save_settings(settings)
-            def complete(_result):
+                return summary
+            def complete(summary):
                 self.app_settings = settings
-                self.reshade_status_text.set("ReShade requested. Dolly's shader library and editable presets are ready in its menu.")
+                if summary.get("shaders") is None and summary.get("textures") is None:
+                    self.reshade_status_text.set(
+                        "ReShade requested, but no FX library was found. Use Browse FX library... "
+                        "to point it at your shaders.")
+                else:
+                    self.reshade_status_text.set("ReShade requested. Dolly's shader library and editable presets are ready in its menu.")
             self._submit("Enabling ReShade", configure, complete)
         if automatic:
             try:

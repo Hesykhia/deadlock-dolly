@@ -73,6 +73,7 @@ def build_settings(app):
         browse_game=app._browse_game,
         browse_replay_folder=app._browse_replay_folder,
         browse_reshade=app._browse_reshade,
+        browse_reshade_library=app._browse_reshade_library,
         check_updates=app._check_updates,
         configure_reshade=app._configure_reshade,
         diagnostics=app._diagnostics,
@@ -95,6 +96,7 @@ def build_settings(app):
     app.graphics_profiles = view.graphics_profiles
     app.keybinds_tab = view.keybinds_tab
     app.reshade_browse_button = view.reshade_browse_button
+    app.reshade_library_button = view.reshade_library_button
     app.reshade_card = view.reshade_card
     app.reshade_configure_button = view.reshade_configure_button
     app.reshade_disable_button = view.reshade_disable_button

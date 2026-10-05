@@ -49,6 +49,41 @@ def bundled_preset() -> Path | None:
     return None
 
 
+def _has_effects(folder: Path) -> bool:
+    try:
+        return folder.is_dir() and next(folder.glob("*.fx"), None) is not None
+    except OSError:
+        return False
+
+
+def library_paths(root) -> tuple[Path | None, Path | None]:
+    """Return (Shaders, Textures) inside a user-chosen FX library folder.
+
+    The folder may be the shader folder itself or its parent. Textures are
+    looked up beside the shaders, where the bundled and common ReShade packs
+    keep them.
+    """
+    base = Path(str(root)).expanduser()
+    shaders = base if _has_effects(base) else base / "Shaders"
+    shaders = shaders if _has_effects(shaders) else None
+    for textures in (base / "Textures", base.parent / "Textures"):
+        if textures.is_dir():
+            return shaders, textures
+    return shaders, None
+
+
+def library_issue(selected) -> str | None:
+    """Explain why a chosen ReShade FX library folder cannot be used, or None."""
+    candidate = Path(str(selected)).expanduser()
+    if not candidate.is_dir():
+        return (f"ReShade FX library folder missing: {candidate}. Choose the folder that "
+                "contains the .fx shaders.")
+    if not _has_effects(candidate) and not _has_effects(candidate / "Shaders"):
+        return (f"No .fx shader files found in {candidate}. Choose the folder that contains "
+                "the ReShade effects, for example the bundled third_party\\reshade_shaders\\Shaders.")
+    return None
+
+
 def _normalize_path(value: str) -> str:
     text = value.strip().strip('"').strip()
     return ntpath.normcase(ntpath.normpath(text))
@@ -154,17 +189,27 @@ def _write_config(path: Path, data: bytes) -> None:
         Path(name).unlink(missing_ok=True)
 
 
-def prepare_config(config_path) -> dict:
-    """Merge bundled shader paths and preset into a ReShade config file.
+def prepare_config(config_path, library_root=None) -> dict:
+    """Merge bundled and chosen shader paths and preset into a ReShade config.
 
     The existing file is preserved; only the ``[GENERAL]`` search paths are
-    extended and ``PresetPath`` is filled in when it is still empty. Returns a
-    summary and never raises when the bundled library is absent.
+    extended and ``PresetPath`` is filled in when it is still empty. A chosen
+    ``library_root`` lets the user point ReShade at their own effect library
+    when the bundled one is missing. Returns a summary and never raises when
+    neither library is present.
     """
     shaders, textures = bundled_shader_paths()
     preset = bundled_preset()
-    summary = {"shaders": shaders, "textures": textures, "preset": preset, "changed": False}
-    if shaders is None and textures is None and preset is None:
+    library_shaders = library_textures = None
+    if library_root is not None:
+        library_shaders, library_textures = library_paths(library_root)
+    shader_paths = [path for path in (shaders, library_shaders) if path is not None]
+    texture_paths = [path for path in (textures, library_textures) if path is not None]
+    summary = {"shaders": shaders, "textures": textures, "preset": preset,
+               "library": Path(str(library_root)).expanduser() if library_root is not None else None,
+               "library_shaders": library_shaders, "library_textures": library_textures,
+               "changed": False}
+    if not shader_paths and not texture_paths and preset is None:
         return summary
 
     path = Path(config_path)
@@ -200,10 +245,10 @@ def prepare_config(config_path) -> dict:
         return None, ""
 
     desired: list[tuple[str, list[Path]]] = []
-    if shaders is not None:
-        desired.append(("EffectSearchPaths", [shaders]))
-    if textures is not None:
-        desired.append(("TextureSearchPaths", [textures]))
+    if shader_paths:
+        desired.append(("EffectSearchPaths", shader_paths))
+    if texture_paths:
+        desired.append(("TextureSearchPaths", texture_paths))
     for name, additions in desired:
         index, existing = find_field(name)
         value = merge_path_list(existing, additions)
