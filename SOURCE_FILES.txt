@@ -77,7 +77,6 @@ dolly/_runtime_generated.py
 dolly/native_effects.py
 dolly/native_path.py
 dolly/navigation.py
-dolly/navigation_input.py
 dolly/particles.py
 dolly/pacing.py
 dolly/path.py
@@ -249,12 +248,10 @@ tests/test_native_flight_controller.py
 tests/test_native_packaging.py
 tests/test_native_path.py
 tests/test_navigation.py
-tests/test_navigation_input.py
 tests/test_pacing.py
 tests/test_particles.py
 tests/test_path.py
 tests/test_paused_camera.py
-tests/test_paused_gui.py
 tests/test_paused_refresh.py
 tests/test_playback.py
 tests/test_playback_transitions.py

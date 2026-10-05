@@ -37,7 +37,6 @@ from dolly.launcher import discover_game, recover_pending, validate_game
 from dolly.launcher import discover_game, recover_pending
 from dolly.memory_watch import PausedMemoryWatch
 from dolly.navigation import CameraMotion
-from dolly.navigation_input import CameraInput
 from dolly.path import (AttachKey, CONFETTI_SPAWN_HEIGHT_DEFAULT, CURVE_CHANNELS,
                         CvarTrack, Keyframe, Project, TrackKey, parse_cvar_value,
                         format_cvar_value)
@@ -401,11 +400,6 @@ class DollyApp:
         self.capture_hotkey_checkboxes = []
         self.capture_generation = 0
         self.binding_dialog = None
-        self.paused_dialog = None
-        self.paused_input = None
-        self.paused_cancel = None
-        self.paused_requested = False
-        self.paused_run_options = (240.0, 60.0)
         self.capture_hint = tk.StringVar(value="Move the replay free camera, then capture each view. Capture pauses a playing replay; the views form a smooth path.")
         self.show_log = tk.BooleanVar(value=False)
         self.playing = False
@@ -1756,7 +1750,6 @@ class DollyApp:
             cancel = threading.Event()
             protocol = "vconsole" if self.protocol.get() == "VConsole" else "netcon"
             native = self.camera_driver.get() == "Native (experimental)"
-            self._close_paused_camera(stop=False)
             self._disable_external_input()
             self.attach_fields = None
             def start():
@@ -1816,7 +1809,6 @@ class DollyApp:
         if self.capture_hotkey is not None:
             self.capture_hotkey.stop()
             self.capture_hotkey = None
-        self._close_paused_camera(stop=False)
 
     def _tree(self, parent, columns, labels, widths=None, height=6):
         """Only data lists scroll; editor panels retain their available width."""
@@ -2125,7 +2117,6 @@ class DollyApp:
             self._refresh_tracks()
             self._refresh_fixed()
             self.status_text.set(label + " applied at the paused moment.")
-        self._close_paused_camera(stop=False)
         self._submit("Applying Citadel DOF", lambda: self.controller.apply(candidate, at), complete)
 
     def _toggle_citadel_dof(self):
@@ -2154,320 +2145,6 @@ class DollyApp:
         self.citadel_focus_text.set(f"Focus distance · {focus:.0f} in")
         self._commit_citadel_dof(2, focus, "Focus distance")
 
-    def _open_paused_camera(self):
-        if getattr(self, "native_editor_active", False):
-            def open_panel():
-                self.controller.enter_native_flight()
-                bridge = self.controller._native_bridge()
-                if bridge is None:
-                    raise RuntimeError("The native editor disconnected. Reconnect the replay to open its controls.")
-                bridge.configure_editor(owner="panel")
-            def opened(_result):
-                editor_session.configure(self)
-                self.status_text.set("Paused camera controls are open inside Deadlock. Return to the game to frame your view.")
-            self._submit("Opening in-game camera controls", open_panel, opened)
-            return
-        if self.paused_dialog is not None and self.paused_dialog.winfo_exists():
-            self.paused_dialog.lift()
-            return
-        dialog = tk.Toplevel(self.root)
-        self.paused_dialog = dialog
-        self.paused_input = CameraInput(self.controller.game_pid)
-        self.paused_requested = False
-        self.paused_cancel = None
-        self.paused_game_enabled = tk.BooleanVar(value=False)
-        self.paused_move_speed = tk.StringVar(value="240")
-        self.paused_turn_speed = tk.StringVar(value="60")
-        self.paused_status = tk.StringVar(value="Start controls to hold the current replay moment.")
-        self.paused_view_text = tk.StringVar(value=self.selected_text.get())
-        dialog.title("Paused camera — Deadlock Dolly")
-        dialog.configure(bg=BG)
-        dialog.geometry(self._window_size(610, 660))
-        dialog.minsize(*self._window_dimensions(590, 650))
-        dialog.transient(self.root)
-        # Deliberately nonmodal: Deadlock and the capture shortcut remain usable.
-        dialog.protocol("WM_DELETE_WINDOW", self._close_paused_camera)
-        body = ttk.Frame(dialog, padding=18)
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(0, weight=1)
-        ttk.Label(body, text="FRAME A PAUSED MOMENT", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(body, text="Move the free camera or switch saved views while paused.\n"
-                  "Switching keeps this replay moment; camera arrival times are ignored.",
-                  style="Muted.TLabel", wraplength=round(550 * self.ui_scale), justify="left").grid(row=1, column=0, sticky="w", pady=(7, 13))
-        saved = ttk.Frame(body, style="Card.TFrame", padding=12)
-        saved.grid(row=2, column=0, sticky="ew")
-        ttk.Label(saved, textvariable=self.paused_view_text, style="CardTitle.TLabel").pack(anchor="w", pady=(0, 8))
-        row = ttk.Frame(saved, style="Card.TFrame")
-        row.pack(fill="x")
-        self.paused_switch_buttons = []
-        for label, delta in (("← Previous", -1), ("Next →", 1), ("Apply selected", 0)):
-            button = ttk.Button(row, text=label, command=lambda step=delta: self._switch_paused_camera(step))
-            button.pack(side="left", padx=(0, 7))
-            self.paused_switch_buttons.append(button)
-        controls = ttk.Frame(body)
-        controls.grid(row=3, column=0, sticky="ew", pady=(14, 8))
-        self.paused_start_button = ttk.Button(controls, text="Start camera controls", style="Primary.TButton", command=self._start_paused_controls)
-        self.paused_start_button.pack(side="left", padx=(0, 8))
-        self.paused_stop_button = ttk.Button(controls, text="Stop controls", command=self._stop_paused_controls)
-        self.paused_stop_button.pack(side="left")
-        self.paused_capture_button = ttk.Button(controls, text="Capture view", command=self.capture_here)
-        self.paused_capture_button.pack(side="right")
-        settings = ttk.Frame(body)
-        settings.grid(row=4, column=0, sticky="ew", pady=(0, 9))
-        ttk.Label(settings, text="Move units / s", style="Muted.TLabel").pack(side="left", padx=(0, 6))
-        self.paused_move_entry = ttk.Entry(settings, textvariable=self.paused_move_speed, width=6)
-        self.paused_move_entry.pack(side="left", padx=(0, 15))
-        ttk.Label(settings, text="Turn degrees / s", style="Muted.TLabel").pack(side="left", padx=(0, 6))
-        self.paused_turn_entry = ttk.Entry(settings, textvariable=self.paused_turn_speed, width=6)
-        self.paused_turn_entry.pack(side="left")
-        ttk.Checkbutton(body, text="Enable keyboard flight while Deadlock is focused", variable=self.paused_game_enabled,
-                        command=self._toggle_paused_game_input).grid(row=5, column=0, sticky="w", pady=(0, 10))
-        self.paused_pad = pad = ttk.Frame(body, style="Card.TFrame", padding=12, takefocus=True)
-        pad.grid(row=6, column=0, sticky="ew")
-        pad.columnconfigure(0, weight=1)
-        pad.columnconfigure(1, weight=1)
-        ttk.Label(pad, text="HOLD TO MOVE", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
-        ttk.Label(pad, text="HOLD TO LOOK", style="CardMuted.TLabel").grid(row=0, column=1, sticky="w", padx=(14, 0), pady=(0, 8))
-        self.paused_hold_buttons = []
-        for column, keys in enumerate(((("Forward · W", "w"), ("Back · S", "s"), ("Left · A", "a"),
-                                         ("Right · D", "d"), ("Up · Space", "space"), ("Down · Ctrl", "ctrl")),
-                                       (("Look up · ↑", "up"), ("Look down · ↓", "down"),
-                                        ("Look left · ←", "left"), ("Look right · →", "right")))):
-            group = ttk.Frame(pad, style="Card.TFrame")
-            group.grid(row=1, column=column, sticky="new", padx=(0 if column == 0 else 14, 0))
-            for slot in range(2):
-                group.columnconfigure(slot, weight=1, uniform="move_buttons")
-            for index, (label, key) in enumerate(keys):
-                button = ttk.Button(group, text=label, state="disabled", takefocus=False)
-                button.grid(row=index // 2, column=index % 2, sticky="ew", padx=(0, 5 if index % 2 == 0 else 0), pady=(0, 6))
-                button.bind("<ButtonPress-1>", lambda event, name=key: self._paused_button_press(event, name))
-                button.bind("<ButtonRelease-1>", self._paused_buttons_release)
-                self.paused_hold_buttons.append(button)
-        self.paused_focus_button = ttk.Button(pad, text="Focus keyboard controls", style="Quiet.TButton", command=pad.focus_set)
-        self.paused_focus_button.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        pad.bind("<FocusIn>", lambda _event: self.paused_input.set_gui_focus(True) if self.paused_input else None)
-        pad.bind("<FocusOut>", lambda _event: self._paused_input_blur())
-        pad.bind("<KeyPress>", lambda event: self._paused_key(event, True))
-        pad.bind("<KeyRelease>", lambda event: self._paused_key(event, False))
-        dialog.bind("<ButtonRelease-1>", self._paused_buttons_release, add="+")
-        dialog.bind("<Unmap>", lambda event: self._paused_input_blur() if event.widget is dialog else None)
-        ttk.Label(body, text="WASD move · Space / Ctrl height · Arrows look · Shift 4× speed\n"
-                  "Escape stops controls. Use Timed shot to capture several views here.",
-                  style="Muted.TLabel", wraplength=round(550 * self.ui_scale), justify="left").grid(row=7, column=0, sticky="w", pady=(10, 8))
-        ttk.Label(body, textvariable=self.paused_status, style="Accent.TLabel", wraplength=round(550 * self.ui_scale)).grid(row=8, column=0, sticky="w")
-        ttk.Label(body, text="Stop keeps this view paused. Main Stop / restore also resets camera variables.",
-                  style="Muted.TLabel", wraplength=round(550 * self.ui_scale)).grid(row=9, column=0, sticky="w", pady=(7, 0))
-        self._poll_paused_camera(self.controller.status())
-
-    def _paused_input_blur(self):
-        helper = getattr(self, "paused_input", None)
-        if helper is not None:
-            helper.set_gui_focus(False)
-            helper.clear()
-        for button in getattr(self, "paused_hold_buttons", ()):
-            try:
-                button.state(["!pressed"])
-            except tk.TclError:
-                pass
-
-    def _paused_button_press(self, event, key):
-        if not self.paused_requested or self.busy:
-            return "break"
-        self.paused_pad.focus_set()
-        self.paused_input.set_gui_focus(True)
-        self.paused_input.press(key)
-        event.widget.state(["pressed"])
-        return "break"
-
-    def _paused_buttons_release(self, _event=None):
-        helper = getattr(self, "paused_input", None)
-        if helper is not None:
-            helper.clear()
-        for button in getattr(self, "paused_hold_buttons", ()):
-            try:
-                button.state(["!pressed"])
-            except tk.TclError:
-                pass
-        return "break"
-
-    def _paused_key(self, event, pressed):
-        helper = getattr(self, "paused_input", None)
-        if helper is None:
-            return None
-        # These bindings belong only to the explicitly focused control pad.
-        # Typing speeds, names, and project values never moves the camera.
-        key = event.keysym.lower()
-        if key not in ("w", "a", "s", "d", "space", "ctrl", "shift", "left", "right", "up", "down", "escape",
-                       "control_l", "control_r", "shift_l", "shift_r", "alt_l", "alt_r", "super_l", "super_r"):
-            return None
-        # Releases must still clear a held key when a console operation starts.
-        if not pressed:
-            helper.release(key)
-        elif key == "escape" and self.paused_requested:
-            self._stop_paused_controls()
-        elif not self.paused_requested or self.busy:
-            helper.clear()
-            return None
-        else:
-            helper.press(key)
-        return "break"
-
-    def _toggle_paused_game_input(self):
-        try:
-            self.paused_input.set_game_enabled(self.paused_game_enabled.get())
-        except (OSError, RuntimeError) as exc:
-            self.paused_game_enabled.set(False)
-            self._error("In-game camera controls", exc)
-
-    def _paused_options(self):
-        move = _finite(self.paused_move_speed.get(), "Move speed")
-        turn = _finite(self.paused_turn_speed.get(), "Turn speed")
-        if not 0 < move <= 10000 or not 0 < turn <= 720:
-            raise ValueError("Move speed must be greater than 0 and at most 10,000; turn speed must be greater than 0 and at most 720.")
-        return move, turn
-
-    def _paused_source(self):
-        helper = self.paused_input
-        previous = getattr(self, "paused_cancel", None)
-        if previous is not None:
-            previous.set()
-        cancel = threading.Event()
-        self.paused_cancel = cancel
-        def sample():
-            return CameraMotion(stop=True) if cancel.is_set() else helper.sample()
-        return sample, cancel
-
-    def _start_paused_controls(self):
-        if getattr(self, "native_editor_active", False):
-            self._submit("Starting native paused flight", self.controller.enter_native_flight)
-            return
-        def operation():
-            move, turn = self._paused_options()
-            helper = self.paused_input
-            helper.clear()
-            source, cancel = self._paused_source()
-            def start():
-                if cancel.is_set():
-                    return
-                try:
-                    self.controller.begin_paused_camera(cancelled=cancel.is_set)
-                except Exception:
-                    if cancel.is_set():
-                        return
-                    raise
-                if not cancel.is_set():
-                    self.controller.start_paused_flight(source, move_speed=move, turn_speed=turn)
-            def started(_result):
-                if self.paused_input is helper and not cancel.is_set():
-                    self.paused_pad.focus_set()
-            if self._submit("Starting paused camera controls", start, started):
-                self.paused_run_options = (move, turn)
-                self.paused_requested = True
-        self._guard("Paused camera controls", operation)
-
-    def _resume_paused_controls(self):
-        if not self.paused_requested or self.paused_input is None:
-            return
-        move, turn = self.paused_run_options
-        self.paused_input.clear()
-        source, cancel = self._paused_source()
-        self._submit("Resuming paused camera controls", lambda: None if cancel.is_set() else self.controller.start_paused_flight(
-            source, move_speed=move, turn_speed=turn))
-
-    def _stop_paused_controls(self):
-        self.paused_requested = False
-        cancel = getattr(self, "paused_cancel", None)
-        if cancel is not None:
-            cancel.set()
-        self._paused_input_blur()
-        if not self.busy:
-            self._submit("Stopping paused camera controls", self.controller.stop_paused_flight)
-
-    def _switch_paused_camera(self, step=0):
-        def operation():
-            project = self._snapshot()
-            index = self._selection_index(self.camera_tree)
-            if index is None:
-                index = len(project.keyframes) - 1 if step < 0 else 0
-            elif step:
-                index = (index + step) % len(project.keyframes)
-            key = project.keyframes[index]
-            helper = self.paused_input
-            helper.clear()
-            resume = self.paused_requested
-            move, turn = self.paused_run_options
-            source, cancel = self._paused_source()
-            def switch():
-                if cancel.is_set():
-                    return
-                try:
-                    frame = self.controller.select_paused_camera(project, key.time, cancelled=cancel.is_set)
-                except Exception:
-                    if cancel.is_set():
-                        return
-                    raise
-                if resume and not cancel.is_set():
-                    self.controller.start_paused_flight(source, move_speed=move, turn_speed=turn)
-                return frame
-            def switched(_result):
-                if self.paused_input is not helper or cancel.is_set():
-                    return
-                self.camera_tree.selection_set(str(index))
-                self.camera_tree.see(str(index))
-                self._select_key()
-                self.paused_view_text.set(f"Camera {index + 1:02d} · current replay moment")
-            self._submit("Switching camera at the paused moment", switch, switched)
-        self._guard("Switch paused camera", operation)
-
-    def _poll_paused_camera(self, status):
-        if getattr(self, "paused_dialog", None) is None:
-            return
-        active = bool(status.get("paused_flight"))
-        if not self.busy and not active:
-            self.paused_requested = False
-            self._paused_input_blur()
-        tick = status.get("paused_tick")
-        if active:
-            text = "Camera controls active"
-        elif status.get("paused_camera"):
-            text = "Camera held · controls stopped"
-        else:
-            text = "Start controls to hold the current replay moment."
-        if tick is not None:
-            text += f" · replay tick {int(tick):,}"
-        self.paused_status.set(text)
-        available = not self.busy and not self.playing and bool(status.get("connected"))
-        for button in self.paused_switch_buttons:
-            button.configure(state="normal" if available and self.project.keyframes else "disabled")
-        self.paused_start_button.configure(state="normal" if available and not active else "disabled")
-        self.paused_stop_button.configure(state="normal" if self.paused_requested or active else "disabled")
-        self.paused_capture_button.configure(state="normal" if available else "disabled")
-        for button in self.paused_hold_buttons:
-            button.configure(state="normal" if available and active else "disabled")
-        self.paused_focus_button.configure(state="normal" if available and active else "disabled")
-        for entry in (self.paused_move_entry, self.paused_turn_entry):
-            entry.configure(state="disabled" if self.busy or active else "normal")
-        if not self.paused_requested and not active:
-            self.paused_view_text.set(self.selected_text.get())
-
-    def _close_paused_camera(self, stop=True):
-        helper = getattr(self, "paused_input", None)
-        if helper is None:
-            return
-        self.paused_requested = False
-        cancel = getattr(self, "paused_cancel", None)
-        if cancel is not None:
-            cancel.set()
-        helper.close()
-        self.paused_input = None
-        dialog = self.paused_dialog
-        self.paused_dialog = None
-        if dialog is not None:
-            dialog.destroy()
-        self.paused_hold_buttons = []
-        if stop and not self.busy and not self.closed:
-            self._submit("Stopping paused camera controls", self.controller.stop_paused_flight)
-
     def _session_operation(self, label, function):
         if self.busy and function in (self.controller.stop, self.controller.pause):
             if self.controller.cancel_replay_recovery():
@@ -2476,7 +2153,6 @@ class DollyApp:
         if self.busy:
             self.status_text.set("Please wait for the current operation to finish.")
             return False
-        self._close_paused_camera(stop=False)
         if function == self.controller.stop:
             function = lambda: self.controller.stop(preserve_speed=True)
             return self._submit(label, function, self._restore_completed)
@@ -2876,7 +2552,6 @@ class DollyApp:
         try:
             status = self.controller.status()
             self.playing = bool(status.get("playing"))
-            self._poll_paused_camera(status)
             connected = bool(status.get("connected"))
             self._poll_connected = connected
             stage = str(status.get("startup_stage", "not_launched"))
@@ -3125,7 +2800,6 @@ class DollyApp:
         except (OSError, ValueError, RuntimeError) as exc:
             self._error("Graphics profiles", exc)
             return
-        self._close_paused_camera(stop=False)
         self._submit("Launching hideout", lambda: self.controller.launch(game, demo, protocol=protocol, native=native,
                      **graphics_options), self._session_result)
 
@@ -3142,7 +2816,6 @@ class DollyApp:
                      lambda result: self._show_result(result, "Unlocker initialized. Click Load replay, then wait for the replay to finish loading."))
 
     def _load_replay(self):
-        self._close_paused_camera(stop=False)
         self._submit("Loading selected replay", self.controller.load_replay,
                      lambda result: self._show_result(result, "Replay requested. Wait for the replay to finish loading, then click Check camera support."))
 
@@ -3884,10 +3557,6 @@ class DollyApp:
         def operation():
             self._sync_options()
             original = self.project
-            resume_paused = bool(getattr(self, "paused_requested", False))
-            paused_session = getattr(self, "paused_input", None)
-            if paused_session is not None:
-                paused_session.clear()
             candidate = copy.deepcopy(original)
             replay_timing = self.capture_mode.get() == "Replay timing"
             selected = self._selection_index(self.camera_tree) if action == "replace" else None
@@ -3944,8 +3613,6 @@ class DollyApp:
                 if action == "start" and tick is None:
                     self.status_text.set("Starting view captured, but the replay start tick is unavailable. "
                                          "Export diagnostics before normal playback, or select Frozen preview for a paused-scene path.")
-                if resume_paused and self.paused_requested and self.paused_input is paused_session:
-                    self._resume_paused_controls()
             self._submit("Capturing free-camera view", capture, captured)
         self._guard("Capture view", operation)
 
@@ -4010,14 +3677,12 @@ class DollyApp:
     def _apply_frame(self):
         def operation():
             project, time = self._snapshot(), self._current_time()
-            self._close_paused_camera(stop=False)
             self._submit("Previewing frame", lambda: self.controller.apply(project, time))
         self._guard("Preview frame", operation)
 
     def _seek(self):
         def operation():
             project, time = self._snapshot(), self._current_time()
-            self._close_paused_camera(stop=False)
             self._submit("Seeking replay", lambda: self.controller.seek(project, time))
         self._guard("Seek replay", operation)
 
@@ -4059,7 +3724,6 @@ class DollyApp:
                 raise ValueError("Choose a playback update rate of 30, 60, or 120.")
             smoothing = self.smoothing.get().lower()
             smoothing_window(smoothing)
-            self._close_paused_camera(stop=False)
             submitted = self._submit("Starting shot playback", lambda: self.controller.play(
                 project, time=0.0, speed=speed, rate=rate, frozen=frozen, hide_hud=hide_hud,
                 smoothing=smoothing))
@@ -4484,7 +4148,6 @@ class DollyApp:
     def new(self):
         if not self._allow_discard():
             return
-        self._close_paused_camera()
         self.project = Project(name="Untitled shot", keyframes=[], tracks=[],
                                interpolation=self.interpolation.get())
         self.shot_history.reset(self.project)
@@ -4505,7 +4168,6 @@ class DollyApp:
             # Project.load enforces the file-size limit before this migration notice.
             legacy_project = json.loads(Path(path).read_text(encoding="utf-8")).get("version") == 1
             project.validate()
-            self._close_paused_camera()
             self.project = project
             self.shot_history.reset(self.project)
             self._native_camera_page = 0
@@ -4588,12 +4250,10 @@ class DollyApp:
         if not self._allow_discard():
             return
         editor_session.close(self)
-        self._close_paused_camera(stop=False)
         self._submit("Closing replay connection", self.controller.close, lambda _result: self._destroy())
 
     def _destroy(self):
         editor_session.close(self)
-        self._close_paused_camera(stop=False)
         self.capture_generation += 1
         self.hotkey_enabled.set(False)
         if self.capture_hotkey is not None:

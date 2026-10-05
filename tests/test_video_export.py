@@ -1442,7 +1442,7 @@ class MediaPollIsolationTests(unittest.TestCase):
         for name in ("play_replay_button", "cancel_startup_button", "speed_combo", "rate_combo", "camera_driver_combo",
                      "smoothing_combo", "smoothing_row", "full_editor_switch", "aspect_curve", "launch_button", "connect_button", "initialize_button",
                      "load_replay_button", "probe_button", "disconnect_button", "capture_hotkey_checkbox", "root",
-                     "_poll_paused_camera", "_log", "_error", "_check_capture_listener", "_capture_binding_label"):
+                     "_log", "_error", "_check_capture_listener", "_capture_binding_label"):
             setattr(app, name, Mock())
         self.editor_poll = patch("dolly.gui.editor_session.poll").start()
         self.addCleanup(patch.stopall)

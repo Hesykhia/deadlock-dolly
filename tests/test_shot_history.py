@@ -136,7 +136,6 @@ class HistoryEditorTests(unittest.TestCase):
 
     def test_desktop_stop_keeps_selected_playback_speed(self):
         app = self.app()
-        app._close_paused_camera = Mock()
         app._submit = Mock(return_value=True)
         self.assertTrue(app._session_operation('Stopping', app.controller.stop))
         app._submit.call_args.args[1]()

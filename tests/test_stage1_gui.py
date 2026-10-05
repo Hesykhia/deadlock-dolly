@@ -69,7 +69,6 @@ class Stage1GuiTests(unittest.TestCase):
         app.startup_cancel = None
         app.cancel_startup_button = Mock()
         app._disable_external_input = Mock()
-        app._close_paused_camera = Mock()
         app.controller.start_editing = Mock(return_value={'startup_stage': 'editing_ready'})
         app._editing_started = Mock()
         app._refresh_bindings = Mock()
@@ -165,19 +164,6 @@ class Stage1GuiTests(unittest.TestCase):
         app._toggle_capture_hotkey()
         self.assertFalse(app.hotkey_enabled.get())
         self.assertIn('Unbound', app.hotkey_label.get())
-
-    def test_native_paused_controls_do_not_start_external_keyboard_polling(self):
-        h, app = self.harness()
-        app.native_editor_active = True
-        app.controller.enter_native_flight = Mock()
-        bridge = Mock()
-        app.controller._native_bridge = Mock(return_value=bridge)
-        with patch('dolly.gui.CameraInput') as external, patch('dolly.gui.editor_session.configure'):
-            app._open_paused_camera()
-            h.finish()
-        external.assert_not_called()
-        app.controller.enter_native_flight.assert_called_once()
-        bridge.configure_editor.assert_called_once_with(owner='panel')
 
     def test_binding_recorder_preserves_f7_and_side_mouse_buttons(self):
         self.assertEqual(_binding_event_key(SimpleNamespace(keysym='F7', num='??')), 'F7')

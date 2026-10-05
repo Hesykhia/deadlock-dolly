@@ -422,17 +422,15 @@ class GuiCaptureTests(unittest.TestCase):
         self.assertEqual((settings["speed"], settings["rate"]), (.1, 120))
         self.assertEqual(self.harness.errors, [])
 
-    def test_invalid_smoothing_keeps_paused_controls_and_does_not_queue_playback(self):
+    def test_invalid_smoothing_does_not_queue_playback(self):
         self.harness.capture()
         self.app._snapshot = lambda: self.app.project
         self.app.controller.play = Mock()
-        self.app._close_paused_camera = Mock()
         self.app._set_time.reset_mock()
         self.app.smoothing.set("Unsupported")
         self.app._play()
         self.assertIsNone(self.harness.pending)
         self.app.controller.play.assert_not_called()
-        self.app._close_paused_camera.assert_not_called()
         self.app._set_time.assert_not_called()
         self.assertEqual(len(self.harness.errors), 1)
 
