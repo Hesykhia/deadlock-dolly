@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.18 alpha - ReShade effect library setup
+
+**0.6.18-alpha**
+
+- **ReShade finds its shaders automatically.** *Before:* ReShade's menu could report no effect files and stay pointed at the game folder, so Dolly's bundled effects never loaded. *After:* Dolly registers the bundled shaders and any shader folder kept next to the selected runtime, so they load on the next ReShade start.
+- **No more silent failure.** *Before:* Dolly could still say the shader library was ready while ReShade found nothing. *After:* it reports when no library was found, and **Browse FX library...** points at any other folder.
+
+Full details: [0.6.18 release notes](RELEASE_NOTES_0.6.18-alpha.md).
+
 ## 0.6.17 alpha - In-game camera editing, framing guide and spline motion
 
 **0.6.17-alpha**
