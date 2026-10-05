@@ -1,5 +1,17 @@
 # Changes
 
+## 0.6.20 alpha - Smoother desktop and in-game UI
+
+**0.6.20-alpha**
+
+- **Smoother desktop editor.** *Before:* dropdowns, sliders and scrolling could feel sticky even while idle. *After:* the interface stays quiet when nothing is happening and redraws only when something changes.
+- **Smooth page scrolling.** *Before:* precision touchpads and high-resolution wheels dropped scroll steps. *After:* scrolling accumulates those small movements into consistent motion.
+- **Zoom and pan the in-game Shot timeline.** *Before:* a timeline with many cameras was crowded and hard to work with. *After:* the mouse wheel zooms around the pointer, right-drag pans, and Alt+drag still retimes a camera tick.
+- **No more panel flicker.** *Before:* moving the mouse quickly over the in-game panel could make it blink off and back. *After:* the overlay no longer skips a frame during fast mouse movement.
+- **Paused camera retired.** *Before:* the desktop Paused camera button duplicated features the game now provides. *After:* it is gone from the Camera tab and File menu.
+
+Full details: [0.6.20 release notes](RELEASE_NOTES_0.6.20-alpha.md).
+
 ## 0.6.19 alpha - Timeline scrubbing and the smooth default
 
 **0.6.19-alpha**
