@@ -27,8 +27,10 @@ public:
         panel_scale = 1.0f;
     }
     bool guides_visible(const EditorSnapshot& state) noexcept;
+    bool framing_grid_visible(const EditorSnapshot& state) noexcept;
     void draw_path_guides(const EditorSnapshot& state,
                           const std::shared_ptr<const VisualizationPath>& path);
+    void draw_framing_grid(const EditorSnapshot& state);
     void draw_panel(const EditorSnapshot& state);
     void draw_bone_picker(const EditorSnapshot& state, const PickerPortrait& portrait);
     void reset_guides() noexcept { guide_geometry.line_count = guide_geometry.label_count = 0; }

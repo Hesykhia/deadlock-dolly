@@ -60,6 +60,24 @@ class EditorSessionTests(unittest.TestCase):
             self.app._submit.call_args.args[1]()
         self.assertFalse(self.app.preview_attach)
 
+    def test_framing_grid_toggle_saves_and_publishes(self):
+        from unittest.mock import patch
+        self.app.app_settings = AppSettings()
+        with patch('dolly.editor_dispatch.save_settings') as save:
+            session.dispatch(self.app, {'action': 'framing_grid', 'value': 0}, self.bridge)
+            label, operation, complete = self.app._submit.call_args.args
+            self.assertIn("framing", label.lower())
+            complete(operation())
+            save.assert_called_once()
+            self.assertTrue(self.app.app_settings.framing_grid_enabled)
+            self.assertIn("on", self.app.status_text.set.call_args.args[0])
+            self.app._submit.reset_mock()
+            session.dispatch(self.app, {'action': 'framing_grid', 'value': 0}, self.bridge)
+            _, operation, complete = self.app._submit.call_args.args
+            complete(operation())
+            self.assertFalse(self.app.app_settings.framing_grid_enabled)
+            self.assertIn("off", self.app.status_text.set.call_args.args[0])
+
     def test_editing_stop_preserves_speed_through_the_native_panel(self):
         self.assertTrue(session.dispatch(self.app, {'action': 'stop', 'value': 0}, self.bridge))
         self.app._submit.call_args.args[1]()

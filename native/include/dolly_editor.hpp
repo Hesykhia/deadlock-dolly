@@ -123,7 +123,8 @@ enum class EditorAction : std::uint32_t {
     RedoShot,
     CameraPage,
     SetCameraTime,
-    SetCameraRoll
+    SetCameraRoll,
+    FramingGrid
 };
 static_assert(static_cast<std::uint32_t>(EditorAction::ResetCameraPath) == 77,
               "Stable camera reset action ID");
@@ -302,9 +303,23 @@ static_assert(kEditorCameraListOffset + sizeof(EditorCameraList) <= 2 * 1024 * 1
               "Camera list fits existing shared mapping");
 static_assert(static_cast<std::uint32_t>(EditorAction::SelectCamera) == 89,
               "Stable camera list action ID");
+// Optional framing-guide block after the camera list. The reserved field
+// carries the bindable action that is not part of the 26-entry wire table:
+// vk in the low 16 bits, modifier bits in the high 16 bits (0 = unbound).
+constexpr std::size_t kEditorFramingGridOffset = 2 * 1024 * 1024 + 24424;
+struct EditorFramingGridConfig {
+    char magic[8];
+    std::uint32_t sequence, abi, flags, reserved;
+};
+static_assert(sizeof(EditorFramingGridConfig) == 24, "Framing guide config layout");
+static_assert(kEditorFramingGridOffset + sizeof(EditorFramingGridConfig) <=
+                  2 * 1024 * 1024 + 24576,
+              "Framing guide config fits the mapping");
 static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraTime) == 95 &&
                   static_cast<std::uint32_t>(EditorAction::SetCameraRoll) == 96,
               "Stable inline camera edit action IDs");
+static_assert(static_cast<std::uint32_t>(EditorAction::FramingGrid) == 97,
+              "Stable framing guide action ID");
 inline bool valid_editor_camera_list(const EditorCameraList& list) noexcept {
     if (std::memcmp(list.magic, "DLYCAMS1", 8) || list.abi != 1 || !list.revision ||
         list.reserved || (list.flags & ~3u) || list.count > kEditorCameraListCount ||
@@ -429,6 +444,8 @@ EditorBinding editor_binding_snapshot(EditorAction action) noexcept;
 // Published attach-camera schema offsets; false while no valid block arrived.
 bool editor_attach_config(EditorAttachConfig& out) noexcept;
 bool editor_follow_config(EditorFollowConfig& out) noexcept;
+// Published framing-guide switch; false while no valid block has arrived.
+bool editor_framing_grid_enabled() noexcept;
 bool editor_camera_list(EditorCameraList& out) noexcept;
 bool editor_bones_snapshot(EditorBones& out) noexcept;
 // Latest native player roster; false while no valid block arrived.

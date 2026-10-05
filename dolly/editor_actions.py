@@ -18,6 +18,11 @@ ACTION_ORDER = (
     "move_fast", "move_slow", "look_left", "look_right", "look_up", "look_down",
     "roll_left", "roll_right",
 )
+# Actions that are bindable but are not part of the 26-entry wire action table.
+# Their bindings travel in dedicated trailing config fields, so the stable
+# ACTION_ORDER/ID ABI and every extra action ID stay untouched.
+BINDABLE_EXTRA = ("framing_grid",)
+BINDABLE_ORDER = ACTION_ORDER + BINDABLE_EXTRA
 ACTION_IDS = {name: index for index, name in enumerate(ACTION_ORDER)}
 ACTION_LABELS = dict(zip(ACTION_ORDER, (
     "Capture camera", "Replace selected camera", "Pause / resume replay", "Play camera path",
@@ -26,6 +31,7 @@ ACTION_LABELS = dict(zip(ACTION_ORDER, (
     "Move backward", "Move left", "Move right", "Move up", "Move down", "Move faster",
     "Move slowly", "Look left", "Look right", "Look up", "Look down", "Roll left", "Roll right",
 )))
+ACTION_LABELS["framing_grid"] = "Toggle framing guide"
 MOVEMENT_ACTIONS = frozenset(ACTION_ORDER[12:])
 MODIFIER_KEYS = {"Ctrl": 0x11, "Alt": 0x12, "Shift": 0x10}
 _EXTRA_KEYS = {**MODIFIER_KEYS, "Comma": 0xBC, "Period": 0xBE,
@@ -93,6 +99,7 @@ def default_action_bindings(capture_binding: CaptureBinding = DEFAULT_BINDING) -
     ))}
     result["capture"] = EditorBinding.from_dict(capture_binding.to_dict())
     result["replace"] = EditorBinding("R", ctrl=True, alt=True)
+    result["framing_grid"] = EditorBinding("G", ctrl=True)
     return result
 
 
@@ -105,12 +112,12 @@ def validate_action_bindings(bindings: Mapping[str, EditorBinding | CaptureBindi
     """
     if not isinstance(bindings, Mapping):
         raise ValueError("Editor bindings must be an action-to-binding mapping.")
-    unknown = set(bindings) - set(ACTION_ORDER)
+    unknown = set(bindings) - set(BINDABLE_ORDER)
     if unknown:
         raise ValueError("Unknown editor action: " + ", ".join(sorted(str(v) for v in unknown)))
     result = default_action_bindings()
     assigned: dict[tuple[int, int], str] = {}
-    for name in ACTION_ORDER:
+    for name in BINDABLE_ORDER:
         value = bindings.get(name, result[name])
         if isinstance(value, CaptureBinding):
             value = EditorBinding.from_dict(value.to_dict())

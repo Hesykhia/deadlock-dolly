@@ -43,12 +43,34 @@ EXTRA_ACTIONS += ("start_game_follow", "stop_game_follow")
 EXTRA_ACTIONS += ("set_replay_hud",)
 EXTRA_ACTIONS += ("select_camera", "view_camera", "delete_camera", "undo_shot", "redo_shot", "camera_page")
 EXTRA_ACTIONS += ("set_camera_time", "set_camera_roll")
+EXTRA_ACTIONS += ("framing_grid",)
 
 CAMERA_LIST_OFFSET = 2 * 1024 * 1024 + 23360
 CAMERA_LIST_COUNT = 32
 CAMERA_LIST_HEADER = struct.Struct("<8s8I")
 CAMERA_LIST_ROW = struct.Struct("<3d2I")
 CAMERA_LIST_BYTES = CAMERA_LIST_HEADER.size + CAMERA_LIST_COUNT * CAMERA_LIST_ROW.size
+
+# Optional framing-guide block after the camera list; enabled state only.
+FRAMING_GRID_OFFSET = 2 * 1024 * 1024 + 24424
+FRAMING_GRID_ABI = 1
+FRAMING_GRID_MAGIC = b"DLYGRID1"
+FRAMING_GRID = struct.Struct("<8s4I")
+
+
+def pack_framing_grid(sequence, enabled, binding=None):
+    """Guide switch plus its binding in the reserved field (vk | mods << 16)."""
+    if type(enabled) is not bool:
+        raise ValueError("Framing guide switch must be a boolean")
+    if binding is None:
+        reserved = 0
+    else:
+        from .editor_actions import EditorBinding
+        if not isinstance(binding, EditorBinding):
+            raise ValueError("Framing guide binding must be an EditorBinding or None")
+        reserved = binding.vk | binding.modifiers << 16
+    return FRAMING_GRID.pack(FRAMING_GRID_MAGIC, _uint(sequence, "sequence"), FRAMING_GRID_ABI,
+                             int(enabled), reserved)
 
 
 def pack_camera_list(sequence, project, revision, first=0, *, can_undo=False, can_redo=False):

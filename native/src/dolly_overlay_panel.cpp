@@ -443,6 +443,39 @@ bool OverlayPanel::guides_visible(const EditorSnapshot& state) noexcept {
            state.view_height > 0 &&
            (state.owner == EditorOwner::Flight || state.owner == EditorOwner::Panel);
 }
+bool OverlayPanel::framing_grid_visible(const EditorSnapshot& state) noexcept {
+    // Same paused-editing policy as the path guides, but independent of the
+    // path-guides checkbox and available with the panel open or closed.
+    return editor_framing_grid_enabled() && state.enabled && state.focused && state.ready &&
+           state.paused && state.manual_active && !state.playing && !state.busy &&
+           state.view_width > 0 && state.view_height > 0 &&
+           (state.owner == EditorOwner::Flight || state.owner == EditorOwner::Panel);
+}
+void OverlayPanel::draw_framing_grid(const EditorSnapshot& state) {
+    if (!framing_grid_visible(state))
+        return;
+    const auto size = ImGui::GetIO().DisplaySize;
+    // Fixed After Effects-style standard guide: rule of thirds plus a centre
+    // cross, one thin light line at the panel's guide opacity.
+    const unsigned grid_color = 0xffffff;
+    const ImU32 color = ImGui::GetColorU32(panel_color(grid_color, .35f));
+    const float width = panel_scale;
+    auto* draw = ImGui::GetBackgroundDrawList();
+    draw->PushClipRect(ImVec2(0, 0), size, true);
+    for (const float fraction : {1.0f / 3.0f, 2.0f / 3.0f}) {
+        draw->AddLine(ImVec2(size.x * fraction, 0), ImVec2(size.x * fraction, size.y), color,
+                      width);
+        draw->AddLine(ImVec2(0, size.y * fraction), ImVec2(size.x, size.y * fraction), color,
+                      width);
+    }
+    const float arm = 12 * panel_scale;
+    const ImVec2 center(size.x * .5f, size.y * .5f);
+    draw->AddLine(ImVec2(center.x - arm, center.y), ImVec2(center.x + arm, center.y), color,
+                  width);
+    draw->AddLine(ImVec2(center.x, center.y - arm), ImVec2(center.x, center.y + arm), color,
+                  width);
+    draw->PopClipRect();
+}
 void OverlayPanel::draw_path_guides(const EditorSnapshot& state,
                                     const std::shared_ptr<const VisualizationPath>& path) {
     if (!path || !path->enabled() || !guides_visible(state))
@@ -975,6 +1008,19 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                         ImGui::TextDisabled("%u of %u camera markers; selected included",
                                             unsigned(guides->cameras().size()),
                                             unsigned(guides->camera_count()));
+                    ImGui::Spacing();
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextDisabled("Framing guide");
+                    const float grid_hint = key_cap_width(EditorAction::FramingGrid, panel_scale);
+                    if (grid_hint > 0) {
+                        ImGui::SameLine();
+                        key_cap(EditorAction::FramingGrid, panel_scale);
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s", editor_framing_grid_enabled() ? "On" : "Off");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip(
+                            "Thirds and centre cross while editing a paused replay. Toggle with the bound key.");
                 }
                 end_panel_card();
                 if (begin_panel_card("##flight-card")) {

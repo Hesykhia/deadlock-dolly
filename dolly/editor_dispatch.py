@@ -245,6 +245,15 @@ def _dispatch(app, event, bridge, *, publish):
             raise ValueError('Choose whether to show the replay HUD.')
         _native_operation(app, 'Changing replay HUD',
                           lambda: app.controller.set_replay_hud(bool(event['value'])), bridge)
+    elif action == "framing_grid":
+        settings = replace(app.app_settings,
+                           framing_grid_enabled=not app.app_settings.framing_grid_enabled)
+        def saved(_result):
+            app.app_settings = settings
+            publish()
+        app.status_text.set("Framing guide " +
+                            ("on." if settings.framing_grid_enabled else "off."))
+        app._submit("Saving framing guide", lambda: save_settings(settings), saved)
     elif action == "play_pause":
         _native_operation(app, "Toggling replay playback", app.controller.toggle_replay, bridge)
     elif action == "play_path":

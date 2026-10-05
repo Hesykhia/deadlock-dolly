@@ -798,6 +798,21 @@ class NativeBridge(MediaTransport):
             self._store(offset + 8, even)
             self._editor_cameras_sequence = even
 
+    def configure_framing_grid(self, *, enabled=False, binding=None):
+        """Optional framing-guide block; enabled state and its bindable action."""
+        from . import editor_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_editor_framing_grid_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack_framing_grid(odd, enabled, binding)
+            offset = wire.FRAMING_GRID_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_framing_grid_sequence = even
+
     def configure_editor_attach(self, offsets, attach=None, preview=False, snap_request=0, picker=False):
         """Optional attach block: schema offsets plus the selected key's state."""
         from . import editor_wire as wire

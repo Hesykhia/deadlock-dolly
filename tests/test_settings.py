@@ -36,8 +36,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(set(raw), {"version", "full_editor", "ffmpeg_path", "auto_updates", "capture_binding", "game_path", "replay_folder",
                                    "demo_path", "launch_options", "movement_speed",
                                    "mouse_sensitivity", "action_bindings", "reshade_binding",
-                                   "reshade_runtime_path"})
-        self.assertEqual(raw["version"], 5)
+                                   "reshade_runtime_path", "framing_grid_enabled"})
+        self.assertEqual(raw["version"], 6)
         self.assertEqual(raw["capture_binding"], settings.capture_binding.to_dict())
         self.assertNotIn("enabled", raw)
 
@@ -50,6 +50,7 @@ class SettingsTests(unittest.TestCase):
         raw.pop("full_editor")
         raw.pop("ffmpeg_path")
         raw.pop("auto_updates")
+        raw.pop("framing_grid_enabled")
         self.write_raw(json.dumps(raw))
         before = self.path.read_bytes()
         loaded = load_settings(self.path)

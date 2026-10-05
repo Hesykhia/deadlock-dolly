@@ -45,7 +45,7 @@ std::atomic<std::uint64_t> diagnostic_present{0}, diagnostic_panel{0}, diagnosti
 std::atomic<std::uint64_t> diagnostic_draw{0}, diagnostic_guides{0}, diagnostic_overlay_last_us{0},
     diagnostic_overlay_max_us{0}, diagnostic_present_last_us{0}, diagnostic_present_max_us{0},
     diagnostic_lock_skips{0}, diagnostic_overlay_active_ms{0}, diagnostic_present_active_ms{0},
-    diagnostic_guide_lines{0}, diagnostic_guide_labels{0};
+    diagnostic_guide_lines{0}, diagnostic_guide_labels{0}, diagnostic_grid{0};
 std::atomic<const char*> last_error{"Waiting for the DirectX 11 game window."};
 std::recursive_mutex render_mutex;
 struct InputMessage {
@@ -740,6 +740,7 @@ void render_overlay(IDXGISwapChain* chain) {
     const bool panel = editor_panel_visible() && state.focused;
     const auto guides = panel_ui.guides_visible(state) ? visualization_snapshot() : nullptr;
     const bool draw_guides = guides && guides->enabled();
+    const bool draw_grid = panel_ui.framing_grid_visible(state);
     auto& io = ImGui::GetIO();
     if (panel != last_panel) {
         io.ClearInputKeys();
@@ -758,7 +759,7 @@ void render_overlay(IDXGISwapChain* chain) {
         clear_pending_input();
         io.ClearEventsQueue();
         editor_text_input_active(false);
-        if (!draw_guides)
+        if (!draw_guides && !draw_grid)
             return;
     } else
         feed_pending_input();
@@ -776,6 +777,10 @@ void render_overlay(IDXGISwapChain* chain) {
     panel_ui.reset_guides();
     if (draw_guides && !state.bone_picker)
         panel_ui.draw_path_guides(state, guides);
+    if (draw_grid && !state.bone_picker) {
+        panel_ui.draw_framing_grid(state);
+        diagnostic_grid.fetch_add(1, std::memory_order_relaxed);
+    }
     if (panel) {
         if (state.bone_picker)
             panel_ui.draw_bone_picker(state, picker_portrait);
@@ -1027,6 +1032,7 @@ OverlayDiagnostics overlay_diagnostics() noexcept {
     result.timeline_x1 = panel_ui.timeline_x1();
     result.timeline_y = panel_ui.timeline_y();
     result.timeline_drags = panel_ui.timeline_drags();
+    result.grid_frames = diagnostic_grid.load(std::memory_order_relaxed);
     return result;
 }
 const char* overlay_last_error() noexcept {

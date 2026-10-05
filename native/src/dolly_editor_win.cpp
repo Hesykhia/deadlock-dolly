@@ -27,6 +27,7 @@ std::shared_ptr<const EditorConfig> gConfig;
 std::shared_ptr<const EditorDofConfig> gDofConfig;
 std::shared_ptr<const EditorCitadelDofConfig> gCitadelDofConfig;
 std::shared_ptr<const EditorFollowConfig> gFollowConfig;
+std::shared_ptr<const EditorFramingGridConfig> gFramingGridConfig;
 std::shared_ptr<const EditorCameraList> gCameraList;
 std::shared_ptr<const EditorAttachConfig> gAttachConfig;
 std::shared_ptr<const EditorRoster> gRoster;
@@ -185,6 +186,13 @@ bool reserved_input(unsigned vk) noexcept {
     if (owner != EditorOwner::Console && c->reshade_binding.vk == vk &&
         c->reshade_binding.modifiers == modifiers())
         return true;
+    if (owner != EditorOwner::Console) {
+        auto grid = std::atomic_load(&gFramingGridConfig);
+        const auto grid_vk = grid ? std::uint16_t(grid->reserved & 0xffffu) : 0;
+        const auto grid_mods = grid ? std::uint16_t(grid->reserved >> 16) : 0;
+        if (grid_vk && grid_vk == vk && grid_mods == modifiers())
+            return true;
+    }
     for (unsigned i : {9u, 10u})
         if ((owner != EditorOwner::Console || (i == 9 && function_key(vk))) &&
             c->bindings[i].vk == vk && c->bindings[i].modifiers == modifiers())
@@ -298,6 +306,18 @@ void dispatch_key_press(unsigned vk) noexcept {
         binding_down(c->reshade_binding)) {
         toggle_reshade();
         return;
+    }
+    // The framing guide is a panel/flight toggle; its binding lives in the
+    // optional block so the stable action table is untouched.
+    if (auto grid = std::atomic_load(&gFramingGridConfig)) {
+        EditorBinding grid_binding{};
+        grid_binding.vk = static_cast<std::uint16_t>(grid->reserved & 0xffffu);
+        grid_binding.modifiers = static_cast<std::uint16_t>(grid->reserved >> 16);
+        if (grid_binding.vk && binding_down(grid_binding) &&
+            (owner == EditorOwner::Panel || owner == EditorOwner::Flight)) {
+            editor_enqueue(EditorAction::FramingGrid);
+            return;
+        }
     }
     for (unsigned i = 0; i < 12; ++i) {
         if ((owner == EditorOwner::ReShade || reshade_overlay_open()) && i != 9 && i != 10)
@@ -601,13 +621,23 @@ EditorSnapshot editor_snapshot() noexcept {
 }
 EditorBinding editor_binding_snapshot(EditorAction action) noexcept {
     EditorBinding result{};
-    const auto index = static_cast<std::size_t>(action);
-    if (index >= kEditorBindingCount)
-        return result;
     auto c = std::atomic_load(&gConfig);
-    if (c)
+    if (!c)
+        return result;
+    const auto index = static_cast<std::size_t>(action);
+    if (index < kEditorBindingCount) {
         result = c->bindings[index];
+    } else if (action == EditorAction::FramingGrid) {
+        if (auto grid = std::atomic_load(&gFramingGridConfig)) {
+            result.vk = static_cast<std::uint16_t>(grid->reserved & 0xffffu);
+            result.modifiers = static_cast<std::uint16_t>(grid->reserved >> 16);
+        }
+    }
     return result;
+}
+bool editor_framing_grid_enabled() noexcept {
+    auto grid = std::atomic_load(&gFramingGridConfig);
+    return grid && gConnected.load() && (grid->flags & 1u) != 0;
 }
 bool editor_attach_config(EditorAttachConfig& out) noexcept {
     auto attach = std::atomic_load(&gAttachConfig);
@@ -650,7 +680,7 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
     if (action == EditorAction::ReShade)
         return configured() && !gReShadeDeferred.load() &&
                reshade_request_overlay(!reshade_overlay_open());
-    if (!std::isfinite(value) || std::uint32_t(action) > std::uint32_t(EditorAction::SetCameraRoll))
+    if (!std::isfinite(value) || std::uint32_t(action) > std::uint32_t(EditorAction::FramingGrid))
         return false;
     auto state = editor_snapshot();
     if (!state.enabled)
@@ -1234,6 +1264,27 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
                 }
             }
         }
+        auto grid_source = memory + kEditorFramingGridOffset;
+        auto grid_sequence = reinterpret_cast<volatile LONG*>(grid_source + 8);
+        const auto grid_first = InterlockedCompareExchange(grid_sequence, 0, 0);
+        const auto grid_previous = std::atomic_load(&gFramingGridConfig);
+        if (!(grid_first & 1) &&
+            (!grid_previous || grid_previous->sequence != std::uint32_t(grid_first))) {
+            EditorFramingGridConfig grid{};
+            std::memcpy(&grid, grid_source, sizeof(grid));
+            MemoryBarrier();
+            const auto grid_vk = std::uint32_t(grid.reserved & 0xffffu);
+            const auto grid_mods = std::uint32_t(grid.reserved >> 16);
+            if (grid_first == InterlockedCompareExchange(grid_sequence, 0, 0) &&
+                std::memcmp(grid.magic, "DLYGRID1", 8) == 0 && grid.abi == 1 &&
+                !(grid.flags & ~1u) && grid_vk <= 0xff && grid_mods <= 7) {
+                try {
+                    std::atomic_store(&gFramingGridConfig,
+                                      std::make_shared<const EditorFramingGridConfig>(grid));
+                } catch (...) {
+                }
+            }
+        }
         auto attach_source = memory + kEditorAttachOffset;
         auto attach_sequence = reinterpret_cast<volatile LONG*>(attach_source + 8);
         const auto attach_first = InterlockedCompareExchange(attach_sequence, 0, 0);
@@ -1399,6 +1450,7 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
         std::atomic_store(&gDofConfig, std::shared_ptr<const EditorDofConfig>{});
         std::atomic_store(&gCitadelDofConfig, std::shared_ptr<const EditorCitadelDofConfig>{});
         std::atomic_store(&gFollowConfig, std::shared_ptr<const EditorFollowConfig>{});
+        std::atomic_store(&gFramingGridConfig, std::shared_ptr<const EditorFramingGridConfig>{});
         std::atomic_store(&gCameraList, std::shared_ptr<const EditorCameraList>{});
         std::atomic_store(&gAttachConfig, std::shared_ptr<const EditorAttachConfig>{});
         std::atomic_store(&gRoster, std::shared_ptr<const EditorRoster>{});

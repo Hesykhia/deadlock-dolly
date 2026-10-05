@@ -147,6 +147,14 @@ def configure(app):
             publish_cameras(app.project, history.revision, first,
                             can_undo=history.can_undo, can_redo=history.can_redo)
             app._native_cameras_bridge, app._native_cameras_cache = bridge, camera_values
+    publish_grid = getattr(bridge, "configure_framing_grid", None)
+    if callable(publish_grid):
+        grid_binding = settings.action_bindings.get("framing_grid")
+        grid = (active, bool(settings.framing_grid_enabled), grid_binding)
+        if (getattr(app, "_native_grid_bridge", None) is not bridge
+                or getattr(app, "_native_grid_cache", None) != grid):
+            publish_grid(enabled=active and grid[1], binding=grid_binding)
+            app._native_grid_bridge, app._native_grid_cache = bridge, grid
     publish_dof = getattr(bridge, "configure_editor_dof", None)
     if callable(publish_dof):
         from .editor_dof import values_at

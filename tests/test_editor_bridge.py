@@ -46,6 +46,24 @@ class EditorBridgeTests(unittest.TestCase):
                 self.bridge.configure_editor_cameras(project, revision, page)
             self.assertEqual(bytes(self.memory), published)
 
+    def test_framing_grid_block_round_trips_and_is_bounded(self):
+        from dolly.editor_actions import EditorBinding
+        before = bytes(self.memory)
+        self.bridge.configure_framing_grid(enabled=True, binding=EditorBinding("G", ctrl=True))
+        fields = w.FRAMING_GRID.unpack_from(self.memory, w.FRAMING_GRID_OFFSET)
+        self.assertEqual(fields, (b"DLYGRID1", 2, 1, 1, 0x47 | 1 << 16))
+        self.assertEqual(bytes(self.memory[:w.FRAMING_GRID_OFFSET]), before[:w.FRAMING_GRID_OFFSET])
+        end = w.FRAMING_GRID_OFFSET + w.FRAMING_GRID.size
+        self.assertLessEqual(end, len(self.memory))
+        self.assertEqual(bytes(self.memory[end:]), before[end:])
+        published = bytes(self.memory)
+        self.bridge.configure_framing_grid(enabled=False)
+        self.assertEqual(w.FRAMING_GRID.unpack_from(self.memory, w.FRAMING_GRID_OFFSET)[3:], (0, 0))
+        for bad in ({"enabled": 1}, {"enabled": True, "binding": "G"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.bridge.configure_framing_grid(**bad)
+        self.assertEqual(bytes(self.memory[end:]), published[end:])
+
     def test_follow_settings_publish_without_touching_other_blocks(self):
         from dolly.follow_camera import FollowSettings
         before = bytes(self.memory)

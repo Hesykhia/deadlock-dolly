@@ -492,8 +492,12 @@ void stress_game_buffer_lifetimes(IDXGISwapChain* chain, ID3D11Device* device,
 static ImGuiContext* screenshot_context = nullptr;
 static bool framebuffer_scale_probe = false;
 namespace dolly {
+bool framing_grid_enabled_stub = false;
 EditorSnapshot editor_snapshot() noexcept {
     return snapshot;
+}
+bool editor_framing_grid_enabled() noexcept {
+    return framing_grid_enabled_stub;
 }
 bool editor_camera_list(EditorCameraList& out) noexcept {
     out = {};
@@ -859,6 +863,21 @@ int main(int argc, char** argv) {
                             before.timeline_drags + 1,
                         "Tick drag was not counted as committed");
                 std::puts("Rendered timeline: tick drag enqueues SetCameraTime passed.");
+            }
+            // Framing grid: fixed thirds and centre cross while the paused
+            // editor owns the view; independent of the path-guides toggle.
+            {
+                const auto before = dolly::overlay_diagnostics();
+                dolly::framing_grid_enabled_stub = true;
+                render();
+                render();
+                require(dolly::overlay_diagnostics().grid_frames == before.grid_frames + 2,
+                        "Framing grid did not draw while the paused editor owned the view");
+                dolly::framing_grid_enabled_stub = false;
+                render();
+                require(dolly::overlay_diagnostics().grid_frames == before.grid_frames + 2,
+                        "Framing grid kept drawing after being disabled");
+                std::puts("Rendered framing grid: enabled/disabled draw counts passed.");
             }
             ImGuiTable* cameras = nullptr;
             auto& tables = screenshot_context->Tables;

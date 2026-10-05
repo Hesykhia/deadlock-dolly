@@ -22,7 +22,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer, ui_theme
 from .ui import shot_commands
-from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, EDITOR_KEY_CHOICES, EditorBinding, default_action_bindings, validate_action_bindings
+from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, BINDABLE_ORDER, EDITOR_KEY_CHOICES, EditorBinding, default_action_bindings, validate_action_bindings
 from dolly.replays import discover_replays, find_replay_folder, parse_launch_options
 from dolly.bindings import CaptureBinding, DEFAULT_BINDING, KEY_CHOICES
 from dolly.branding import apply_window_icon
@@ -1520,7 +1520,7 @@ class DollyApp:
             return
         selected = selected or next(iter(self.bindings_tree.selection()), ACTION_ORDER[0])
         self.bindings_tree.delete(*self.bindings_tree.get_children())
-        for action in ACTION_ORDER:
+        for action in BINDABLE_ORDER:
             binding = self.app_settings.action_bindings.get(action)
             self.bindings_tree.insert("", "end", iid=action, values=(ACTION_LABELS[action], binding.label if binding else "Unbound"))
         binding = self.app_settings.reshade_binding

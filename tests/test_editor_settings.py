@@ -63,7 +63,7 @@ class EditorSettingsTests(unittest.TestCase):
         save_settings(settings, self.path)
         self.assertEqual(load_settings(self.path), settings)
         raw = json.loads(self.path.read_text())
-        self.assertEqual(raw["version"], 5)
+        self.assertEqual(raw["version"], 6)
         self.assertNotIn("migration_warnings", raw)
         self.assertNotIn("enabled", raw)
         self.assertEqual(raw["capture_binding"]["key"], "Mouse4")
@@ -139,6 +139,7 @@ class EditorSettingsTests(unittest.TestCase):
         raw.pop("full_editor")
         raw.pop("ffmpeg_path")
         raw.pop("auto_updates")
+        raw.pop("framing_grid_enabled")
         raw.pop("reshade_binding")
         raw.pop("reshade_runtime_path")
         self.path.write_text(json.dumps(raw))
@@ -178,6 +179,7 @@ class EditorBindingTests(unittest.TestCase):
         defaults = default_action_bindings()
         self.assertEqual(bindings_from_dict(bindings_to_dict(defaults)), defaults)
         self.assertEqual(defaults["capture"].label, DEFAULT_BINDING.label)
+        self.assertEqual(defaults["framing_grid"].label, "Ctrl+G")
         self.assertNotIn("F7", [binding.key for binding in defaults.values() if binding])
 
     def test_duplicates_are_rejected_with_both_action_names(self):
