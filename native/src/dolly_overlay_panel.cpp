@@ -235,9 +235,11 @@ void OverlayPanel::roster_label(const EditorRosterEntry& entry, char* out, std::
 }
 // Label, ImGui slider and a right-aligned readout. Ctrl+click types an exact
 // value (ImGui built-in), which keeps numeric entry available in game. With a
-// timeline, camera ticks can be dragged along the track: the playhead stays
+// timeline, Alt+drag moves a camera tick along the track: the playhead stays
 // pinned while a tick is dragged and the new arrival commits on release with
 // the current camera-list revision, so the list re-sorts safely afterwards.
+// A plain drag always scrubs the slider, so the seek preview stays reachable
+// even when the track is crowded with ticks.
 OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* label, float* value,
                                                  float minimum, float maximum, const char* format,
                                                  float label_width,
@@ -293,7 +295,7 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
             // the next time the timeline is drawn.
             if (dragged_tick >= 0 && !result.active && !deactivated)
                 dragged_tick = -1;
-            if (!result.active && !io.KeyCtrl && ImGui::IsItemHovered()) {
+            if (!result.active && io.KeyAlt && ImGui::IsItemHovered()) {
                 float best = 8 * panel_scale;
                 for (const auto& camera : timeline->cameras()) {
                     const float distance = std::abs(io.MousePos.x - marker_x(camera.time));
@@ -303,12 +305,14 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
                         hovered_time = camera.time;
                     }
                 }
-                if (hovered_tick >= 0)
+                if (hovered_tick >= 0) {
                     ImGui::SetTooltip(
-                        "Camera %02u arrives at %.2f s. Drag the tick to change it.",
+                        "Camera %02u arrives at %.2f s. Alt+drag to change it.",
                         hovered_tick + 1, hovered_time);
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                }
             }
-            if (ImGui::IsItemActivated() && !io.KeyCtrl) {
+            if (ImGui::IsItemActivated() && io.KeyAlt) {
                 const ImVec2 press = io.MouseClickedPos[0];
                 if (press.y >= lo.y - 10 * panel_scale && press.y <= hi.y + 10 * panel_scale) {
                     float best = 8 * panel_scale;
@@ -668,7 +672,7 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                                   ImGui::GetContentRegionAvail().x, double(seek_time));
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip(
-                            "Seek the replay and apply this point on the camera path. Timeline marks match the saved camera guides. Dragging alone does not seek.");
+                            "Seek the replay and apply this point on the camera path. Moving the slider alone does not seek; Alt+drag a camera tick to retime it. Timeline marks match the saved camera guides.");
                     ImGui::EndDisabled();
                     ImGui::Separator();
                     char tick_label[64]{};

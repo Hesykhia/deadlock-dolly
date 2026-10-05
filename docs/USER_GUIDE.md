@@ -253,7 +253,9 @@ not saved across app restarts. A new edit after Undo replaces the redo branch.
 Open **Camera** in the in-game Dolly panel. Drag the **Shot** timeline
 (or Ctrl+click its slider to type seconds), then press **Seek here**. Dolly
 pauses the replay at that part of the shot and applies its position, rotation
-and framing. Moving the slider alone does not seek. Pause shot playback first.
+and framing. Moving the slider alone does not seek. Hold **Alt** and drag a
+camera mark to change that view's arrival time; a plain drag always scrubs.
+Pause shot playback first.
 A replay can reconstruct only recorded packet times; Dolly reports the actual
 shot time if it has to use the following packet.
 

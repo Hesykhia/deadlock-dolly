@@ -824,8 +824,9 @@ int main(int argc, char** argv) {
             shortcut(ImGuiKey_Y, false, dolly::EditorAction::RedoShot);
             shortcut(ImGuiKey_Z, true, dolly::EditorAction::RedoShot);
             std::puts("Rendered history shortcuts: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z passed.");
-            // Draggable camera ticks: a press on a tick pins the playhead and
-            // commits exactly one revision-bound SetCameraTime on release.
+            // Draggable camera ticks: Alt+drag pins the playhead and commits
+            // exactly one revision-bound SetCameraTime on release; a plain drag
+            // scrubs the slider instead of grabbing the tick.
             {
                 const auto timeline = dolly::visualization_snapshot();
                 require(timeline && timeline->cameras().size() == 2,
@@ -841,15 +842,29 @@ int main(int argc, char** argv) {
                         std::clamp(float(camera.time) / span, 0.0f, 1.0f);
                 const float target_x = std::min(before.timeline_x1 - 2.0f, tick_x + 40);
                 observed_actions.clear();
+                auto& io = ImGui::GetIO();
                 auto drag = [&](bool down, float x) {
-                    ImGui::GetIO().AddMousePosEvent(x, before.timeline_y);
-                    ImGui::GetIO().AddMouseButtonEvent(0, down);
+                    io.AddMousePosEvent(x, before.timeline_y);
+                    io.AddMouseButtonEvent(0, down);
                     render();
                 };
+                // A plain drag must scrub without moving a tick.
                 drag(false, tick_x);
                 drag(true, tick_x);
                 drag(true, target_x);
                 drag(false, target_x);
+                require(observed_actions.empty() &&
+                            dolly::overlay_diagnostics().timeline_drags ==
+                                before.timeline_drags,
+                        "Plain timeline drag must scrub without moving a tick");
+                // Alt+drag moves the tick and commits once on release.
+                io.AddKeyEvent(ImGuiMod_Alt, true);
+                drag(false, tick_x);
+                drag(true, tick_x);
+                drag(true, target_x);
+                drag(false, target_x);
+                io.AddKeyEvent(ImGuiMod_Alt, false);
+                render();
                 const double expected_time =
                     double(span) * double((target_x - before.timeline_x0) /
                                           (before.timeline_x1 - before.timeline_x0));
@@ -858,11 +873,11 @@ int main(int argc, char** argv) {
                             observed_actions[0].value == camera.index &&
                             observed_actions[0].revision == 7 &&
                             std::abs(observed_actions[0].time - expected_time) < 1e-3,
-                        "Tick drag did not enqueue one revision-bound SetCameraTime");
+                        "Alt tick drag did not enqueue one revision-bound SetCameraTime");
                 require(dolly::overlay_diagnostics().timeline_drags ==
                             before.timeline_drags + 1,
-                        "Tick drag was not counted as committed");
-                std::puts("Rendered timeline: tick drag enqueues SetCameraTime passed.");
+                        "Alt tick drag was not counted as committed");
+                std::puts("Rendered timeline: plain drag scrubs; Alt+drag commits SetCameraTime passed.");
             }
             // Framing grid: fixed thirds and centre cross while the paused
             // editor owns the view; independent of the path-guides toggle.
