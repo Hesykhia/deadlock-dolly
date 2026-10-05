@@ -366,6 +366,11 @@ aspect ratio. These are Dolly's editing limits, not verified native cvar bounds.
 The values are ratios, not FOV degrees; preview them in your scene to judge the
 framing. Dolly does not convert between the two or claim an identical projection.
 
+The **Path curve** control in the same header switches the camera path between
+**smooth** (the default), **spline** and **linear**. Spline runs one continuous
+curve through every view for the smoothest motion; the Coordinates / timing
+dialog offers the same choice.
+
 1. Select a camera in the list or click its point in the graph.
 2. Drag the point up or down to change that camera's aspect ratio. This updates
    the saved camera value without changing its arrival time or position. With
@@ -582,9 +587,11 @@ restoration behavior. Other camera cvars require Console mode.
 
 ## Playback behavior
 
-- Smooth or Linear camera paths; Linear, Smooth or Step cvar tracks. A smooth
-  spatial spline does not automatically give constant travel speed. The distance
-  between views and their arrival times determine how fast each section moves.
+- Smooth, Spline or Linear camera paths (choose **Path curve** in the Camera
+  header or the Coordinates / timing dialog); Linear, Smooth or Step cvar
+  tracks. A smooth spatial spline does not automatically give constant travel
+  speed. The distance between views and their arrival times determine how fast
+  each section moves.
 - **Play shot** starts from zero, seeks the shot's starting replay tick, applies
   the initial camera and fixed/animated cvars, verifies the camera position,
   then resumes. The replay and path

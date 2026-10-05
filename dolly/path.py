@@ -639,11 +639,7 @@ class Project:
         if any(k.lens_scale is not None for k in self.keyframes):
             version = LENS_FORMAT_VERSION
             particles_used = True  # New-format files include the existing optional-setting schema.
-        if self.interpolation in ("smooth", "spline"):
-            # Version 10 records the interpolation choice explicitly. Pre-spline
-            # files stored the old default "smooth" without meaning to keep it,
-            # so loading upgrades those to spline; files written here keep an
-            # explicit smooth or spline choice.
+        if self.interpolation == "spline":
             version = SPLINE_FORMAT_VERSION
             particles_used = True  # New-format files include the existing optional-setting schema.
         return {
@@ -769,14 +765,8 @@ class Project:
             tracks.append(CvarTrack(name=track["name"], keys=keys,
                                     interpolation=track.get("interpolation", "linear"),
                                     restore_value=track.get("restore_value")))
-        # Pre-spline files (versions 1-9) stored "smooth" as the default without
-        # an explicit choice, so they now load with the spline default; linear
-        # stays linear and version 10+ files keep whatever they recorded.
-        interpolation = obj.get("interpolation", "spline")
-        if version < SPLINE_FORMAT_VERSION and interpolation == "smooth":
-            interpolation = "spline"
         project = cls(name=obj.get("name", "Untitled"), keyframes=keyframes, tracks=tracks,
-                      interpolation=interpolation,
+                      interpolation=obj.get("interpolation", "smooth"),
                       rotation_mode=obj.get("rotation_mode", "shortest"),
                       start_tick=obj.get("start_tick", 0), tick_rate=obj.get("tick_rate", 64.0),
                       setup_values=obj.get("setup_values", {}),

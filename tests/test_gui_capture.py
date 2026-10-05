@@ -64,13 +64,13 @@ class FakeController:
 class CaptureHarness:
     def __init__(self):
         self.app = app = DollyApp.__new__(DollyApp)
-        app.project = Project(name="Shot", interpolation="spline")
+        app.project = Project(name="Shot")
         app.busy = False
         app.playing = False
         app.closed = False
         app.start_tick = Var("0")
         app.tick_rate = Var("64")
-        app.interpolation = Var("spline")
+        app.interpolation = Var("smooth")
         app.rotation = Var("shortest")
         app.standard_aspect = Var(str(STANDARD_ASPECT))
         app.lens_interpolation = Var("smooth")
@@ -147,12 +147,12 @@ class GuiCaptureTests(unittest.TestCase):
         self.harness = CaptureHarness()
         self.app = self.harness.app
 
-    def test_timed_paused_views_append_zero_three_six_and_form_spline_path(self):
+    def test_timed_paused_views_append_zero_three_six_and_form_smooth_path(self):
         for _ in range(3):
             self.harness.capture()
         self.assertEqual([key.time for key in self.app.project.keyframes], [0.0, 3.0, 6.0])
         self.assertEqual([key.x for key in self.app.project.keyframes], [100.0, 200.0, 300.0])
-        self.assertEqual(self.app.project.interpolation, "spline")
+        self.assertEqual(self.app.project.interpolation, "smooth")
         self.assertFalse(self.app.frozen.get())
         self.assertEqual(self.harness.errors, [])
 
@@ -524,7 +524,7 @@ class GuiCaptureTests(unittest.TestCase):
         snapshot = self.app._snapshot()
         self.assertEqual(snapshot.lens_interpolation, "step")
         self.assertEqual(snapshot.standard_aspect, 4 / 3)
-        self.assertEqual(snapshot.interpolation, "spline")
+        self.assertEqual(snapshot.interpolation, "smooth")
         self.assertEqual(snapshot.keyframes, original)
         self.assertIsNot(snapshot, self.app.project)
         self.assertEqual(Project.from_dict(snapshot.to_dict()), snapshot)

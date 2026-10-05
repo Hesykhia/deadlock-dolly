@@ -25,7 +25,7 @@ class ShotCommandTests(unittest.TestCase):
         project = Project(name='Shot', keyframes=[key(1)])
         commands.finish_capture(project, 'start', key(0), 123)
         self.assertEqual(project.start_tick, 123)
-        self.assertEqual(project.interpolation, 'spline')
+        self.assertEqual(project.interpolation, 'smooth')
         replacement = key(0); replacement.x = 42
         commands.finish_capture(project, 'replace', replacement, None, 0)
         self.assertEqual(project.keyframes[0].x, 42)

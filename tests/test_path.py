@@ -343,22 +343,21 @@ class SplineInterpolationTests(unittest.TestCase):
         self.assertEqual(saved["interpolation"], "spline")
         self.assertEqual(Project.from_dict(saved), spline)
         smooth = Project(interpolation="smooth", keyframes=keys)
-        saved = smooth.to_dict()
-        self.assertEqual(saved["version"], 10)
-        self.assertEqual(Project.from_dict(saved).interpolation, "smooth")
+        self.assertEqual(smooth.to_dict()["version"], 2)
+        self.assertEqual(Project.from_dict(smooth.to_dict()).interpolation, "smooth")
         linear = Project(interpolation="linear", keyframes=keys)
         self.assertEqual(Project.from_dict(linear.to_dict()).interpolation, "linear")
 
-    def test_pre_spline_shots_default_to_the_spline(self):
-        # Version 1-9 files stored the old "smooth" default without an explicit
-        # choice; those now load with the spline. Linear was always deliberate.
+    def test_pre_spline_shots_keep_smooth(self):
+        # Version 1-9 files stored the old default without an explicit choice;
+        # loading them must not silently switch their curve to the spline.
         data = Project(interpolation="linear", keyframes=[key(0, x=0), key(1, x=1)]).to_dict()
         data["interpolation"] = "smooth"
-        self.assertEqual(Project.from_dict(data).interpolation, "spline")
+        self.assertEqual(Project.from_dict(data).interpolation, "smooth")
         data["interpolation"] = "linear"
         self.assertEqual(Project.from_dict(data).interpolation, "linear")
         del data["interpolation"]
-        self.assertEqual(Project.from_dict(data).interpolation, "spline")
+        self.assertEqual(Project.from_dict(data).interpolation, "smooth")
 
 
 if __name__ == "__main__":

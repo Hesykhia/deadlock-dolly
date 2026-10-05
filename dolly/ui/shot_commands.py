@@ -19,7 +19,7 @@ def finish_capture(candidate, action, key, tick, selected=None):
         candidate.keyframes = [key]
         if tick is not None:
             candidate.start_tick = int(tick)
-        candidate.interpolation = "spline"
+        candidate.interpolation = "smooth"
     elif action == "replace":
         candidate.keyframes[selected] = key
     else:

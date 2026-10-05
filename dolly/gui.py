@@ -260,7 +260,7 @@ class DollyApp:
         self.dirty = False
         self.file_path: Path | None = None
         self.project = Project(name="Untitled shot", keyframes=[], tracks=[],
-                               interpolation="spline")
+                               interpolation="smooth")
         self.shot_history = ShotHistory(self.project)
         self.controller = Controller(log_callback=self._enqueue_log)
         self.video_export = VideoExport(self.controller)
@@ -276,7 +276,7 @@ class DollyApp:
         self.busy_text = tk.StringVar(value="")
         self.start_tick = tk.StringVar(value="0")
         self.tick_rate = tk.StringVar(value="64")
-        self.interpolation = tk.StringVar(value="spline")
+        self.interpolation = tk.StringVar(value="smooth")
         self.rotation = tk.StringVar(value="shortest")
         self.standard_aspect = tk.StringVar(value="16:9")
         self.lens_interpolation = tk.StringVar(value="smooth")
@@ -379,7 +379,7 @@ class DollyApp:
         self.paused_cancel = None
         self.paused_requested = False
         self.paused_run_options = (240.0, 60.0)
-        self.capture_hint = tk.StringVar(value="Move the replay free camera, then capture each view. Capture pauses a playing replay; the views form a smooth spline.")
+        self.capture_hint = tk.StringVar(value="Move the replay free camera, then capture each view. Capture pauses a playing replay; the views form a smooth path.")
         self.show_log = tk.BooleanVar(value=False)
         self.playing = False
         self.dragging = False
@@ -1866,6 +1866,11 @@ class DollyApp:
                                  values=("smooth", "linear", "step"), state="readonly", width=9)
         curve_mode.pack(side="right")
         curve_mode.bind("<<ComboboxSelected>>", lambda _event: self._apply_options())
+        self.path_curve_mode = ttk.Combobox(graph_header, textvariable=self.interpolation,
+                                            values=("smooth", "spline", "linear"), state="readonly", width=9)
+        self.path_curve_mode.pack(side="right")
+        self.path_curve_mode.bind("<<ComboboxSelected>>", lambda _event: self._apply_options())
+        ttk.Label(graph_header, text="Path curve", style="CardMuted.TLabel").pack(side="right", padx=(10, 4))
         self.timeline_view = TimelineView()
         self.rotation_curve = RotationCurve(graph, on_change=self._change_rotation_curve,
                                             on_select=self._select_curve_key,
@@ -2526,7 +2531,7 @@ class DollyApp:
         ttk.Button(actions, text="Add entered camera", command=self._add_key).pack(side="left")
         ttk.Label(body, text="SHOT TIMING & MOVEMENT", style="Section.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 10))
         for index, (label, variable, values) in enumerate((("Start replay tick", self.start_tick, None), ("Ticks / second", self.tick_rate, None),
-                                                         ("Position curve", self.interpolation, ("spline", "smooth", "linear")),
+                                                         ("Position curve", self.interpolation, ("smooth", "spline", "linear")),
                                                          ("Rotation", self.rotation, ("shortest", "unwrapped")))):
             cell = ttk.Frame(body)
             cell.grid(row=7 + index // 2, column=index % 2, sticky="ew", padx=(0, 14 if index % 2 == 0 else 0), pady=(0, 8))
