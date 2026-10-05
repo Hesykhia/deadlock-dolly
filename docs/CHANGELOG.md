@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.19 alpha - Timeline scrubbing and the smooth default
+
+**0.6.19-alpha**
+
+- **Scrub the Shot timeline without grabbing a camera.** *Before:* a press near a camera mark started moving it, so scrubbing was hard on a busy track. *After:* a plain drag always scrubs; hold **Alt** and drag a mark to retime that view, with the mark highlighted and its arrival time shown.
+- **Smooth is the default curve again.** *Before:* new shots and captures started on spline. *After:* they start on smooth, and spline is one click away in the new **Path curve** selector in the Camera tab header; saved shots keep the curve they were saved with.
+
+Full details: [0.6.19 release notes](RELEASE_NOTES_0.6.19-alpha.md).
+
 ## 0.6.18 alpha - ReShade effect library setup
 
 **0.6.18-alpha**

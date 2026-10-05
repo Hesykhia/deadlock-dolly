@@ -541,3 +541,5 @@ docs/RELEASE_NOTES_0.6.16-alpha.md
 docs/RELEASE_NOTES_0.6.17-alpha.md
 
 docs/RELEASE_NOTES_0.6.18-alpha.md
+
+docs/RELEASE_NOTES_0.6.19-alpha.md
