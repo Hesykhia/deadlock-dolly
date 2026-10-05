@@ -212,7 +212,18 @@ class _GraphViewMixin:
         if callable(getattr(self, "on_view", None)):
             self.on_view()
         else:
-            self._redraw()
+            self._schedule_redraw()
+
+    def _schedule_redraw(self, _event=None):
+        """Coalesce redraw bursts (wheel/pan/resize) into one idle redraw."""
+        if getattr(self, "_redraw_scheduled", False):
+            return
+        self._redraw_scheduled = True
+        self.after_idle(self._run_scheduled_redraw)
+
+    def _run_scheduled_redraw(self):
+        self._redraw_scheduled = False
+        self._redraw()
 
 
 class AspectCurve(_GraphViewMixin, ttk.Frame):
@@ -249,7 +260,7 @@ class AspectCurve(_GraphViewMixin, ttk.Frame):
         self.hint.grid(row=1, column=0, sticky="w", pady=(5, 0))
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
-        self.canvas.bind("<Configure>", self._redraw)
+        self.canvas.bind("<Configure>", self._schedule_redraw)
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._motion)
         self.canvas.bind("<ButtonRelease-1>", self._release)
@@ -459,7 +470,7 @@ class RotationCurve(_GraphViewMixin, ttk.Frame):
         self.hint.grid(row=2, column=0, sticky="w", pady=(4, 0))
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
-        self.canvas.bind("<Configure>", self._redraw)
+        self.canvas.bind("<Configure>", self._schedule_redraw)
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._motion)
         self.canvas.bind("<ButtonRelease-1>", self._release)

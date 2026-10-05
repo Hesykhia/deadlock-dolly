@@ -101,6 +101,33 @@ def _finite(value: str, label: str) -> float:
     return number
 
 
+def _set_var(variable, value):
+    """Assign a Tk variable only when it changes.
+
+    The status poll runs several times a second; re-setting identical strings
+    makes Tk redraw labels and comboboxes for no visible change, which is the
+    main source of idle stutter in dropdowns, sliders and scrolling.
+    """
+    try:
+        current = variable.get()
+    except (AttributeError, tk.TclError):
+        variable.set(value)
+        return
+    if current != value:
+        variable.set(value)
+
+
+def _set_widget_state(widget, state):
+    """Apply a widget state only when it differs, for the same reason."""
+    try:
+        current = str(widget.cget("state"))
+    except (AttributeError, tk.TclError):
+        widget.configure(state=state)
+        return
+    if current != state:
+        widget.configure(state=state)
+
+
 def _binding_event_key(event):
     number = getattr(event, "num", None)
     if isinstance(number, int):
@@ -1139,26 +1166,35 @@ class DollyApp:
             # recorder open until the game closes.
             self._auto_finish_layered = False
             self._stop_video_recording()
-        self.video_status_text.set("Launch a replay to record video." if state == "idle" and not ready else format_video_status(status))
-        self.video_start_button.configure(state="normal" if ready and not active and not self.busy else "disabled")
+        _set_var(self.video_status_text,
+                 "Launch a replay to record video." if state == "idle" and not ready
+                 else format_video_status(status))
+        _set_widget_state(self.video_start_button,
+                          "normal" if ready and not active and not self.busy else "disabled")
         can_stop = state in ("starting", "recording") and not self.busy
-        self.video_stop_button.configure(state="normal" if can_stop else "disabled")
-        self.video_cancel_button.configure(state="normal" if can_stop else "disabled")
+        _set_widget_state(self.video_stop_button, "normal" if can_stop else "disabled")
+        _set_widget_state(self.video_cancel_button, "normal" if can_stop else "disabled")
+        entry_state = "disabled" if active or self.busy else "normal"
         for widget in (self.video_path_entry, self.video_browse_button,
                        getattr(self, "ffmpeg_path_entry", None), getattr(self, "ffmpeg_browse_button", None)):
             if widget is not None:
-                widget.configure(state="disabled" if active or self.busy else "normal")
+                _set_widget_state(widget, entry_state)
+        combo_state = "disabled" if active or self.busy else "readonly"
         for widget in (self.video_fps_combo, self.video_bitrate_combo,
                        getattr(self, "video_source_combo", None),
                        getattr(self, "video_pov_duration_combo", None),
                        getattr(self, "video_codec_combo", None),
                        getattr(self, "video_speed_combo", None)):
             if widget is not None:
-                widget.configure(state="disabled" if active or self.busy else "readonly")
+                _set_widget_state(widget, combo_state)
+        check_state = "disabled" if active or self.busy else "normal"
         for widget in (self.video_game_audio_check, self.video_reconstructed_audio_check):
-            widget.configure(state="disabled" if active or self.busy else "normal")
-        self.reshade_configure_button.configure(state="normal" if ready and not active and not self.busy and not self.playing else "disabled")
-        self.reshade_forget_button.configure(state="normal" if not active and not self.busy and not self.playing else "disabled")
+            _set_widget_state(widget, check_state)
+        _set_widget_state(self.reshade_configure_button,
+                          "normal" if ready and not active and not self.busy and not self.playing
+                          else "disabled")
+        _set_widget_state(self.reshade_forget_button,
+                          "normal" if not active and not self.busy and not self.playing else "disabled")
         self._refresh_reshade(controller_status, active)
         self._advance_layer_pipeline()
 
@@ -1172,9 +1208,9 @@ class DollyApp:
             # Optional media telemetry must not stop the camera/session UI or
             # repeat the same failure in the log ten times every second.
             message = "ReShade status unavailable: " + str(exc)
-            self.reshade_status_text.set(message)
-            self.reshade_disable_button.configure(state="disabled")
-            self.reshade_configure_button.configure(state="disabled")
+            _set_var(self.reshade_status_text, message)
+            _set_widget_state(self.reshade_disable_button, "disabled")
+            _set_widget_state(self.reshade_configure_button, "disabled")
             signature = (id(bridge), message)
             if getattr(self, "_last_reshade_status_error", None) != signature:
                 self._last_reshade_status_error = signature
@@ -1189,28 +1225,31 @@ class DollyApp:
         issue = runtime_issue(selection, application_root=application_root()) if selection else None
         # Selecting a runtime must be possible without a live session; the
         # worker explains that a DirectX 11 replay is still required if pressed.
-        self.reshade_configure_button.configure(
-            state="normal" if selection and issue is None and not video_active and not self.busy
+        _set_widget_state(
+            self.reshade_configure_button,
+            "normal" if selection and issue is None and not video_active and not self.busy
             and not self.playing else "disabled")
         if state == 3:
-            self.reshade_status_text.set("ReShade unavailable: " + str(shade.get("message") or "Runtime loading failed."))
+            _set_var(self.reshade_status_text,
+                     "ReShade unavailable: " + str(shade.get("message") or "Runtime loading failed."))
         elif state == 2:
             binding = self.app_settings.reshade_binding
             menu = "Menu open." if shade.get("open") else (f"{binding.label} opens its menu." if binding else "Set its menu shortcut in Keybinds.")
-            self.reshade_status_text.set("ReShade ready. " + menu)
+            _set_var(self.reshade_status_text, "ReShade ready. " + menu)
         elif state == 1:
-            self.reshade_status_text.set("Loading ReShade…")
+            _set_var(self.reshade_status_text, "Loading ReShade…")
         elif not self.busy:
             if issue:
-                self.reshade_status_text.set("ReShade unavailable: " + issue)
+                _set_var(self.reshade_status_text, "ReShade unavailable: " + issue)
             elif selection and ready:
-                self.reshade_status_text.set("ReShade runtime selected. Press Enable ReShade to load it.")
+                _set_var(self.reshade_status_text, "ReShade runtime selected. Press Enable ReShade to load it.")
             elif selection:
-                self.reshade_status_text.set("ReShade runtime selected. Launch a replay through Dolly, "
-                                             "then press Enable ReShade (a live session enables it automatically).")
+                _set_var(self.reshade_status_text, "ReShade runtime selected. Launch a replay through Dolly, "
+                                                   "then press Enable ReShade (a live session enables it automatically).")
             else:
-                self.reshade_status_text.set("ReShade disabled. Choose a runtime DLL to enable its in-game menu.")
-        self.reshade_disable_button.configure(state="normal" if ready and state in (1, 2) and not self.busy and not video_active else "disabled")
+                _set_var(self.reshade_status_text, "ReShade disabled. Choose a runtime DLL to enable its in-game menu.")
+        _set_widget_state(self.reshade_disable_button,
+                          "normal" if ready and state in (1, 2) and not self.busy and not video_active else "disabled")
         # A selected runtime is opt-in and remembered across launches. Make one
         # attempt per bridge; a bad DLL must never create a retry/modal loop.
         if (ready and not self.busy and not self.playing and not video_active
@@ -1931,7 +1970,7 @@ class DollyApp:
         ttk.Label(view, text="PATH · TOP DOWN", style="CardMuted.TLabel").pack(anchor="w", pady=(0, 5))
         self.canvas = tk.Canvas(view, width=230, height=55, background=PANEL, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.bind("<Configure>", lambda _event: self._draw_path())
+        self.canvas.bind("<Configure>", self._schedule_draw_path)
         citadel = ttk.Frame(inspector, style="Card.TFrame", padding=(10, 8))
         citadel.grid(row=3, column=0, sticky="ew", pady=(10, 0))
         ttk.Label(citadel, text="CITADEL DEPTH OF FIELD", style="CardMuted.TLabel").pack(anchor="w", pady=(0, 5))
@@ -2739,6 +2778,7 @@ class DollyApp:
         self.rate_combo.pack(side="left")
         self.smoothing_row = ttk.Frame(options)
         self.smoothing_row.pack(fill="x", pady=(0, 10))
+        self._smoothing_packed = True
         ttk.Label(self.smoothing_row, text="Console smoothing").pack(side="left", padx=(0, 8))
         self.smoothing_combo = ttk.Combobox(self.smoothing_row, textvariable=self.smoothing,
             values=("Off", "Light", "Balanced", "Strong"), state="readonly", width=12)
@@ -2791,7 +2831,15 @@ class DollyApp:
             LOG.exception("Dolly's interface poll failed; the window will keep updating.")
         finally:
             if not self.closed:
-                self.root.after(100, self._poll)
+                self.root.after(self._poll_delay(), self._poll)
+
+    def _poll_delay(self):
+        """Poll fast only while a session or work is active."""
+        if (getattr(self, "playing", False) or getattr(self, "busy", False)
+                or getattr(self, "startup_cancel", None) is not None
+                or getattr(self, "_poll_connected", False)):
+            return 100
+        return 250
 
     def _poll_once(self):
         if self.closed:
@@ -2833,6 +2881,7 @@ class DollyApp:
             self.playing = bool(status.get("playing"))
             self._poll_paused_camera(status)
             connected = bool(status.get("connected"))
+            self._poll_connected = connected
             stage = str(status.get("startup_stage", "not_launched"))
             stage_labels = {
                 "not_launched": "Game not launched",
@@ -2858,29 +2907,34 @@ class DollyApp:
             session_label = stage_labels.get(stage, "Game connected" if connected else "Game not connected")
             if not connected and stage in ("connected", "unlocker_ready", "loading_replay", "replay_ready"):
                 session_label = "Disconnected — reconnect to continue"
-            self.session_text.set("Playing camera path" if self.playing else session_label)
+            _set_var(self.session_text, "Playing camera path" if self.playing else session_label)
             if self.startup_cancel is not None and not self.startup_cancel.is_set():
-                self.startup_progress.set(str(status.get("message") or session_label))
-            self.full_editor_switch.configure(state="disabled" if self.busy else "normal")
-            self.play_replay_button.configure(state="normal" if not self.busy and not self.playing else "disabled")
-            self.cancel_startup_button.configure(state="normal" if self.startup_cancel is not None and not self.startup_cancel.is_set() else "disabled")
+                _set_var(self.startup_progress, str(status.get("message") or session_label))
+            _set_widget_state(self.full_editor_switch, "disabled" if self.busy else "normal")
+            _set_widget_state(self.play_replay_button,
+                              "normal" if not self.busy and not self.playing else "disabled")
+            _set_widget_state(self.cancel_startup_button,
+                              "normal" if self.startup_cancel is not None
+                              and not self.startup_cancel.is_set() else "disabled")
             unlocker_ready = bool(status.get("unlocker_ready"))
             available = not self.busy and not self.playing
-            self.speed_combo.configure(state="normal" if available else "disabled")
-            self.rate_combo.configure(state="readonly" if available else "disabled")
+            _set_widget_state(self.speed_combo, "normal" if available else "disabled")
+            _set_widget_state(self.rate_combo, "readonly" if available else "disabled")
             running = bool(status.get("game_running"))
             driver_state = "disabled" if running or self.busy else "readonly"
-            self.camera_driver_combo.configure(state=driver_state)
+            _set_widget_state(self.camera_driver_combo, driver_state)
             home_driver_combo = getattr(self, "home_camera_driver_combo", None)
             if home_driver_combo is not None:
-                home_driver_combo.configure(state=driver_state)
+                _set_widget_state(home_driver_combo, driver_state)
             native = status.get("camera_backend") == "native" if running else self.camera_driver.get() == "Native (experimental)"
             self._set_driver_indicator(status.get("camera_backend"), running)
-            self.smoothing_combo.configure(state="disabled" if native or self.playing else "readonly")
-            if native:
+            _set_widget_state(self.smoothing_combo, "disabled" if native or self.playing else "readonly")
+            if native and getattr(self, "_smoothing_packed", False):
                 self.smoothing_row.pack_forget()
-            else:
+                self._smoothing_packed = False
+            elif not native and not getattr(self, "_smoothing_packed", False):
                 self.smoothing_row.pack(fill="x", pady=(0, 10))
+                self._smoothing_packed = True
             self.aspect_curve.set_enabled(available)
             if hasattr(self, "rotation_curve"):
                 self.rotation_curve.set_enabled(available)
@@ -2893,16 +2947,17 @@ class DollyApp:
                 (self.disconnect_button, not self.busy and connected),
             )
             for button, enabled in startup_buttons:
-                button.configure(state="normal" if enabled else "disabled")
+                _set_widget_state(button, "normal" if enabled else "disabled")
+            capture_available = available and connected and stage in ("replay_ready", "editing_ready")
             for button in self.capture_buttons:
-                button.configure(state="normal" if available and connected and stage in ("replay_ready", "editing_ready") else "disabled")
+                _set_widget_state(button, "normal" if capture_available else "disabled")
             message = str(status.get("message") or "")
             if message and message != self._last_controller_message:
                 self._last_controller_message = message
                 self.status_text.set(message)
             if not self.busy:
                 tick = status.get("tick")
-                self.busy_text.set(f"Replay tick {int(tick):,}" if tick is not None else "")
+                _set_var(self.busy_text, f"Replay tick {int(tick):,}" if tick is not None else "")
             if self.playing and not self.dragging:
                 self._set_time(float(status.get("time", self.shot_time.get())))
         except Exception as exc:
@@ -2996,10 +3051,10 @@ class DollyApp:
         else:
             active = "native" if selected == "Native (experimental)" else "console"
         if active == "native":
-            indicator.set("DRIVER · NATIVE")
+            _set_var(indicator, "DRIVER · NATIVE")
             style = "Pill.TLabel"
         else:
-            indicator.set("DRIVER · CONSOLE LEGACY")
+            _set_var(indicator, "DRIVER · CONSOLE LEGACY")
             style = "PillConsole.TLabel"
         label = getattr(self, "driver_indicator_label", None)
         if label is not None and label.cget("style") != style:
@@ -3194,6 +3249,18 @@ class DollyApp:
         self._refresh_curve()
 
     def _redraw_curves(self):
+        """Coalesce graph redraw bursts (wheel/pan/edits) into one idle pass."""
+        if getattr(self, "_curves_redraw_pending", False):
+            return
+        schedule = getattr(self.root, "after_idle", None)
+        if not callable(schedule):
+            self._redraw_curves_now()
+            return
+        self._curves_redraw_pending = True
+        schedule(self._redraw_curves_now)
+
+    def _redraw_curves_now(self):
+        self._curves_redraw_pending = False
         for widget in (getattr(self, "rotation_curve", None), getattr(self, "aspect_curve", None)):
             if widget is not None:
                 widget._redraw()
@@ -4015,7 +4082,12 @@ class DollyApp:
         self.slider.configure(to=max(10.0, float(self.project.duration), time))
         self.shot_time.set(time)
         self.time_text.set(_number(time))
-        self._draw_path()
+        # Moving the playhead must not rebuild the whole path overview; the
+        # full redraw only happens when the project itself changed.
+        if getattr(self, "_path_project", None) is self.project:
+            self._draw_path_playhead(time)
+        else:
+            self._draw_path()
         if hasattr(self, "aspect_curve"):
             self.aspect_curve.set_current_time(float(time))
         if hasattr(self, "rotation_curve"):
@@ -4247,10 +4319,27 @@ class DollyApp:
             self.setup_tree.insert("", "end", iid=str(index), values=(name, format_cvar_value(value)))
         self._refresh_citadel_dof()
 
+    def _schedule_draw_path(self, _event=None):
+        """Coalesce resize-driven path redraws into one idle pass."""
+        if getattr(self, "_path_draw_scheduled", False):
+            return
+        schedule = getattr(self.root, "after_idle", None)
+        if not callable(schedule):
+            self._draw_path()
+            return
+        self._path_draw_scheduled = True
+        schedule(self._run_scheduled_draw_path)
+
+    def _run_scheduled_draw_path(self):
+        self._path_draw_scheduled = False
+        self._draw_path()
+
     def _draw_path(self):
         if not hasattr(self, "canvas"):
             return
         canvas = self.canvas
+        self._path_projection = None
+        self._path_project = None
         canvas.delete("all")
         width, height = canvas.winfo_width(), canvas.winfo_height()
         if width < 20 or height < 20:
@@ -4279,6 +4368,8 @@ class DollyApp:
         y0, y1 = min(p[1] for p in all_points), max(p[1] for p in all_points)
         scale = min(max(1, width - 44) / max(1, x1 - x0), max(1, height - 44) / max(1, y1 - y0))
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        self._path_projection = (cx, cy, scale, width, height)
+        self._path_project = self.project
         def xy(point):
             return (width / 2 + (point[0] - cx) * scale, height / 2 - (point[1] - cy) * scale)
         if len(sample) > 1:
@@ -4287,14 +4378,26 @@ class DollyApp:
             x, y = xy(point)
             canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=ACCENT, outline="")
             canvas.create_text(x + 8, y - 8, text=str(i + 1), fill=TEXT, anchor="w", font=(FAMILY, _F["small"]))
+        self._draw_path_playhead(self.shot_time.get())
+
+    def _draw_path_playhead(self, time):
+        """Move the playhead marker without rebuilding the path overview."""
+        canvas = getattr(self, "canvas", None)
+        projection = getattr(self, "_path_projection", None)
+        if canvas is None or projection is None:
+            return
+        cx, cy, scale, width, height = projection
+        canvas.delete("path_playhead")
         try:
-            state = self.project.evaluate(self.shot_time.get())
-            x, y = xy((state["x"], state["y"]))
-            canvas.create_oval(x - 6, y - 6, x + 6, y + 6, outline=WARN, width=2)
-            yaw = math.radians(state["yaw"])
-            canvas.create_line(x, y, x + math.cos(yaw) * 18, y - math.sin(yaw) * 18, fill=WARN, width=2, arrow="last")
+            state = self.project.evaluate(time)
+            x = width / 2 + (state["x"] - cx) * scale
+            y = height / 2 - (state["y"] - cy) * scale
         except (ValueError, KeyError, TypeError):
-            pass
+            return
+        canvas.create_oval(x - 6, y - 6, x + 6, y + 6, outline=WARN, width=2, tags="path_playhead")
+        yaw = math.radians(state["yaw"])
+        canvas.create_line(x, y, x + math.cos(yaw) * 18, y - math.sin(yaw) * 18,
+                           fill=WARN, width=2, arrow="last", tags="path_playhead")
 
     def _title(self):
         marker = " *" if self.dirty else ""

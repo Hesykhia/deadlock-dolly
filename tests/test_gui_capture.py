@@ -841,7 +841,7 @@ class GuiPumpTests(unittest.TestCase):
         app.events.get_nowait.side_effect = RuntimeError("poll exploded")
         app._dropped_logs = 0
         DollyApp._poll(app)
-        app.root.after.assert_called_once_with(100, app._poll)
+        app.root.after.assert_called_once_with(app._poll_delay(), app._poll)
 
     def test_log_events_drop_instead_of_growing_the_queue_without_bound(self):
         harness = CaptureHarness()
