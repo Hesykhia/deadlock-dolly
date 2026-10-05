@@ -13,6 +13,7 @@ struct OverlayDiagnostics {
     // tick drags. Native-internal diagnostics; not part of any wire ABI.
     float timeline_x0 = 0, timeline_x1 = 0, timeline_y = 0;
     std::uint64_t timeline_drags = 0;
+    float timeline_view_start = 0, timeline_view_end = 0;
     std::uint64_t grid_frames = 0;
 };
 // Independent monotonic counters; sampled off the render thread.

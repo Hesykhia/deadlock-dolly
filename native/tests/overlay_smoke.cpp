@@ -879,6 +879,47 @@ int main(int argc, char** argv) {
                         "Alt tick drag was not counted as committed");
                 std::puts("Rendered timeline: plain drag scrubs; Alt+drag commits SetCameraTime passed.");
             }
+            // The Shot timeline wheel-zooms its visible window and right-drag
+            // pans it; wheeling out restores the full duration.
+            {
+                const auto before_zoom = dolly::overlay_diagnostics();
+                const float full = before_zoom.timeline_view_end - before_zoom.timeline_view_start;
+                require(full > 0, "Shot timeline view window was not recorded");
+                const float mid_x = (before_zoom.timeline_x0 + before_zoom.timeline_x1) * .5f;
+                auto& io = ImGui::GetIO();
+                io.AddMousePosEvent(mid_x, before_zoom.timeline_y);
+                io.AddMouseWheelEvent(0.0f, 1.0f);
+                render();
+                render();
+                const auto zoomed = dolly::overlay_diagnostics();
+                const float span = zoomed.timeline_view_end - zoomed.timeline_view_start;
+                require(span < full, "Wheel over the Shot timeline did not zoom in");
+                require(zoomed.timeline_view_start >= -1e-3f &&
+                            zoomed.timeline_view_end <= float(snapshot.duration) + 1e-3f,
+                        "Zoomed Shot timeline left the shot duration");
+                // Right-drag pans the zoomed window (dragging right moves the
+                // visible window earlier in the shot).
+                io.AddMousePosEvent(mid_x, zoomed.timeline_y);
+                io.AddMouseButtonEvent(1, true);
+                render();
+                io.AddMousePosEvent(mid_x + 40.0f, zoomed.timeline_y);
+                render();
+                io.AddMouseButtonEvent(1, false);
+                render();
+                require(dolly::overlay_diagnostics().timeline_view_start <
+                            zoomed.timeline_view_start,
+                        "Right-drag did not pan the zoomed Shot timeline");
+                // Wheel out restores the full duration.
+                for (int i = 0; i < 40; ++i) {
+                    io.AddMousePosEvent(mid_x, zoomed.timeline_y);
+                    io.AddMouseWheelEvent(0.0f, -1.0f);
+                    render();
+                }
+                const auto restored = dolly::overlay_diagnostics();
+                require(std::abs((restored.timeline_view_end - restored.timeline_view_start) - full) < 1e-2f,
+                        "Wheel out did not restore the full Shot timeline");
+                std::puts("Rendered timeline: wheel zoom, right-drag pan and full-range restore passed.");
+            }
             // Framing grid: fixed thirds and centre cross while the paused
             // editor owns the view; independent of the path-guides toggle.
             {

@@ -145,6 +145,14 @@ class SharedWidgetTests(unittest.TestCase):
         page.scroll_page_wheel(SimpleNamespace(delta=0, num=4))
         self.assertEqual(page.canvas.yview(), before)
 
+    def test_small_precision_wheel_deltas_accumulate(self):
+        page, labels = self.make_page()
+        before = page.canvas.yview()[0]
+        page.scroll_page_wheel(SimpleNamespace(delta=-30, num=0))
+        self.assertEqual(page.canvas.yview()[0], before)
+        page.scroll_page_wheel(SimpleNamespace(delta=-30, num=0))
+        self.assertGreater(page.canvas.yview()[0], before)
+
     def test_nonoverflowing_page_does_not_consume_wheel(self):
         page = widgets.ScrollPage(self.root); page.pack(fill='both', expand=True)
         label = ttk.Label(page.body, text='Short'); label.pack(); self.root.update()

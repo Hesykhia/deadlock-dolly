@@ -447,7 +447,6 @@ class DollyApp:
         file_menu.add_command(label="Rename shot…", command=self.rename)
         file_menu.add_separator()
         file_menu.add_command(label="Keybinds…", command=self._show_keybinds)
-        file_menu.add_command(label="Paused camera…", command=self._open_paused_camera)
         file_menu.add_command(label="Export diagnostics…", command=self._diagnostics)
         file_menu.add_command(label="Recover game configuration…", command=self._recover_game_config)
         file_menu.add_separator()
@@ -1867,8 +1866,6 @@ class DollyApp:
         ttk.Label(timing, textvariable=self.path_summary, style="Muted.TLabel").pack(side="right")
         ttk.Button(timing, text="Keybinds…", style="Quiet.TButton",
                    command=self._show_keybinds).pack(side="right", padx=(0, 14))
-        ttk.Button(timing, text="Paused camera…", style="Quiet.TButton",
-                   command=self._open_paused_camera).pack(side="right", padx=(0, 7))
         workspace = ttk.Frame(tab)
         workspace.grid(row=2, column=0, sticky="nsew")
         workspace.columnconfigure(0, weight=1)

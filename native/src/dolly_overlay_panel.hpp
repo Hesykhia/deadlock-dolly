@@ -42,6 +42,8 @@ public:
     float timeline_x1() const noexcept { return timeline_x1_; }
     float timeline_y() const noexcept { return timeline_y_; }
     std::uint64_t timeline_drags() const noexcept { return timeline_drags_; }
+    float timeline_view_start() const noexcept { return timeline_view_start_; }
+    float timeline_view_end() const noexcept { return timeline_view_end_; }
 
 private:
     static void roster_label(const EditorRosterEntry& entry, char* out, std::size_t capacity);
@@ -65,5 +67,9 @@ private:
     VisualizationGeometry guide_geometry;
     float timeline_x0_ = 0, timeline_x1_ = 0, timeline_y_ = 0;
     std::uint64_t timeline_drags_ = 0;
+    const char* timeline_view_id_ = nullptr;
+    float timeline_view_start_ = 0, timeline_view_end_ = 0;
+    bool timeline_panning_ = false;
+    float timeline_pan_anchor_ = 0, timeline_pan_start_ = 0, timeline_pan_end_ = 0;
 };
 } // namespace dolly

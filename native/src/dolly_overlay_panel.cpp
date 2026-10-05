@@ -235,16 +235,34 @@ void OverlayPanel::roster_label(const EditorRosterEntry& entry, char* out, std::
 }
 // Label, ImGui slider and a right-aligned readout. Ctrl+click types an exact
 // value (ImGui built-in), which keeps numeric entry available in game. With a
-// timeline, Alt+drag moves a camera tick along the track: the playhead stays
-// pinned while a tick is dragged and the new arrival commits on release with
-// the current camera-list revision, so the list re-sorts safely afterwards.
-// A plain drag always scrubs the slider, so the seek preview stays reachable
-// even when the track is crowded with ticks.
+// timeline, the wheel zooms the visible time window and right-drag pans it so
+// a crowded track stays workable. Alt+drag moves a camera tick (the playhead
+// stays pinned while a tick is dragged and the new arrival commits on release
+// with the current camera-list revision, so the list re-sorts safely). A plain
+// drag always scrubs the slider within the visible window.
 OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* label, float* value,
                                                  float minimum, float maximum, const char* format,
                                                  float label_width,
                                                  const VisualizationPath* timeline) {
     SliderRow result;
+    const bool timeline_mode = timeline != nullptr && maximum > minimum;
+    if (timeline_mode) {
+        const float full = maximum - minimum;
+        const bool stale = timeline_view_id_ == nullptr
+                           || std::strcmp(timeline_view_id_, id) != 0
+                           || timeline_view_end_ - timeline_view_start_ <= 0.0f;
+        if (stale || timeline_view_end_ > maximum || timeline_view_start_ < minimum
+                || timeline_view_end_ - timeline_view_start_ > full) {
+            timeline_view_id_ = id;
+            timeline_view_start_ = minimum;
+            timeline_view_end_ = maximum;
+        } else {
+            timeline_view_start_ = std::max(timeline_view_start_, minimum);
+            timeline_view_end_ = std::min(timeline_view_end_, maximum);
+        }
+    }
+    const float slider_min = timeline_mode ? timeline_view_start_ : minimum;
+    const float slider_max = timeline_mode ? timeline_view_end_ : maximum;
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("%s", label);
     const float right = ImGui::GetWindowContentRegionMax().x;
@@ -258,10 +276,14 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
     for (const auto color : {ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive,
                              ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive, ImGuiCol_Border})
         ImGui::PushStyleColor(color, ImVec4(0, 0, 0, 0));
-    ImGui::SliderFloat(id, value, minimum, maximum, "", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::SliderFloat(id, value, slider_min, slider_max, "", ImGuiSliderFlags_AlwaysClamp);
     result.committed = ImGui::IsItemDeactivatedAfterEdit();
     result.active = ImGui::IsItemActive();
     const bool deactivated = ImGui::IsItemDeactivated();
+    // Hovering the Shot timeline claims the wheel so the panel's scroll region
+    // does not swallow it; the wheel zooms the timeline instead.
+    if (timeline_mode)
+        ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
     ImGui::PopStyleColor(6);
     ImGui::PopStyleVar(2);
     // Process-lived like the other per-widget edit caches.
@@ -272,7 +294,7 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
         const auto lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
         const float y = (lo.y + hi.y) * .5f;
         const float x0 = lo.x + 4 * panel_scale, x1 = hi.x - 4 * panel_scale;
-        const float t = std::clamp((*value - minimum) / (maximum - minimum), 0.0f, 1.0f);
+        const float t = std::clamp((*value - slider_min) / (slider_max - slider_min), 0.0f, 1.0f);
         const float x = x0 + (x1 - x0) * t;
         auto* draw = ImGui::GetWindowDrawList();
         draw->AddLine(ImVec2(x0, y), ImVec2(x1, y),
@@ -281,16 +303,57 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
                       ImGui::GetColorU32(panel_color(dolly::ui::ACCENT_ACTIVE)), 6 * panel_scale);
         int hovered_tick = -1;
         double hovered_time = 0;
-        if (timeline && maximum > minimum) {
+        if (timeline_mode) {
             timeline_x0_ = x0;
             timeline_x1_ = x1;
             timeline_y_ = y;
-            const float span = maximum - minimum;
+            const float span = timeline_view_end_ - timeline_view_start_;
             const unsigned dragged_color = 0xe8c879;
-            const auto marker_x = [&](double time) {
-                return x0 + (x1 - x0) *
-                                std::clamp(float((time - minimum) / span), 0.0f, 1.0f);
+            const auto in_view = [&](double time) {
+                return time >= timeline_view_start_ && time <= timeline_view_end_;
             };
+            const auto marker_x = [&](double time) {
+                const float current = timeline_view_end_ - timeline_view_start_;
+                return x0 + (x1 - x0) *
+                                std::clamp(float((time - timeline_view_start_) / current), 0.0f, 1.0f);
+            };
+            // Wheel zooms around the pointer; right-drag pans the window. The
+            // seek preview follows the visible window so its handle stays put.
+            if (ImGui::IsItemHovered() && io.MouseWheel != 0.0f) {
+                const float full = maximum - minimum;
+                const float fraction =
+                    std::clamp((io.MousePos.x - x0) / std::max(1.0f, x1 - x0), 0.0f, 1.0f);
+                const float anchor = timeline_view_start_ + fraction * span;
+                const float factor = io.MouseWheel > 0 ? 0.85f : 1.0f / 0.85f;
+                const float min_span = std::min(full, std::max(0.1f, full * 0.002f));
+                const float next_span = std::clamp(span * factor, min_span, full);
+                const float next_start =
+                    std::clamp(anchor - fraction * next_span, minimum, maximum - next_span);
+                timeline_view_start_ = next_start;
+                timeline_view_end_ = next_start + next_span;
+                *value = std::clamp(*value, timeline_view_start_, timeline_view_end_);
+            }
+            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)
+                    && span < maximum - minimum) {
+                timeline_panning_ = true;
+                timeline_pan_anchor_ = io.MousePos.x;
+                timeline_pan_start_ = timeline_view_start_;
+                timeline_pan_end_ = timeline_view_end_;
+            }
+            if (timeline_panning_) {
+                if (ImGui::IsMouseDragging(ImGuiMouseButton_Right)) {
+                    const float pan_span = timeline_pan_end_ - timeline_pan_start_;
+                    const float shift = -(io.MousePos.x - timeline_pan_anchor_) /
+                                        std::max(1.0f, x1 - x0) * pan_span;
+                    const float next_start = std::clamp(timeline_pan_start_ + shift,
+                                                        minimum, maximum - pan_span);
+                    timeline_view_start_ = next_start;
+                    timeline_view_end_ = next_start + pan_span;
+                    *value = std::clamp(*value, timeline_view_start_, timeline_view_end_);
+                }
+                if (!ImGui::IsMouseDown(ImGuiMouseButton_Right))
+                    timeline_panning_ = false;
+            }
             // An abandoned drag (panel hidden mid-drag) must never leak into
             // the next time the timeline is drawn.
             if (dragged_tick >= 0 && !result.active && !deactivated)
@@ -298,6 +361,8 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
             if (!result.active && io.KeyAlt && ImGui::IsItemHovered()) {
                 float best = 8 * panel_scale;
                 for (const auto& camera : timeline->cameras()) {
+                    if (!in_view(camera.time))
+                        continue;
                     const float distance = std::abs(io.MousePos.x - marker_x(camera.time));
                     if (distance <= best) {
                         best = distance;
@@ -317,6 +382,8 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
                 if (press.y >= lo.y - 10 * panel_scale && press.y <= hi.y + 10 * panel_scale) {
                     float best = 8 * panel_scale;
                     for (const auto& camera : timeline->cameras()) {
+                        if (!in_view(camera.time))
+                            continue;
                         const float distance = std::abs(press.x - marker_x(camera.time));
                         if (distance <= best) {
                             best = distance;
@@ -332,7 +399,8 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
                 // Keep the playhead exactly where it was for the whole drag.
                 *value = pinned_value;
                 const float fraction = std::clamp((io.MousePos.x - x0) / (x1 - x0), 0.0f, 1.0f);
-                dragged_time = minimum + fraction * span;
+                dragged_time = timeline_view_start_ +
+                               fraction * (timeline_view_end_ - timeline_view_start_);
                 const float ghost = x0 + (x1 - x0) * fraction;
                 draw->AddLine(ImVec2(ghost, y - 11 * panel_scale),
                               ImVec2(ghost, y + 11 * panel_scale),
@@ -355,6 +423,8 @@ OverlayPanel::SliderRow OverlayPanel::slider_row(const char* id, const char* lab
                 }
             }
             for (const auto& camera : timeline->cameras()) {
+                if (!in_view(camera.time))
+                    continue;
                 const float marker = marker_x(camera.time);
                 const bool selected = camera.index == timeline->selected_camera();
                 const bool highlighted = int(camera.index) == hovered_tick;
@@ -672,7 +742,7 @@ void OverlayPanel::draw_panel(const EditorSnapshot& state) {
                                   ImGui::GetContentRegionAvail().x, double(seek_time));
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip(
-                            "Seek the replay and apply this point on the camera path. Moving the slider alone does not seek; Alt+drag a camera tick to retime it. Timeline marks match the saved camera guides.");
+                            "Seek the replay and apply this point on the camera path. Moving the slider alone does not seek; Alt+drag a camera tick to retime it, wheel zooms the timeline and right-drag pans it. Timeline marks match the saved camera guides.");
                     ImGui::EndDisabled();
                     ImGui::Separator();
                     char tick_label[64]{};

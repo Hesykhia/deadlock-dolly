@@ -9,24 +9,33 @@ from .. import ui_theme
 GAP = 14
 
 
+WHEEL_PIXELS_PER_NOTCH = 60
+WHEEL_UNIT_PIXELS = 20
+
+
 class ScrollPage(ttk.Frame):
     """One vertical scroll region; wheel events stay within this page."""
     def __init__(self, parent):
         super().__init__(parent)
         self.canvas = tk.Canvas(self, background=ui_theme.TOKENS["bg"], highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set, yscrollincrement=WHEEL_UNIT_PIXELS)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
         self.body = ttk.Frame(self.canvas, padding=(16, 12))
         self.window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.window, width=e.width))
         self.body.bind("<Configure>", self._resize)
+        self._wheel_pixels = 0.0
+        self._scrollregion = None
         self.bind_id = self.winfo_toplevel().bind("<MouseWheel>", self._wheel, add="+")
         self.bind("<Destroy>", self._destroyed, add="+")
 
     def _resize(self, _event=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        region = self.canvas.bbox("all")
+        if region != self._scrollregion:
+            self._scrollregion = region
+            self.canvas.configure(scrollregion=region)
 
     def _wheel(self, event):
         target = event.widget
@@ -39,8 +48,22 @@ class ScrollPage(ttk.Frame):
             return "break"
 
     def scroll_page_wheel(self, event):
-        amount = -int(event.delta / 120) if event.delta else (-1 if getattr(event, "num", 0) == 4 else 1)
-        self.canvas.yview_scroll(amount, "units")
+        # Accumulate pixel deltas so precision touchpads and high-resolution
+        # wheels (|delta| < 120) scroll smoothly instead of dropping events.
+        if event.delta:
+            self._wheel_pixels += -event.delta / 120 * WHEEL_PIXELS_PER_NOTCH
+        else:
+            self._wheel_pixels += (-WHEEL_PIXELS_PER_NOTCH if getattr(event, "num", 0) == 4
+                                   else WHEEL_PIXELS_PER_NOTCH)
+        units = int(self._wheel_pixels / WHEEL_UNIT_PIXELS)
+        if not units:
+            return
+        first, last = self.canvas.yview()
+        if (units < 0 and first <= 0.0) or (units > 0 and last >= 1.0):
+            self._wheel_pixels = 0.0
+            return
+        self._wheel_pixels -= units * WHEEL_UNIT_PIXELS
+        self.canvas.yview_scroll(units, "units")
 
     def _destroyed(self, event):
         if event.widget is self:

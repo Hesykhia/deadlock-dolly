@@ -1032,6 +1032,8 @@ OverlayDiagnostics overlay_diagnostics() noexcept {
     result.timeline_x1 = panel_ui.timeline_x1();
     result.timeline_y = panel_ui.timeline_y();
     result.timeline_drags = panel_ui.timeline_drags();
+    result.timeline_view_start = panel_ui.timeline_view_start();
+    result.timeline_view_end = panel_ui.timeline_view_end();
     result.grid_frames = diagnostic_grid.load(std::memory_order_relaxed);
     return result;
 }

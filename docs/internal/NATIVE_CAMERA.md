@@ -68,7 +68,7 @@ modes, restoration behavior and the live test checklist.
 5. Watch the last camera at completion. Confirm the replay pauses, the HUD
    returns and the camera does not jump. Also press **Pause** partway through
    a run and check the same handoff.
-6. Open **Paused camera…** and test movement, **Previous / Next**, and capture
+6. Start flight from the F8 panel, switch cameras in the list, and capture
    again. Native input must resume without a height jump or delayed mouse movement.
 7. Export diagnostics immediately after a problem. Note the speed, whether
    it was straight movement or rotation, and whether it happened during the
