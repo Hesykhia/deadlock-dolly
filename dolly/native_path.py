@@ -65,7 +65,9 @@ The callback consumes these coefficients rather than a sampled pose stream.
         if name in ("yaw", "roll") and project.rotation_mode == "shortest":
             values = _unwrap(values)
         interpolation = project.lens_interpolation if name in ("aspect_ratio", "lens_scale") else project.interpolation
-        flags = int(name not in ("x", "y", "z"))
+        # The native clamp bit follows the evaluator: the spline mode is
+        # intentionally unclamped for every channel.
+        flags = int(name not in ("x", "y", "z") and interpolation != "spline")
         kind = 0 if interpolation == "step" else 1
         tangents = [0.0] * len(keys)
         if len(keys) > 2 and interpolation in ("smooth", "spline"):

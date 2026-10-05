@@ -319,7 +319,10 @@ class SplineInterpolationTests(unittest.TestCase):
             self.assertAlmostEqual(curvature(index - 1, True), curvature(index, False),
                                    places=6)
 
-    def test_spline_bounds_rotation_channels_only(self):
+    def test_spline_rotation_channels_are_not_clamped(self):
+        # The old PCHIP clamp would flatten the spline into a wall wherever it
+        # passed a key's value; spline mode keeps the true C2 curve for every
+        # channel, so identical x and pitch keys evaluate identically.
         times = [0.0, 0.2, 0.4, 0.6, 0.8]
         values = [0.0, 0.0, 10.0, 0.0, 0.0]
         project = Project(interpolation="spline",
@@ -327,9 +330,8 @@ class SplineInterpolationTests(unittest.TestCase):
         samples = [index / 2000 * times[-1] for index in range(2001)]
         self.assertLess(min(project.evaluate(t)["x"] for t in samples), 0.0)
         for timestamp in samples:
-            pitch = project.evaluate(timestamp)["pitch"]
-            self.assertLessEqual(pitch, 10.0)
-            self.assertGreaterEqual(pitch, 0.0)
+            self.assertAlmostEqual(project.evaluate(timestamp)["pitch"],
+                                   project.evaluate(timestamp)["x"], places=12)
 
     def test_spline_version_and_old_modes_are_preserved(self):
         keys = [key(0, x=0), key(1, x=1), key(2, x=0)]

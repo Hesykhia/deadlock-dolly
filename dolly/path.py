@@ -430,8 +430,10 @@ def _sample(times: list[float], values: list[float], time: float,
              + (u3 - u2) * span * tangents[left + 1])
     if not math.isfinite(value):
         return (1 - fraction) * values[left] + fraction * values[left + 1]
-    if monotone:
-        # Also contain floating-point rounding at segment boundaries.
+    if monotone and interpolation != "spline":
+        # Contain PCHIP overshoot at segment boundaries. The C2 spline is
+        # intentionally unclamped: clamping it would flatten the curve into a
+        # wall wherever it passes a key's value.
         low, high = sorted((values[left], values[left + 1]))
         value = max(low, min(high, value))
     return value

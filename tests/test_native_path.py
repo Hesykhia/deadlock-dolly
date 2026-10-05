@@ -10,7 +10,8 @@ import subprocess
 import tempfile
 import unittest
 
-from dolly.native_path import CHANNELS, HEADER, HEADER_BYTES, MAX_CAMERA_KEYS, SEGMENT_BYTES, compile_project
+from dolly.native_path import (CHANNEL_RECORD, CHANNELS, HEADER, HEADER_BYTES, MAX_CAMERA_KEYS,
+                               SEGMENT_BYTES, compile_project)
 from dolly.path import CvarTrack, Keyframe, Project, TrackKey
 
 
@@ -93,6 +94,9 @@ class NativeCompilerTests(unittest.TestCase):
             self.assertEqual((left, right), (keys[index].x, keys[index + 1].x))
             self.assertAlmostEqual(derivative_a, tangents[index], places=12)
             self.assertAlmostEqual(derivative_b, tangents[index + 1], places=12)
+        # Pitch (channel 3) keeps the spline curve too: no native clamp bit.
+        pitch_offset = HEADER_BYTES + 16 + 3 * CHANNEL_RECORD.size
+        self.assertEqual(struct.unpack_from("<I", data, pitch_offset + 4)[0], 0)
 
     def test_spline_blob_evaluation_matches_the_project_evaluator(self):
         keys = [camera(0, x=0), camera(.4, x=4), camera(1.1, x=-2), camera(3, x=1)]
