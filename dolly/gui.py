@@ -259,7 +259,8 @@ class DollyApp:
         self.busy = False
         self.dirty = False
         self.file_path: Path | None = None
-        self.project = Project(name="Untitled shot", keyframes=[], tracks=[])
+        self.project = Project(name="Untitled shot", keyframes=[], tracks=[],
+                               interpolation="spline")
         self.shot_history = ShotHistory(self.project)
         self.controller = Controller(log_callback=self._enqueue_log)
         self.video_export = VideoExport(self.controller)
@@ -275,7 +276,7 @@ class DollyApp:
         self.busy_text = tk.StringVar(value="")
         self.start_tick = tk.StringVar(value="0")
         self.tick_rate = tk.StringVar(value="64")
-        self.interpolation = tk.StringVar(value="smooth")
+        self.interpolation = tk.StringVar(value="spline")
         self.rotation = tk.StringVar(value="shortest")
         self.standard_aspect = tk.StringVar(value="16:9")
         self.lens_interpolation = tk.StringVar(value="smooth")
@@ -2486,7 +2487,7 @@ class DollyApp:
         ttk.Button(actions, text="Add entered camera", command=self._add_key).pack(side="left")
         ttk.Label(body, text="SHOT TIMING & MOVEMENT", style="Section.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 10))
         for index, (label, variable, values) in enumerate((("Start replay tick", self.start_tick, None), ("Ticks / second", self.tick_rate, None),
-                                                         ("Position curve", self.interpolation, ("smooth", "linear")),
+                                                         ("Position curve", self.interpolation, ("spline", "smooth", "linear")),
                                                          ("Rotation", self.rotation, ("shortest", "unwrapped")))):
             cell = ttk.Frame(body)
             cell.grid(row=7 + index // 2, column=index % 2, sticky="ew", padx=(0, 14 if index % 2 == 0 else 0), pady=(0, 8))
@@ -4340,7 +4341,8 @@ class DollyApp:
         if not self._allow_discard():
             return
         self._close_paused_camera()
-        self.project = Project(name="Untitled shot", keyframes=[], tracks=[])
+        self.project = Project(name="Untitled shot", keyframes=[], tracks=[],
+                               interpolation=self.interpolation.get())
         self.shot_history.reset(self.project)
         self._native_camera_page = 0
         self.file_path = None

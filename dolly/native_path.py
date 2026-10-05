@@ -25,7 +25,8 @@ from __future__ import annotations
 import math
 import struct
 
-from .path import Project, _monotone_tangents, _position_tangents, _unwrap, channel_value
+from .path import (Project, _monotone_tangents, _position_tangents, _spline_tangents,
+                   _unwrap, channel_value)
 
 
 CHANNELS = ("x", "y", "z", "pitch", "yaw", "roll", "aspect_ratio")
@@ -67,9 +68,12 @@ The callback consumes these coefficients rather than a sampled pose stream.
         flags = int(name not in ("x", "y", "z"))
         kind = 0 if interpolation == "step" else 1
         tangents = [0.0] * len(keys)
-        if len(keys) > 2 and interpolation == "smooth":
+        if len(keys) > 2 and interpolation in ("smooth", "spline"):
             try:
-                candidate = (_monotone_tangents if flags else _position_tangents)(times, values)
+                if interpolation == "spline":
+                    candidate = _spline_tangents(times, values)
+                else:
+                    candidate = (_monotone_tangents if flags else _position_tangents)(times, values)
                 if all(math.isfinite(value) for value in candidate):
                     tangents = candidate
                     kind = 2

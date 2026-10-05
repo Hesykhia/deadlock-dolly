@@ -80,6 +80,51 @@ class NativeCompilerTests(unittest.TestCase):
         kind, _flags, _left, _right, derivative_a, derivative_b = struct.unpack_from("<II4d", data, 176)
         self.assertEqual((kind, derivative_a, derivative_b), (1, 0, 0))
 
+    def test_spline_compiles_cubic_hermite_tangents(self):
+        from dolly.path import _spline_tangents
+        keys = [camera(0, x=0), camera(1, x=4), camera(3, x=-2), camera(4, x=1)]
+        shot = Project(interpolation="spline", keyframes=keys)
+        data = compile_project(shot)
+        tangents = _spline_tangents([key.time for key in keys], [key.x for key in keys])
+        for index in range(len(keys) - 1):
+            kind, flags, left, right, derivative_a, derivative_b = struct.unpack_from(
+                "<II4d", data, HEADER_BYTES + index * SEGMENT_BYTES + 16)
+            self.assertEqual((kind, flags), (2, 0))
+            self.assertEqual((left, right), (keys[index].x, keys[index + 1].x))
+            self.assertAlmostEqual(derivative_a, tangents[index], places=12)
+            self.assertAlmostEqual(derivative_b, tangents[index + 1], places=12)
+
+    def test_spline_blob_evaluation_matches_the_project_evaluator(self):
+        keys = [camera(0, x=0), camera(.4, x=4), camera(1.1, x=-2), camera(3, x=1)]
+        shot = Project(interpolation="spline", keyframes=keys)
+        data = compile_project(shot)
+
+        def blob_x(timestamp):
+            if timestamp <= keys[0].time:
+                return keys[0].x
+            if timestamp >= keys[-1].time:
+                return keys[-1].x
+            for index in range(len(keys) - 1):
+                offset = HEADER_BYTES + index * SEGMENT_BYTES
+                begin, end = struct.unpack_from("<2d", data, offset)
+                if not begin <= timestamp <= end:
+                    continue
+                kind, _flags, left, right, derivative_a, derivative_b = struct.unpack_from(
+                    "<II4d", data, offset + 16)
+                self.assertEqual(kind, 2)
+                span = end - begin
+                u = (timestamp - begin) / span
+                u2, u3 = u * u, u * u * u
+                return ((2 * u3 - 3 * u2 + 1) * left
+                        + (u3 - 2 * u2 + u) * span * derivative_a
+                        + (-2 * u3 + 3 * u2) * right
+                        + (u3 - u2) * span * derivative_b)
+            return keys[-1].x
+
+        for timestamp in (0, .1, .2, .4, .55, .8, 1.1, 1.7, 2.5, 2.99, 3):
+            self.assertAlmostEqual(blob_x(timestamp), shot.evaluate(timestamp)["x"],
+                                   places=10)
+
 
 @unittest.skipUnless(shutil.which("g++"), "Native C++ parity runner requires g++; Windows CI runs the native CMake gate")
 class NativeEvaluationTests(unittest.TestCase):
@@ -143,7 +188,7 @@ class NativeEvaluationTests(unittest.TestCase):
                                   camera(.7, yaw=540, roll=-180), camera(2, yaw=1080, roll=-720)])
         for rotation in ("shortest", "unwrapped"):
             shot.rotation_mode = rotation
-            for motion in ("linear", "smooth"):
+            for motion in ("linear", "smooth", "spline"):
                 shot.interpolation = motion
                 self.assert_matches(shot, [0, .03, .1, .31, .7, 1.1, 1.9, 2, 3])
 

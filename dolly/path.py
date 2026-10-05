@@ -27,6 +27,7 @@ VECTOR_FORMAT_VERSION = 3
 CONFETTI_FORMAT_VERSION = 7
 PARTICLE_FORMAT_VERSION = 8
 LENS_FORMAT_VERSION = 9
+SPLINE_FORMAT_VERSION = 10
 CONFETTI_SPAWN_HEIGHT_DEFAULT = 250.0
 CONFETTI_SPAWN_HEIGHT_MIN = 100.0
 CONFETTI_SPAWN_HEIGHT_MAX = 1500.0
@@ -365,6 +366,39 @@ def _monotone_tangents(times: list[float], values: list[float]) -> list[float]:
     return derivatives
 
 
+def _spline_tangents(times: list[float], values: list[float]) -> list[float]:
+    """Natural cubic spline derivatives (C2) for nonuniform sample times."""
+    count = len(times)
+    if count == 2:
+        slope = (values[1] - values[0]) / (times[1] - times[0])
+        return [slope, slope]
+    spacing = [times[i + 1] - times[i] for i in range(count - 1)]
+    slopes = [(values[i + 1] - values[i]) / spacing[i] for i in range(count - 1)]
+    # Tridiagonal system for the interior second derivatives, natural ends.
+    lower = [0.0] * count
+    diagonal = [1.0] * count
+    upper = [0.0] * count
+    rhs = [0.0] * count
+    for i in range(1, count - 1):
+        lower[i] = spacing[i - 1]
+        diagonal[i] = 2 * (spacing[i - 1] + spacing[i])
+        upper[i] = spacing[i]
+        rhs[i] = 6 * (slopes[i] - slopes[i - 1])
+    for i in range(1, count - 1):
+        factor = lower[i] / diagonal[i - 1]
+        diagonal[i] -= factor * upper[i - 1]
+        rhs[i] -= factor * rhs[i - 1]
+    second = [0.0] * count
+    for i in range(count - 2, 0, -1):
+        second[i] = (rhs[i] - upper[i] * second[i + 1]) / diagonal[i]
+    derivatives = [0.0] * count
+    derivatives[0] = slopes[0] - spacing[0] * (2 * second[0] + second[1]) / 6
+    for i in range(1, count - 1):
+        derivatives[i] = slopes[i] - spacing[i] * (2 * second[i] + second[i + 1]) / 6
+    derivatives[-1] = slopes[-1] + spacing[-1] * (second[-2] + 2 * second[-1]) / 6
+    return derivatives
+
+
 def _sample(times: list[float], values: list[float], time: float,
             interpolation: str, monotone: bool = True) -> float:
     if time <= times[0] or len(times) == 1:
@@ -379,7 +413,10 @@ def _sample(times: list[float], values: list[float], time: float,
     if interpolation == "linear" or len(times) == 2:
         return (1 - fraction) * values[left] + fraction * values[left + 1]
     try:
-        tangents = (_monotone_tangents if monotone else _position_tangents)(times, values)
+        if interpolation == "spline":
+            tangents = _spline_tangents(times, values)
+        else:
+            tangents = (_monotone_tangents if monotone else _position_tangents)(times, values)
     except ArithmeticError:
         # Extremely close timestamps can exceed floating-point derivative
         # precision. A linear segment remains finite and honors both keys.
@@ -421,7 +458,7 @@ class Project:
     def validate(self) -> None:
         if not isinstance(self.name, str) or len(self.name) > 256:
             raise ValueError("Project name must be text no longer than 256 characters")
-        _choice(self.interpolation, ("linear", "smooth"), "Camera interpolation")
+        _choice(self.interpolation, ("linear", "smooth", "spline"), "Camera interpolation")
         _choice(self.rotation_mode, ("shortest", "unwrapped"), "Rotation mode")
         _choice(self.lens_interpolation, ("linear", "smooth", "step"), "Zoom interpolation")
         if not isinstance(self.confetti_enabled, bool):
@@ -600,6 +637,9 @@ class Project:
         if any(k.lens_scale is not None for k in self.keyframes):
             version = LENS_FORMAT_VERSION
             particles_used = True  # New-format files include the existing optional-setting schema.
+        if self.interpolation == "spline":
+            version = SPLINE_FORMAT_VERSION
+            particles_used = True
         return {
             "format": FORMAT_NAME,
             "version": version,
@@ -633,9 +673,10 @@ class Project:
         if isinstance(version, bool) or not isinstance(version, int) \
                 or version not in (1, FORMAT_VERSION, VECTOR_FORMAT_VERSION, ATTACH_FORMAT_VERSION,
                                    ROTATION_FORMAT_VERSION, BLEND_FORMAT_VERSION,
-                                   CONFETTI_FORMAT_VERSION, PARTICLE_FORMAT_VERSION, LENS_FORMAT_VERSION):
+                                   CONFETTI_FORMAT_VERSION, PARTICLE_FORMAT_VERSION,
+                                   LENS_FORMAT_VERSION, SPLINE_FORMAT_VERSION):
             raise ValueError(f"Unsupported project version: {version!r}; expected 1 through "
-                             f"{LENS_FORMAT_VERSION}")
+                             f"{SPLINE_FORMAT_VERSION}")
         allowed = ("format", "version", "name", "interpolation", "rotation_mode",
                    "start_tick", "tick_rate", "setup_values", "keyframes", "tracks")
         if version >= FORMAT_VERSION:

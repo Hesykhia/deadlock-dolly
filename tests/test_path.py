@@ -294,5 +294,54 @@ class PathTests(unittest.TestCase):
                     Project.load(path)
 
 
+class SplineInterpolationTests(unittest.TestCase):
+    def test_spline_passes_through_keys_with_continuous_curvature(self):
+        from dolly.path import _spline_tangents
+        times = [0.0, 0.4, 1.1, 1.2, 3.0]
+        values = [0.0, 2.0, -1.0, 3.0, 0.5]
+        project = Project(interpolation="spline",
+                          keyframes=[key(t, x=v) for t, v in zip(times, values)])
+        for timestamp, value in zip(times, values):
+            self.assertAlmostEqual(project.evaluate(timestamp)["x"], value, places=9)
+        tangents = _spline_tangents(times, values)
+
+        def curvature(segment, right):
+            span = times[segment + 1] - times[segment]
+            left_value, right_value = values[segment], values[segment + 1]
+            left_slope, right_slope = tangents[segment], tangents[segment + 1]
+            if right:
+                return (6 * left_value + 2 * span * left_slope - 6 * right_value
+                        + 4 * span * right_slope) / span ** 2
+            return (-6 * left_value - 4 * span * left_slope + 6 * right_value
+                    - 2 * span * right_slope) / span ** 2
+
+        for index in range(1, len(times) - 1):
+            self.assertAlmostEqual(curvature(index - 1, True), curvature(index, False),
+                                   places=6)
+
+    def test_spline_bounds_rotation_channels_only(self):
+        times = [0.0, 0.2, 0.4, 0.6, 0.8]
+        values = [0.0, 0.0, 10.0, 0.0, 0.0]
+        project = Project(interpolation="spline",
+                          keyframes=[key(t, x=v, pitch=v) for t, v in zip(times, values)])
+        samples = [index / 2000 * times[-1] for index in range(2001)]
+        self.assertLess(min(project.evaluate(t)["x"] for t in samples), 0.0)
+        for timestamp in samples:
+            pitch = project.evaluate(timestamp)["pitch"]
+            self.assertLessEqual(pitch, 10.0)
+            self.assertGreaterEqual(pitch, 0.0)
+
+    def test_spline_version_and_old_modes_are_preserved(self):
+        keys = [key(0, x=0), key(1, x=1), key(2, x=0)]
+        spline = Project(interpolation="spline", keyframes=keys)
+        saved = spline.to_dict()
+        self.assertEqual(saved["version"], 10)
+        self.assertEqual(saved["interpolation"], "spline")
+        self.assertEqual(Project.from_dict(saved), spline)
+        smooth = Project(interpolation="smooth", keyframes=keys)
+        self.assertEqual(smooth.to_dict()["version"], 2)
+        self.assertEqual(Project.from_dict(smooth.to_dict()).interpolation, "smooth")
+
+
 if __name__ == "__main__":
     unittest.main()
