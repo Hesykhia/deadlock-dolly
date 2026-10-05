@@ -1,5 +1,17 @@
 # Changes
 
+## 0.6.17 alpha - In-game camera editing, framing guide and spline motion
+
+**0.6.17-alpha**
+
+- **Edit camera views in the overlay list.** *Before:* retiming or adjusting a view meant switching back to the desktop. *After:* change a camera's time and bank directly in the in-game camera list, with edits streaming while you drag.
+- **Drag camera ticks on the Shot timeline.** *Before:* retiming a shot meant typing times or nudging step by step. *After:* drag camera markers along the overlay timeline to place views where you want them.
+- **Framing guide on a hotkey.** *Before:* nothing helped you check thirds or centering while composing. *After:* a clean thirds/cross grid toggles in the panel (Alt+G by default), and Escape closes the panel like F8.
+- **Spline camera motion, now the default.** *Before:* moves could feel mechanical, and rotation channels could flatten against a key. *After:* a smooth spline runs through your keys by default, for new captures and for shots saved before this update; deliberate Linear choices stay Linear.
+- **ReShade FX library recovery.** *Before:* if ReShade could not find its effect folder, its menu asked you to fix it and Dolly offered no way to. *After:* the bundled shaders and a shader folder beside the selected runtime are registered automatically, **Browse FX library...** covers anything else, and a missing library is reported instead of claiming it is ready.
+
+Full details: [0.6.17 release notes](RELEASE_NOTES_0.6.17-alpha.md).
+
 ## 0.6.15 alpha - Session lifecycle maintenance
 
 **0.6.15-alpha**
