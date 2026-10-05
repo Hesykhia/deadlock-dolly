@@ -99,7 +99,7 @@ def default_action_bindings(capture_binding: CaptureBinding = DEFAULT_BINDING) -
     ))}
     result["capture"] = EditorBinding.from_dict(capture_binding.to_dict())
     result["replace"] = EditorBinding("R", ctrl=True, alt=True)
-    result["framing_grid"] = EditorBinding("G", ctrl=True)
+    result["framing_grid"] = EditorBinding("G", alt=True)
     return result
 
 

@@ -1284,6 +1284,21 @@ void editor_input_checks() {
     require(event_count() == escape_requested, "Held Escape queued duplicate close requests");
     dolly::key_event(VK_ESCAPE, false);
 
+    // Escape closes the Dolly panel without a camera command, but an active
+    // text edit keeps Escape for ImGui instead.
+    editor_set_owner(EditorOwner::Panel);
+    const auto panel_escape = event_count();
+    dolly::key_event(VK_ESCAPE, true);
+    require(dolly::gOwner == EditorOwner::Flight && event_count() == panel_escape,
+            "Escape did not close the Dolly panel");
+    dolly::key_event(VK_ESCAPE, false);
+    editor_set_owner(EditorOwner::Panel);
+    dolly::gTextInput = true;
+    dolly::key_event(VK_ESCAPE, true);
+    require(dolly::gOwner == EditorOwner::Panel, "Escape closed the panel during a text edit");
+    dolly::key_event(VK_ESCAPE, false);
+    dolly::gTextInput = false;
+
     editor_set_owner(EditorOwner::Flight);
     // A movement key physically held during this offline test must not
     // masquerade as a blocked post-transition press.

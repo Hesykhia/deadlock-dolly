@@ -179,7 +179,7 @@ class EditorBindingTests(unittest.TestCase):
         defaults = default_action_bindings()
         self.assertEqual(bindings_from_dict(bindings_to_dict(defaults)), defaults)
         self.assertEqual(defaults["capture"].label, DEFAULT_BINDING.label)
-        self.assertEqual(defaults["framing_grid"].label, "Ctrl+G")
+        self.assertEqual(defaults["framing_grid"].label, "Alt+G")
         self.assertNotIn("F7", [binding.key for binding in defaults.values() if binding])
 
     def test_duplicates_are_rejected_with_both_action_names(self):

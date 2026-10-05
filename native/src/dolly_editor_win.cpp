@@ -180,6 +180,8 @@ bool reserved_input(unsigned vk) noexcept {
     auto owner = gOwner.load();
     if (owner == EditorOwner::Console && vk == VK_ESCAPE)
         return true;
+    if (owner == EditorOwner::Panel && vk == VK_ESCAPE && !gTextInput.load())
+        return true;
     auto c = std::atomic_load(&gConfig);
     if (!c)
         return false;
@@ -296,6 +298,12 @@ void dispatch_key_press(unsigned vk) noexcept {
             if (open)
                 editor_set_owner(EditorOwner::Console);
         }
+        return;
+    }
+    // Escape closes the Dolly panel exactly like F8. An active ImGui text edit
+    // keeps Escape for itself, and the game UI/console own their own Escape.
+    if (vk == VK_ESCAPE && gOwner.load() == EditorOwner::Panel && !gTextInput.load()) {
+        dispatch(EditorAction::Panel);
         return;
     }
     auto owner = gOwner.load();
