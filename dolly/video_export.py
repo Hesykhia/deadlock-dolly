@@ -17,7 +17,7 @@ import subprocess
 import threading
 import time
 
-from . import player_layer
+from . import encoder_select, player_layer
 from .display import client_size
 
 
@@ -83,10 +83,18 @@ def bundled_ffmpeg_path() -> "Path | None":
 
 
 def resolve_backend(options: "VideoOptions") -> tuple[int, int]:
-    """Choose the native (encoder, codec) pair for validated options."""
+    """Choose the native (encoder, codec) pair for validated options.
+
+    Auto maps the machine's GPU vendor to that vendor's FFmpeg encoder instead
+    of assuming NVENC, and keeps the built-in encoder when FFmpeg is absent.
+    """
     _label, encoder, codec_id, needs_ffmpeg = CODEC_BY_KEY[options.codec]
     if options.codec == "auto":
-        return (1, 1) if (needs_ffmpeg or options.ffmpeg_path) else (0, 0)
+        if not options.ffmpeg_path:
+            return 0, 0
+        key, _resolved_label = encoder_select.auto_encoder()
+        _key_label, encoder, codec_id, _needs = CODEC_BY_KEY[key]
+        return encoder, codec_id
     if needs_ffmpeg and not options.ffmpeg_path:
         return 0, 0
     return encoder, codec_id
@@ -261,6 +269,9 @@ def format_video_status(status: dict) -> str:
         details.append(f"{width} × {height}")
     if dropped:
         details.append(f"{dropped:,} missed frames")
+    codec = str(status.get("codec") or "").strip()
+    if codec:
+        details.append(codec)
     return ("Recording · " if state == "recording" else "Saved · ") + " · ".join(details)
 
 
@@ -342,6 +353,8 @@ class VideoExport:
                 for key in ("depth_preview", "audit"):
                     if key in self._finished_status:
                         current[key] = self._finished_status[key]
+            if last.get("codec"):
+                current.setdefault("codec", last["codec"])
             self._last = current
             pending = self._start_pending
         if not pending and current.get("state") in TERMINAL_STATES:
@@ -385,6 +398,20 @@ class VideoExport:
                     self.controller.finish_pov_recording()
             raise
 
+    def _resolve_recording_backend(self, options: VideoOptions) -> tuple[int, int, str]:
+        """Resolve the encoder for this take and log the automatic choice."""
+        encoder, codec_id = resolve_backend(options)
+        codec_name = CODEC_BY_KEY[options.codec][0]
+        if options.codec != "auto":
+            return encoder, codec_id, codec_name
+        if encoder == 0:
+            return encoder, codec_id, "Auto → Built-in Windows Media Foundation"
+        key, _label = encoder_select.auto_encoder()
+        resolved_label, encoder, codec_id, _needs = CODEC_BY_KEY[key]
+        LOG.info("Auto encoder: %s selected for %s (vendor=%s).", key,
+                 encoder_select.describe_adapters(), encoder_select.detect_vendor() or "unknown")
+        return encoder, codec_id, f"Auto → {resolved_label}"
+
     def _start(self, options: VideoOptions, project=None, *, frozen=False,
                before_record=None, capture_only=False, pov=False) -> dict:
         options = options.validated()
@@ -395,6 +422,9 @@ class VideoExport:
         bridge = self.controller._native_bridge()
         if bridge is None:
             raise RuntimeError("The native recorder is not connected.")
+        encoder, codec_id, codec_name = (0, 0, "")
+        if not capture_only:
+            encoder, codec_id, codec_name = self._resolve_recording_backend(options)
         if "players" in options.layers:
             # Reject an impossible Players pass before spending time on Color,
             # Depth and World. Recheck measured dimensions/frame count at the
@@ -454,7 +484,7 @@ class VideoExport:
         initial_ack = bridge.video_status().get("ack")
         with self._lock:
             self._bridge = bridge
-            self._last = {"state": "starting"}
+            self._last = {"state": "starting", "codec": codec_name}
             self.output_path = color_path
             self.output_directory = folder.parent if folder is not None else color_path.parent
             self._layer_folder = folder
@@ -463,7 +493,6 @@ class VideoExport:
             self._depth_options = options if options.depth else None
             self._finish_pending = True
             self._finished_status = None
-        encoder, codec_id = resolve_backend(options)
         mark = getattr(self.controller, "mark_recording_pending", None)
         if callable(mark):
             mark(True)

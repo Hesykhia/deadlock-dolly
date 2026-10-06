@@ -50,6 +50,7 @@ dolly/curve.py
 dolly/desktop.py
 dolly/dialogs.py
 dolly/display.py
+dolly/encoder_select.py
 dolly/editor_actions.py
 dolly/editor_session.py
 dolly/editor_view.py
@@ -220,6 +221,7 @@ tests/test_editor_bridge.py
 tests/test_editor_session.py
 tests/test_editor_view.py
 tests/test_editor_settings.py
+tests/test_encoder_select.py
 tests/test_endpoint_playback.py
 tests/test_game_ui_handoff.py
 tests/test_graphics_diagnostics.py

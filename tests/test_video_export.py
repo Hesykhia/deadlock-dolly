@@ -459,13 +459,24 @@ class VideoExportTests(unittest.TestCase):
         self.assertEqual(self.bridge.start_video.call_args.kwargs["codec"], 10)
         self.assertEqual(self.bridge.start_video.call_args.kwargs["encoder"], 1)
 
-    def test_auto_codec_uses_ffmpeg_when_available(self):
+    def test_auto_codec_uses_the_detected_vendor_encoder(self):
         with tempfile.TemporaryDirectory() as folder:
             exe = Path(folder) / "ffmpeg.exe"
             exe.write_bytes(b"MZ")
-            self.export.start(VideoOptions(self.path, 60, 20_000_000, ffmpeg_path=exe))
+            with patch("dolly.encoder_select.detect_vendor", return_value="amd"):
+                self.export.start(VideoOptions(self.path, 60, 20_000_000, ffmpeg_path=exe))
         self.assertEqual(self.bridge.start_video.call_args.kwargs["encoder"], 1)
-        self.assertEqual(self.bridge.start_video.call_args.kwargs["codec"], 1)
+        self.assertEqual(self.bridge.start_video.call_args.kwargs["codec"], 8)
+        self.assertIn("AMD H.264 (AMF)", self.export.status()["codec"])
+
+    def test_auto_codec_without_a_known_gpu_uses_media_foundation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            exe = Path(folder) / "ffmpeg.exe"
+            exe.write_bytes(b"MZ")
+            with patch("dolly.encoder_select.detect_vendor", return_value=""):
+                self.export.start(VideoOptions(self.path, 60, 20_000_000, ffmpeg_path=exe))
+        self.assertEqual(self.bridge.start_video.call_args.kwargs["encoder"], 1)
+        self.assertEqual(self.bridge.start_video.call_args.kwargs["codec"], 3)
 
     def test_fixed_step_sets_and_clears_controller_timing(self):
         self.export.start(VideoOptions(self.path, 60, 20_000_000, fixed_step=True))
