@@ -1,5 +1,15 @@
 # Changes
 
+## 0.6.22 alpha - Vendor-aware encoder, camera feel and clean recordings
+
+**0.6.22-alpha**
+
+- **Auto encoder picks your GPU's encoder.** *Before:* Auto always chose NVIDIA NVENC, so AMD and Intel users' recordings failed even though their cards support hardware encoding. *After:* Dolly detects the installed GPU and picks NVIDIA NVENC, AMD AMF or Intel Quick Sync automatically, falls back safely on unknown hardware, and shows the chosen encoder in the recording status.
+- **Camera feel chooser.** *Before:* the free-camera mouse speed was a small number box hidden in the keybinds tab, and high-DPI mice made the camera spin. *After:* Settings has a Camera feel card with a slider and Very slow / Slow / Normal / Fast / Very fast presets, kept in sync with the keybinds field.
+- **No more debug overlays over recordings.** *Before:* every Dolly session showed Deadlock's faint client-status logo mark and the match ID / server CPU debug text, even with the HUD hidden. *After:* both are hidden for the whole Dolly session, in the editor and while recording, and the rest of the replay HUD still works normally.
+
+Full details: [0.6.22 release notes](RELEASE_NOTES_0.6.22-alpha.md).
+
 ## 0.6.21 alpha - Support for the October 5 Deadlock build (6753)
 
 **0.6.21-alpha**

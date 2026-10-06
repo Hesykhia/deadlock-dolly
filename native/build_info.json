@@ -1,9 +1,9 @@
 {
   "abi": 4,
-  "version": "0.6.21-alpha",
-  "sha256": "ec1acf058a2b7f28b319560d3c7724fa8bdb13b8c351611bb017483aa1ad2cd6",
+  "version": "0.6.22-alpha",
+  "sha256": "a76d9daf01fb28b0c760fedf07fa386faa667ffd0a5fe1b052ca8006e14cf777",
   "game_audio_sha256": "fd3a5db4f7f07c8091193089d91c1d2021b4c5c6a7201fe0c1ab056c4825da2b",
-  "built_utc": "2026-10-06T02:13:21.826585+00:00",
+  "built_utc": "2026-10-06T07:24:22.251483+00:00",
   "compiler": "Visual Studio 17 2022",
   "configuration": "Release",
   "runtime": "static",
