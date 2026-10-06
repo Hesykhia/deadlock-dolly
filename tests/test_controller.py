@@ -287,6 +287,27 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(evidence["checkerboard_risk"])
         self.assertIn("checkerboard", self.controller.status()["message"])
 
+    def test_native_dof_guard_refuses_the_checkerboard_pass_and_keeps_it_refused(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx dx dll, "
+            "dynamic shader compile unavailable!")
+        project = make_project()
+        project.setup_values["r_dof_override"] = 1.0
+        with self.assertRaisesRegex(RuntimeError, "checkerboard"):
+            self.controller._require_native_dof_support(project)
+        self.assertTrue(self.controller.status()["native_dof_unavailable"])
+        # The shader check is one-shot; a later apply must still be refused.
+        with self.assertRaisesRegex(RuntimeError, "checkerboard"):
+            self.controller._require_native_dof_support(project)
+
+    def test_native_dof_guard_leaves_projects_without_the_override_alone(self):
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx dx dll, "
+            "dynamic shader compile unavailable!")
+        self.controller._require_native_dof_support(make_project())
+        self.assertFalse(self.controller.status()["native_dof_unavailable"])
+
     def test_native_dof_refreshes_shaders_without_changing_an_allowed_setting(self):
         self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
         project = make_project()

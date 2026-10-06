@@ -62,6 +62,16 @@ DOF_SHADER_RELOAD = "mat_forcereloadshaders dof"
 # material because its vfx shader compiler files are missing: the DOF pass
 # falls back to the engine error material, the magenta/black checkerboard.
 DOF_SHADER_COMPILE_ERRORS = ("dynamic shader compile unavailable", "can't load vfx dx dll")
+# Raised when Native DOF cannot be rendered safely. Without the vfx compiler the
+# engine substitutes its error material for the full-screen pass (the magenta/
+# black checkerboard) and the corrupt pass has crashed Deadlock, so Dolly refuses
+# the override instead of warning and continuing.
+NATIVE_DOF_UNAVAILABLE = (
+    "Native Depth of Field cannot run on this game install: its vfx shader compiler "
+    "is missing, so the engine shows the magenta/black checkerboard and can crash "
+    "Deadlock. Dolly left Native DOF off. Repair the game files (Steam > Deadlock > "
+    "Properties > Installed Files > Verify integrity of game files) to re-enable it, "
+    "or use Citadel Depth of Field instead.")
 CAMERA_AXES = ("x", "y", "z")
 CAMERA_SETTLE_INTERVAL = .05
 CAMERA_SETTLE_SAMPLES = 3
@@ -246,6 +256,7 @@ class Controller:
         self._playback_restore = {}
         self._dof_shader_restore = {}
         self._dof_shader_checked = False
+        self._native_dof_unavailable = None
         self._layer_hidden = None
         self._healthbar_restore = {}
         self._healthbars_hidden = False
@@ -304,6 +315,7 @@ class Controller:
         state["native_editor_active"] = self._native_manual
         state["game_ui_visible"] = self._game_ui_visible
         state["health_panel_restore_pending"] = self._game_ui_restore.get(OWN_HEALTH_HUD) == 0
+        state["native_dof_unavailable"] = bool(self._native_dof_unavailable)
         state["game_follow_active"] = self._follow_active
         state["game_running"] = self._alive()
         if self._session and not self._alive():
@@ -548,6 +560,7 @@ class Controller:
             self._playback_restore.clear()
             self._dof_shader_restore.clear()
             self._dof_shader_checked = False
+            self._native_dof_unavailable = None
             self._playback_details = None
             self._playback_metrics = {}
             self._applied_pose = None
@@ -2330,7 +2343,7 @@ class Controller:
                 self._halt(native_action="native_hold")
                 self._require_probe()
                 self._require_demo()
-                self.ensure_native_dof_shader_support(project)
+                self._require_native_dof_support(project)
                 self._request("demo_pause")
                 self._snapshot(project)
                 bridge = self._native_bridge()
@@ -2410,18 +2423,32 @@ class Controller:
         reload_text = str(evidence["reload"] or "").casefold()
         if any(marker in reload_text for marker in DOF_SHADER_COMPILE_ERRORS):
             evidence["checkerboard_risk"] = True
-            warning = ("This game install cannot compile its Native DOF shaders because its vfx "
-                       "shader compiler files are missing or unavailable. The r_dof_override pass "
-                       "may show the magenta/black checkerboard in the game view. Your replay, "
-                       "saved shots and exports are not affected; repairing the game files may "
-                       "restore the effect.")
-            LOG.warning("Native DOF shader compilation is unavailable: %s", evidence["reload"])
-            self._message(warning)
+            # Remember the failure for the whole session and refuse the pass at
+            # every apply point; re-running the check would just warn again and
+            # still let the engine render the checkerboard (and crash).
+            self._native_dof_unavailable = NATIVE_DOF_UNAVAILABLE
+            LOG.error("Native DOF shader compilation is unavailable; refusing the pass: %s",
+                      evidence["reload"])
+            self._message(NATIVE_DOF_UNAVAILABLE)
+            self._startup_evidence["dof_shader"] = evidence
+            return False
         if changed:
             self._message("Native DOF enabled the engine's dynamic shader compilation for this session; "
                           "your shader setting is restored when you disconnect.", playing=False)
         self._startup_evidence["dof_shader"] = evidence
         return changed
+
+    def _require_native_dof_support(self, project):
+        """Check Native DOF shader support and refuse an unsafe ``r_dof_override`` pass.
+
+        :meth:`ensure_native_dof_shader_support` only records the failure; this
+        guard is what keeps an authored override from reaching the engine, where
+        the missing compiler would render the magenta/black checkerboard and has
+        crashed Deadlock. Called at every point that applies DOF to the game.
+        """
+        self.ensure_native_dof_shader_support(project)
+        if self._native_dof_unavailable:
+            raise RuntimeError(self._native_dof_unavailable)
 
     def _restore_dof_shader_settings(self):
         if not self._dof_shader_restore:
@@ -2452,7 +2479,7 @@ class Controller:
                 raise RuntimeError("Pause native camera playback before editing DOF.")
             self._require_probe()
             self._require_demo()
-            self.ensure_native_dof_shader_support(project)
+            self._require_native_dof_support(project)
             current = bridge.status()
             editor = bridge.editor_status()
             if not current.get("paused") or not editor.get("ready") or editor.get("input_mode") != "panel":
@@ -3796,7 +3823,7 @@ class Controller:
             self._stop_event.clear()
             self._require_probe()
             self._require_demo()
-            self.ensure_native_dof_shader_support(project)
+            self._require_native_dof_support(project)
             self._snapshot(project)
             shot_time = self._shot_time(project, shot_time)
             bridge = self._native_bridge() if self._supports_native_flight() else None
@@ -3863,7 +3890,7 @@ class Controller:
             self._stop_event.clear()
             self._require_probe()
             self._require_demo(require_tick=not frozen)
-            self.ensure_native_dof_shader_support(project)
+            self._require_native_dof_support(project)
             project = Project.from_dict(project.to_dict())
             speed, rate = float(speed), float(rate)
             if not math.isfinite(speed) or not .05 <= speed <= 4:

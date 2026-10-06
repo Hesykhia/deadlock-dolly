@@ -134,6 +134,18 @@ class NativeControllerTests(unittest.TestCase):
                 self.controller.preview_native_effects(self.project, 0)
         self.assertNotIn("native.prepare", self.bridge.events)
 
+    def test_dof_preview_refuses_the_checkerboard_when_the_shader_compiler_is_missing(self):
+        self.bridge.state = "armed"
+        self.console.paused = True
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx dx dll, "
+            "dynamic shader compile unavailable!")
+        self.project.setup_values["r_dof_override"] = 1
+        with self.assertRaisesRegex(RuntimeError, "checkerboard"):
+            self.controller.preview_native_effects(self.project, .5)
+        self.assertNotIn("native.prepare", self.bridge.events)
+
     def setUp(self):
         controller_fixture.ControllerTests.setUp(self)
         self.clock = Clock()
