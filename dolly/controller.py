@@ -2964,8 +2964,15 @@ class Controller:
                 values['citadel_hide_replay_hud'] = 1
         return values
 
-    def _health_panel_held(self):
-        """An intentional outer hide can span a guarded in-process reload."""
+    def _health_panel_held(self, *, require_full_hud=True):
+        """An intentional own-health hide that can span shots or a guarded reload.
+
+        ``require_full_hud`` keeps the stricter reload rule: the main HUD hide
+        must still be in place so an in-process replay reload cannot expose the
+        panel. Playback only needs the own-health panel to stay safely hidden,
+        so it passes ``require_full_hud=False`` and is not dead-ended once the
+        main HUD has been restored and a verified health handoff is unavailable.
+        """
         originals = self._game_ui_restore
         if (self._native_active or self._native_manual or not originals
                 or set(originals) - {OWN_HEALTH_HUD, 'citadel_hud_visible', 'citadel_hide_replay_hud'}
@@ -2973,8 +2980,13 @@ class Controller:
                 or self._own_health_hud_value() != 1):
             return False
         for name, original, hidden in (('citadel_hud_visible', 1, 0), ('citadel_hide_replay_hud', 0, 1)):
-            if ((name in originals and originals[name] != original)
-                    or read_cvar_value(name, self._request(name)) != hidden):
+            current = read_cvar_value(name, self._request(name))
+            if name not in originals:
+                # Already restored; only a full-HUD reload needs it still hidden.
+                if require_full_hud and current != hidden:
+                    return False
+                continue
+            if originals[name] != original or current != hidden:
                 return False
         return True
 
@@ -3882,9 +3894,11 @@ class Controller:
             else:
                 self._stop_before_new_shot()
             # A suppressed health container may intentionally span repeated
-            # shots when the original game view has no safe HUD player. Other
-            # failed restorations still block playback as before.
-            health_held = self._health_panel_held()
+            # shots when the original game view has no safe HUD player. Playback
+            # only needs the panel hidden, so it does not require the full-HUD
+            # hide that a guarded replay reload needs. Other failed restorations
+            # still block playback as before.
+            health_held = self._health_panel_held(require_full_hud=False)
             if self._playback_restore or self._restore or (self._game_ui_restore and not health_held) or self._demo_speed_changed:
                 raise RuntimeError("Previous settings still need restoration. Reconnect and use Stop / restore before playing again.")
             self._stop_event.clear()

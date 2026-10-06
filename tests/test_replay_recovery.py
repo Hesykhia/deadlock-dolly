@@ -137,6 +137,17 @@ class ReplayRecoveryTests(unittest.TestCase):
                     self.console.values['citadel_hud_visible'] = 1
                     self.assertFalse(self.controller._health_panel_held())
 
+    def test_playback_holds_a_health_panel_after_the_main_hud_restores(self):
+        name = 'citadel_hud_hide_own_health'
+        self.controller._game_ui_restore = {name: 0}
+        self.console.values['citadel_hud_visible'] = 1
+        self.console.values['citadel_hide_replay_hud'] = 0
+        with patch.object(self.controller, '_own_health_hud_value', return_value=1):
+            # The guarded reload still needs the full HUD hide in place ...
+            self.assertFalse(self.controller._health_panel_held())
+            # ... but playback can proceed with only the panel held hidden.
+            self.assertTrue(self.controller._health_panel_held(require_full_hud=False))
+
     def test_disabled_glow_is_reapplied_after_recovery(self):
         self.console.values.update({"citadel_boss_glow_disabled": 0,
             "citadel_player_glow_disabled": 0, "citadel_trooper_glow_disabled": 0,

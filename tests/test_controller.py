@@ -1368,6 +1368,18 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.console.values["engine_no_focus_sleep"], 20)
         self.assertEqual(self.controller._playback_restore, {})
 
+    def test_held_health_panel_does_not_dead_end_playback_after_hud_restores(self):
+        name = "citadel_hud_hide_own_health"
+        self.controller._game_ui_restore = {name: 0}
+        self.console.values[name] = 1
+        self.console.values["citadel_hud_visible"] = 1
+        self.console.values["citadel_hide_replay_hud"] = 0
+        with patch.object(self.controller, "_stop_before_new_shot"), \
+             patch.object(self.controller, "_own_health_hud_value", return_value=1):
+            self._start_playback_without_worker()
+        self.assertEqual(self.controller._game_ui_restore[name], 0)
+        self.assertTrue(self.controller.status()["health_panel_restore_pending"])
+
     def test_wrong_replay_feedback_stops_before_next_frame_and_restores_hud(self):
         self.console.goto_output = 100
         project = self._start_playback_without_worker()
