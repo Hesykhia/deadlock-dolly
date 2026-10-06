@@ -37,6 +37,7 @@ GENERATED_FILES = frozenset({
         "dolly_owner_frame_stats.txt", "dolly_owner_stop.txt",
         "dolly_owner_captures.txt")),
     "cvar_unlocker/pak01_dir.vpk",
+    "cvar_unlocker/pak02_dir.vpk",
 })
 GENERATED_DIRS = frozenset({"cvar_unlocker", "cvar_unlocker/bin", "cvar_unlocker/bin/win64"})
 

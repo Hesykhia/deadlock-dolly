@@ -63,7 +63,8 @@ def runtime_files(root: Path) -> tuple[list[tuple[Path, Path]], dict]:
     recorder = native / AUDIO_RELATIVE
     metadata = native / "build_info.json"
     confetti_pack = native / "assets/confetti/pak01_dir.vpk"
-    for path in (dll, recorder, metadata, confetti_pack):
+    ui_override_pack = native / "assets/ui/pak02_dir.vpk"
+    for path in (dll, recorder, metadata, confetti_pack, ui_override_pack):
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"Missing or unsafe native runtime file: {path.name}")
     info = json.loads(metadata.read_text(encoding="utf-8"))
@@ -77,7 +78,8 @@ def runtime_files(root: Path) -> tuple[list[tuple[Path, Path]], dict]:
     report = verify_native_dll(dll)
     files = [(dll, DLL_RELATIVE), (recorder, AUDIO_RELATIVE),
              (metadata, Path("build_info.json")),
-             (confetti_pack, Path("assets/confetti/pak01_dir.vpk"))]
+             (confetti_pack, Path("assets/confetti/pak01_dir.vpk")),
+             (ui_override_pack, Path("assets/ui/pak02_dir.vpk"))]
     for profile in sorted((native / "profiles").glob("*.json")):
         if not profile.is_file() or profile.is_symlink():
             raise ValueError("Unsafe native build profile")

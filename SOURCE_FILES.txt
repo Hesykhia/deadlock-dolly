@@ -92,7 +92,10 @@ dolly/visualization_wire.py
 examples/demo_shot.dolly.json
 native/CMakeLists.txt
 native/assets/confetti/pak01_dir.vpk
+native/assets/ui/pak02_dir.vpk
 native/bin/win64/DollyNative.dll
+native/ui_override/panorama/styles/citadel_client_status.css
+native/ui_override/panorama/styles/citadel_hud_and_db_overlay.css
 native/build_info.json
 native/include/dolly_confetti.hpp
 native/include/dolly_editor.hpp
@@ -284,6 +287,7 @@ third_party/notices/VConsoleLib-python-MIT.txt
 third_party/notices/tcl-license.terms
 third_party/notices/tk-license.terms
 tools/build_native.py
+tools/build_ui_override.py
 tools/build_windows.py
 tools/fetch_ffmpeg.py
 tools/release_files.py

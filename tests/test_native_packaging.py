@@ -16,6 +16,22 @@ from release_files import sha256
 
 
 class NativePackagingTests(unittest.TestCase):
+    def test_ui_override_pack_matches_launcher_pin_and_shipped_stylesheets(self):
+        from dolly.launcher import UI_OVERRIDE_PACK_SHA256
+        import struct
+        pack = TOOLS.parent / "native/assets/ui/pak02_dir.vpk"
+        data = pack.read_bytes()
+        self.assertEqual(sha256(pack), UI_OVERRIDE_PACK_SHA256)
+        magic, version, tree_size = struct.unpack_from("<III", data, 0)
+        self.assertEqual((magic, version), (0x55AA1234, 2))
+        tree = data[28:28 + tree_size]
+        for expected in (b"vcss_c\0panorama/styles\0citadel_client_status\0",
+                         b"citadel_hud_and_db_overlay\0"):
+            self.assertIn(expected, tree)
+        body = data[28 + tree_size:]
+        self.assertIn(b"ClientServerDebugStats", body)
+        self.assertIn(b"GameLogoIcon", body)
+
     def test_reviewed_module_profiles_match_both_launcher_and_native_pins(self):
         from dolly.launcher import NATIVE_GAME_SHA256
         root = TOOLS.parent
@@ -94,6 +110,9 @@ class NativePackagingTests(unittest.TestCase):
         confetti = native / "assets/confetti/pak01_dir.vpk"
         confetti.parent.mkdir(parents=True)
         confetti.write_bytes(b"Dolly native particle fixture")
+        ui_override = native / "assets/ui/pak02_dir.vpk"
+        ui_override.parent.mkdir(parents=True)
+        ui_override.write_bytes(b"Dolly native UI override fixture")
         profiles = native / "profiles"
         profiles.mkdir()
         (profiles / "supported-build.json").write_text('{"profile": "fixture"}')
@@ -138,7 +157,8 @@ class NativePackagingTests(unittest.TestCase):
             build_native.copy_native_runtime(self.root, output)
         self.assertEqual({p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()},
                          {"bin/win64/DollyNative.dll", "bin/win64/DollyGameAudio.exe", "build_info.json",
-                          "assets/confetti/pak01_dir.vpk", "profiles/supported-build.json"})
+                          "assets/confetti/pak01_dir.vpk", "assets/ui/pak02_dir.vpk",
+                          "profiles/supported-build.json"})
         self.assertEqual(sha256(output / build_native.DLL_RELATIVE), sha256(dll))
 
     def test_pe_gate_requires_every_atomic_export(self):

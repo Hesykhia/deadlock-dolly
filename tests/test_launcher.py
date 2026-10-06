@@ -894,6 +894,8 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual((target / "dolly_native.cfg").read_bytes(), b"DOLLY_NATIVE_1\n" + b"a" * 32 + b"\n5432\n")
         self.assertEqual(hashlib.sha256((target.parents[1] / "pak01_dir.vpk").read_bytes()).hexdigest(),
                          launcher.CONFETTI_PACK_SHA256)
+        self.assertEqual(hashlib.sha256((target.parents[1] / "pak02_dir.vpk").read_bytes()).hexdigest(),
+                         launcher.UI_OVERRIDE_PACK_SHA256)
         args = popen.call_args.args[0]
         self.assertIn("-dev", args)
         self.assertIn("-insecure", args)

@@ -49,6 +49,8 @@ NATIVE_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "native"
 EDITING_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "assets" / "editing"
 CONFETTI_PACK = NATIVE_ROOT / "assets" / "confetti" / "pak01_dir.vpk"
 CONFETTI_PACK_SHA256 = "99c0325fe333bfa12c3f23a2808767c2fd27b49fe0e5abe4531fa472519f8ae6"
+UI_OVERRIDE_PACK = NATIVE_ROOT / "assets" / "ui" / "pak02_dir.vpk"
+UI_OVERRIDE_PACK_SHA256 = "160c23f2b4ef670469833a193b2fa3d4ed5f027a4b9310607391008f39054cc0"
 UNLOCKER_SHA256 = "1d491c14e335ec38f279475ce03bfa9d98f5b444f0250d4cdb1dc35e63018a8a"
 # Accepted game-module SHA-256 pins come from native/profiles/manifest.json, the
 # single source of truth shared with the native bridge and its build tests.
@@ -554,6 +556,18 @@ def _verified_confetti_pack() -> Path:
     return CONFETTI_PACK
 
 
+def _verified_ui_override_pack() -> Path:
+    try:
+        data = UI_OVERRIDE_PACK.read_bytes()
+    except OSError as exc:
+        raise LaunchError("The capture-clean UI override pack is missing. Extract the complete Dolly build again.") from exc
+    if hashlib.sha256(data).hexdigest() != UI_OVERRIDE_PACK_SHA256:
+        raise LaunchError("The capture-clean UI override pack failed its SHA-256 check.")
+    if len(data) < 32 or data[:4] != struct.pack("<I", 0x55AA1234):
+        raise LaunchError("The capture-clean UI override pack is not a Source 2 VPK.")
+    return UI_OVERRIDE_PACK
+
+
 def _save_record(session_dir: Path, record: dict[str, Any]) -> None:
     gameinfo_transaction.save_record(session_dir, record, atomic_write=_atomic_write)
 
@@ -805,6 +819,9 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
             # This mounted game search path exists before Deadlock starts, so
             # Source 2 resolves the custom particle systems as native assets.
             shutil.copyfile(_verified_confetti_pack(), target.parents[1] / "pak01_dir.vpk")
+            # The UI override pack loads beside it and hides the development
+            # HUD overlay's client-status mark and match/server debug label.
+            shutil.copyfile(_verified_ui_override_pack(), target.parents[1] / "pak02_dir.vpk")
             (target / "dolly_native.cfg").write_text(
                 f"DOLLY_NATIVE_1\n{bridge.token}\n{bridge.editor_pid}\n",
                 encoding="ascii", newline="\n")
