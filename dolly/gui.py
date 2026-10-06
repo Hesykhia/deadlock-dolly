@@ -1683,6 +1683,13 @@ class DollyApp:
             self._persist_preferences(settings, "Movement settings saved.")
         self._guard("Movement settings", operation)
 
+    def _save_mouse_sensitivity(self):
+        def operation():
+            settings = replace(self.app_settings,
+                mouse_sensitivity=_finite(self.editor_sensitivity.get(), "Mouse sensitivity"))
+            self._persist_preferences(settings, f"Mouse sensitivity saved ({settings.mouse_sensitivity:.3g}).")
+        self._guard("Mouse sensitivity", operation)
+
     def _persist_preferences(self, settings, message):
         if self.busy or self.playing:
             self.status_text.set("Finish the current operation and stop playback before saving preferences.")

@@ -6,7 +6,10 @@ import unittest
 from unittest.mock import patch
 
 from dolly.ui.library_page import LibraryActions, LibraryPage, LibraryState
-from dolly.ui.settings_page import SettingsActions, SettingsPage, SettingsState
+from dolly.ui.settings_page import (
+    SENSITIVITY_MAX, SENSITIVITY_MIN, SENSITIVITY_TICKS, SettingsActions, SettingsPage,
+    SettingsState, position_to_sensitivity, sensitivity_preset_name, sensitivity_to_position,
+)
 from dolly.ui.export_page import ExportActions, ExportPage, ExportState
 
 
@@ -108,3 +111,32 @@ class PageBoundaryTests(unittest.TestCase):
             'assert not forbidden.intersection(sys.modules), sorted(forbidden.intersection(sys.modules))'],
             capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_settings_camera_feel_presets_and_state_sync(self):
+        state = self.variables(SettingsState, auto_updates_initial=True, show_log=tk.BooleanVar(self.root, False))
+        with patch('dolly.graphics_profiles.load_library', return_value={'format': 1, 'selected': '', 'profiles': []}):
+            view = SettingsPage(self.root, state, self.callbacks(SettingsActions), root=self.root,
+                                on_error=lambda *args: self.fail(str(args)))
+        self.calls.clear()
+        self.button('Very slow').invoke()
+        self.assertEqual([c[0] for c in self.calls], ['save_mouse_sensitivity'])
+        self.assertAlmostEqual(float(state.mouse_sensitivity.get()), 0.02, places=3)
+        state.mouse_sensitivity.set('0.25')
+        self.assertAlmostEqual(view.sensitivity_position.get(),
+                               sensitivity_to_position(0.25), places=3)
+        self.assertIn('Fast', view.sensitivity_text.get())
+
+
+class SensitivityMappingTests(unittest.TestCase):
+    def test_mapping_round_trips_across_the_supported_range(self):
+        for value in (SENSITIVITY_MIN, 0.02, 0.12, 0.5, SENSITIVITY_MAX):
+            self.assertAlmostEqual(position_to_sensitivity(sensitivity_to_position(value)), value, places=9)
+        self.assertLess(sensitivity_to_position(0.02), sensitivity_to_position(0.12))
+        self.assertEqual(sensitivity_to_position(SENSITIVITY_MIN), 0.0)
+        self.assertEqual(sensitivity_to_position(SENSITIVITY_MAX), float(SENSITIVITY_TICKS))
+
+    def test_preset_names_match_the_nearest_choice(self):
+        self.assertEqual(sensitivity_preset_name(0.12), 'Normal')
+        self.assertEqual(sensitivity_preset_name(0.021), 'Very slow')
+        self.assertEqual(sensitivity_preset_name(1.9), 'Custom')
+        self.assertEqual(sensitivity_preset_name('not a number'), 'Custom')
