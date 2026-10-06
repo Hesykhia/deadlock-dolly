@@ -14,6 +14,12 @@ already invalidated, producing an access violation on normal game exit.
 
 ## Changes
 
+- `unlocker-build-6753.patch` (apply after the 6746 patch): adds the exact
+  October5 server hash; the reviewed Source2ServerConfig001 secondary table
+  moved +0x4240 while all three method bodies and the this-8 thunks are
+  unchanged from 6746. Unknown module identities remain refused. Import,
+  offline ABI and lifecycle checks pass; build6753 live acceptance pending.
+
 - `unlocker-build-6746.patch` (apply after the 6745 patch): adds the exact
   October4 server hash; the reviewed Source2ServerConfig001 secondary table
   moved +0x1000 while all three method bodies and the this-8 thunks are

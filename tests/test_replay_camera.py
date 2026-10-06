@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from dolly import replay_camera as camera
+from dolly._runtime_generated import ReplayCamera as RC
 from dolly.preload import PreloadError
 
 
@@ -48,7 +49,7 @@ class ReplayCameraTests(unittest.TestCase):
         pointers = {m.base+camera.RULES_GLOBAL: 0x100000,
                     0x100000: m.base+camera.RULES_VTABLE,
                     0x200000: m.base+(current_type or camera.GAMEPLAY_CAMERA_VTABLE),
-                    0x300000: m.base+0x2a42458}
+                    0x300000: m.base+(RC.GAMEPLAY_CAMERA_VTABLE + 8)}
         m.memory = Mock()
         m.memory.read.side_effect = lambda address, size: bytes(blocks[address])[:size]
         m.memory.pointer.side_effect = pointers.__getitem__
@@ -60,7 +61,7 @@ class ReplayCameraTests(unittest.TestCase):
             self.assertEqual(m.sample()['ready'], state == 7)
 
     def test_scripted_unknown_and_blending_cameras_wait(self):
-        for kwargs in ({'current_type': 0x2a42458}, {'current_type': 0x123456},
+        for kwargs in ({'current_type': RC.GAMEPLAY_CAMERA_VTABLE + 8}, {'current_type': 0x123456},
                        {'blend': 1, 'weight': .99, 'previous': 0x300000}):
             m, _, _ = self.monitor(**kwargs)
             self.assertFalse(m.sample()['ready'])
@@ -103,8 +104,8 @@ class ReplayCameraTests(unittest.TestCase):
 
     def startup_monitor(self, count=0):
         m, blocks, pointers = self.monitor()
-        pointers[m.base+0x3c33c98] = 0x400000
-        pointers[0x400000] = m.base+0x2adeac8
+        pointers[m.base+RC.HUD_ROOT] = 0x400000
+        pointers[0x400000] = m.base+RC.HUD_ROOT_VTABLE
         blocks[0x400284] = struct.pack('<i', count)
         return m, blocks, pointers
 
@@ -120,7 +121,7 @@ class ReplayCameraTests(unittest.TestCase):
 
     def test_missing_hud_does_not_admit_startup(self):
         m, _, pointers = self.startup_monitor()
-        pointers[m.base+0x3c33c98] = 0
+        pointers[m.base+RC.HUD_ROOT] = 0
         self.assertFalse(m.sample_startup()['ready'])
 
     def test_wrong_hud_type_and_invalid_counter_fail_closed(self):
@@ -149,7 +150,7 @@ class ReplayCameraTests(unittest.TestCase):
     def test_unreadable_hud_never_admits_startup(self):
         m, _, pointers = self.startup_monitor()
         def pointer(address):
-            if address == m.base+0x3c33c98:
+            if address == m.base+RC.HUD_ROOT:
                 raise PreloadError('unmapped HUD')
             return pointers[address]
         m.memory.pointer.side_effect = pointer

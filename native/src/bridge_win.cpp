@@ -60,15 +60,21 @@ constexpr char kBuild6728EngineHash[] =
     "8b846736ddbd833fcc85c943dccc7b7fe3cd13eeef772d1ca375c2961f51a53e";
 constexpr char kBuild6739EngineHash[] =
     "0782caed3e1c476389fe2a27a0713d47567a5237f706b151ce7cc34a05dbadc3";
+// October 5: the engine2 identity changed; every reviewed vtable and accessor
+// kept its RVA (see the 6753 engine audit).
+constexpr char kBuild6753EngineHash[] =
+    "aac84e48de57844d5499af8fd95c976143efe2f14845ff2409b111eb9ff5ce74";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
-constexpr char kUnlockerHash[] = "df502ba8f686f74632581e1a4b32374c512d9c16251f21fd0e9fe1cf264e2acb";
+constexpr char kUnlockerHash[] = "1d491c14e335ec38f279475ce03bfa9d98f5b444f0250d4cdb1dc35e63018a8a";
 constexpr char kSoundSystemHash[] =
     "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr char kSeptemberSoundSystemHash[] =
     "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281";
 constexpr char kSound6739Hash[] =
     "15b30cb326d8bbeb7c5fbe7a20aabd3d58d6d790ed344989f8d015c2c290981b";
+constexpr char kSound6753Hash[] =
+    "1df6e097125504ac6d4863edd4169928697f1f1d440397033b20f2b1e52aa8c2";
 constexpr std::uintptr_t kDemoGlobal = 0x61b618, kDemoTable = 0x535730, kEngineTable = 0x540128;
 struct EngineLayout {
     std::uintptr_t demo_global, demo_table, engine_table;
@@ -1391,8 +1397,9 @@ static DWORD WINAPI worker(void*) {
         const bool engine6726 = module_matches(engine, kBuild6726EngineHash, 0x906000);
         const bool engine6728 = module_matches(engine, kBuild6728EngineHash, 0x906000);
         const bool engine6739 = module_matches(engine, kBuild6739EngineHash, 0x906000);
+        const bool engine6753 = module_matches(engine, kBuild6753EngineHash, 0x906000);
         const bool september_engine = module_matches(engine, kSeptemberEngineHash, 0x906000);
-        if (!engine6739 && !engine6728 && !engine6726 && !september_engine &&
+        if (!engine6753 && !engine6739 && !engine6728 && !engine6726 && !september_engine &&
             !module_matches(engine, kEngineHash, 0x969000) &&
             !module_matches(engine, kUpdatedEngineHash, 0x969000)) {
             startup_status(
@@ -1402,7 +1409,8 @@ static DWORD WINAPI worker(void*) {
         }
         gClient = reinterpret_cast<std::uintptr_t>(client);
         gEngine = reinterpret_cast<std::uintptr_t>(engine);
-        gEngineLayout = engine6739         ? kEngine6728Layout
+        gEngineLayout = engine6753         ? kEngine6728Layout
+                        : engine6739       ? kEngine6728Layout
                         : engine6728       ? kEngine6728Layout
                         : engine6726       ? kEngine6726Layout
                         : september_engine ? kSeptemberEngineLayout
@@ -1502,7 +1510,8 @@ static DWORD WINAPI worker(void*) {
                               module_matches(sound, kSoundSystemHash, 0x678000) ||
                                   module_matches(sound, kSeptemberSoundSystemHash, 0x6bf000) ||
                                   module_matches(sound, kSound6726Hash, 0x6bf000) ||
-                                  module_matches(sound, kSound6739Hash, 0x6bf000));
+                                  module_matches(sound, kSound6739Hash, 0x6bf000) ||
+                                  module_matches(sound, kSound6753Hash, 0x6bf000));
         // Hook and original trampoline remain resident until process exit. Losing
         // the editor only releases ownership, avoiding code-unload races in a view.
         std::shared_ptr<const NativeShot> shot;
@@ -1536,7 +1545,8 @@ static DWORD WINAPI worker(void*) {
                         module, module_matches(module, kSoundSystemHash, 0x678000) ||
                                     module_matches(module, kSeptemberSoundSystemHash, 0x6bf000) ||
                                     module_matches(module, kSound6726Hash, 0x6bf000) ||
-                                    module_matches(module, kSound6739Hash, 0x6bf000));
+                                    module_matches(module, kSound6739Hash, 0x6bf000) ||
+                                    module_matches(module, kSound6753Hash, 0x6bf000));
                 }
             }
             if (diagnostic_now >= next_renderer_probe) {

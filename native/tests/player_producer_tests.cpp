@@ -46,8 +46,8 @@ int main() {
     require(current->september && current->layout.owner == 0xd8 && current->layout.gpu_buffer == 0x70);
     // Every old pair retains its original entry and ABI. Crossed pairs, missing
     // modules, changed identities and wrong PE sizes must never enable a hook.
-    const std::uintptr_t entries[] = {0x564b0, 0x5c8e0, 0x5c8e0, 0x5c8f0};
-    const std::uintptr_t tables[] = {0x5d4fe8, 0x61e7d0, 0x61e860, 0x61e860};
+    const std::uintptr_t entries[] = {0x564b0, 0x5c8e0, 0x5c8e0, 0x5c8f0, 0x5c8f0};
+    const std::uintptr_t tables[] = {0x5d4fe8, 0x61e7d0, 0x61e860, 0x61e860, 0x61e860};
     unsigned profile_index = 0;
     for (const auto& scene : kSceneProfiles) {
         require(scene.layout.producer == entries[profile_index] && scene.layout.table == tables[profile_index]);
@@ -64,7 +64,7 @@ int main() {
         require(!reviewed_scene_profile(scene.scene_hash, scene.scene_size + 1, scene.renderer_hash, scene.renderer_size));
         require(!reviewed_scene_profile(scene.scene_hash, scene.scene_size, scene.renderer_hash, scene.renderer_size + 1));
     }
-    require(profile_index == 4);
+    require(profile_index == 5);
 #if defined(_WIN32)
     // Both real producer ABIs preserve every caller-owned output and invoke
     // the selected original exactly once; a tenth output must never be lost.

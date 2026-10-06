@@ -524,7 +524,15 @@ native/profiles/scenesystem-2026-10-02-6745.json
 third_party/cvar_unlocker/unlocker-build-6745.patch
 
 native/profiles/deadlock-2026-10-04-6746-complete.json
+
+native/profiles/deadlock-2026-10-05-6753-complete.json
+
+native/profiles/scenesystem-2026-10-05-6753.json
+
+native/profiles/soundsystem-2026-10-05-6753.json
 third_party/cvar_unlocker/unlocker-build-6746.patch
+
+third_party/cvar_unlocker/unlocker-build-6753.patch
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
