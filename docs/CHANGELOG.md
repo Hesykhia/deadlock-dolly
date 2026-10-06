@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.23 alpha - Native DOF guard against the checkerboard crash
+
+**0.6.23-alpha**
+
+- **Native DOF no longer shows the checkerboard or crashes when the game's vfx compiler is missing.** *Before:* enabling Native Depth of Field (`r_dof_override`) on a game install whose vfx shader compiler could not load made the engine render its magenta/black error material and could crash Deadlock. *After:* Dolly detects the failure before applying the pass, leaves Native DOF off for the session, and tells you to verify the game files; Native DOF still works normally on healthy installs.
+
+Full details: [0.6.23 release notes](RELEASE_NOTES_0.6.23-alpha.md).
+
 ## 0.6.22 alpha - Vendor-aware encoder, camera feel and clean recordings
 
 **0.6.22-alpha**
