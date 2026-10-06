@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.24 alpha - Playback no longer dead-ends on health-panel restoration
+
+**0.6.24-alpha**
+
+- **Playback continues when the game's health panel cannot be verified.** *Before:* on a game build whose spectator player context could not be verified, the hidden own-health panel stayed pending and Play refused with "Previous settings still need restoration" with no way past it. *After:* playback proceeds with the panel left safely hidden, and the panel is restored on a later verified hero view.
+
+Full details: [0.6.24 release notes](RELEASE_NOTES_0.6.24-alpha.md).
+
 ## 0.6.23 alpha - Native DOF guard against the checkerboard crash
 
 **0.6.23-alpha**
