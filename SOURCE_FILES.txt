@@ -550,3 +550,5 @@ docs/RELEASE_NOTES_0.6.18-alpha.md
 docs/RELEASE_NOTES_0.6.19-alpha.md
 
 docs/RELEASE_NOTES_0.6.20-alpha.md
+
+docs/RELEASE_NOTES_0.6.21-alpha.md

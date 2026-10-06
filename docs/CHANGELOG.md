@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.21 alpha - Support for the October 5 Deadlock build (6753)
+
+**0.6.21-alpha**
+
+- **Works with the new game build.** *Before:* Dolly could not attach to the October 5 Deadlock update. *After:* startup, the unlocker, replay loading, camera editing and Players/audio work on build 6753.
+- **Rebuilt unlocker and updated module support.** *Before:* the console unlocker and the Players/audio module pins matched the previous server and engine builds. *After:* the unlocker is rebuilt for the new server, and the new scene, sound and renderer builds are recognized.
+
+Full details: [0.6.21 release notes](RELEASE_NOTES_0.6.21-alpha.md).
+
 ## 0.6.20 alpha - Smoother desktop and in-game UI
 
 **0.6.20-alpha**
