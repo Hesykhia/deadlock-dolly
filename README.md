@@ -5,6 +5,12 @@
 A camera-path editor for local Deadlock replays. Capture the free camera,
 shape a shot and play it back with animated framing and camera variables.
 
+> **Screenshot fork.** This fork of [cravvnn/deadlock-dolly](https://github.com/cravvnn/deadlock-dolly)
+> adds high-resolution thumbnail stills: one click saves the plate, a 16-bit
+> players-only matte, a cut-out hero and depth from the current paused view,
+> at up to 7680 × 4320. Everything else tracks upstream Dolly. See
+> [High-resolution screenshots](docs/SCREENSHOTS.md).
+
 **Current source: 0.6.15-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.
 
@@ -42,6 +48,7 @@ Deadlock normally.
 - In-game playback speed and monitoring rate shared with desktop controls.
 - Replay playback with HUD handling, settings restoration and diagnostics.
 - Console fallback with Off, Light, Balanced and Strong smoothing choices.
+- High-resolution screenshots: plate, 16-bit players-only matte, cut-out hero and depth from one paused view (fork feature, see docs/SCREENSHOTS.md).
 - Video recording at the game resolution: real-time or fixed-step, 30 to 600 FPS, hardware or software H.264/HEVC encoders, or lossless FFV1.
 - Paired depth master as a 10-bit ProRes `.mov`, with an optional float EXR sequence and a normalized preview video.
 - Isolated world, players and effects layer takes; players and effects get a real alpha channel from black and white matte passes.
