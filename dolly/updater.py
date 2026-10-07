@@ -12,7 +12,8 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-REPOSITORY = "cravvnn/deadlock-dolly"
+# Screenshot fork: updates come from the fork so they keep the screenshot tool.
+REPOSITORY = "Hesykhia/deadlock-dolly"
 LATEST_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
 MANIFEST = "UPDATE_MANIFEST.json"
 MAX_DOWNLOAD = 1024 * 1024 * 1024

@@ -32,7 +32,7 @@ class ReleaseTests(unittest.TestCase):
         return {"tag_name": "v0.5.5-alpha", "draft": False, "prerelease": False,
                 "assets": [{"name": "Deadlock_Dolly_0.5.5-alpha_Windows_x64.zip", "state": "uploaded",
                   "size": 100, "digest": "sha256:" + "a" * 64,
-                  "browser_download_url": "https://github.com/cravvnn/deadlock-dolly/releases/download/v0.5.5-alpha/Deadlock_Dolly_0.5.5-alpha_Windows_x64.zip"}]}
+                  "browser_download_url": "https://github.com/Hesykhia/deadlock-dolly/releases/download/v0.5.5-alpha/Deadlock_Dolly_0.5.5-alpha_Windows_x64.zip"}]}
 
     def test_public_alpha_can_update_but_pre_release_and_draft_cannot(self):
         raw = self.release()
@@ -61,7 +61,7 @@ class ReleaseTests(unittest.TestCase):
         from io import BytesIO
         with patch.object(u, "open_url", return_value=BytesIO(json.dumps(self.release()).encode())) as opened:
             self.assertIsNotNone(u.check_latest("0.5.4-alpha"))
-            opened.assert_called_once_with("https://api.github.com/repos/cravvnn/deadlock-dolly/releases/latest")
+            opened.assert_called_once_with("https://api.github.com/repos/Hesykhia/deadlock-dolly/releases/latest")
 
     def test_redirect_rejects_plain_http_and_other_hosts(self):
         from urllib.request import Request
@@ -161,7 +161,7 @@ install(json.loads(Path(sys.argv[1]).read_text()),replace=cut_power)
 
     def test_download_stages_inside_install_and_reuses_verified_payload(self):
         archive, release = self.make_zip()
-        release.update(url="https://github.com/cravvnn/deadlock-dolly/releases/download/v1.0.1/package.zip",
+        release.update(url="https://github.com/Hesykhia/deadlock-dolly/releases/download/v1.0.1/package.zip",
                        size=archive.stat().st_size)
         with patch.object(u, "open_url", side_effect=[BytesIO(archive.read_bytes())]) as opened:
             work = u.download_update(release, self.target)
