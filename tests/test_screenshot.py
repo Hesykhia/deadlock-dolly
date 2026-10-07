@@ -260,3 +260,30 @@ class DesktopFlowTests(unittest.TestCase):
         self.assertIsNone(app._still_run)
         self.assertEqual(sorted(p.name for p in folder.iterdir()),
                          ["hero_alpha.png", "hero_isolated.png", "hero_rgba.png", "plate.png"])
+
+
+@unittest.skipUnless(FFMPEG, "FFmpeg is not on PATH")
+class PlayersTakeContainerTests(unittest.TestCase):
+    """A lossless (.mkv) still must not build a players take named .mp4."""
+
+    def test_players_take_matches_the_lossless_color_container(self):
+        from unittest.mock import MagicMock, patch
+        from dolly.gui import DollyApp
+        from dolly.video_export import VideoOptions
+        parent = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, parent, ignore_errors=True)
+        base = VideoOptions(parent / "Dolly_Still_x.mkv", screenshot.STILL_FPS, 20_000_000,
+                            codec=screenshot.STILL_CODEC, ffmpeg_path=Path(FFMPEG), fixed_step=True,
+                            speed=screenshot.STILL_SPEED, layers=("players",)).validated()
+        app = SimpleNamespace(
+            _base_capture=base, _pov_project=None, _snapshot=lambda: None,
+            controller=MagicMock(deployment_directory=lambda: parent, _request=lambda *_a, **_k: ""),
+            video_export=MagicMock(status=lambda: {"width": 64, "height": 36}))
+        with patch.object(player_layer, "parse_owner_offset", return_value=408), \
+             patch.object(player_layer, "parse_scene_node_offset", return_value=816), \
+             patch.object(player_layer, "reference_frame_count", return_value=12), \
+             patch.object(player_layer, "check_capture_space", return_value=1):
+            DollyApp._start_player_capture(app, "players")
+        options = app.video_export.start.call_args.args[0]
+        self.assertEqual(options.path, (parent / "Dolly_Still_x" / "players" / "players.mkv").absolute())
+        self.assertEqual(options.codec, screenshot.STILL_CODEC)

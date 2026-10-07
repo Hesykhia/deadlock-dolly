@@ -1011,7 +1011,8 @@ class DollyApp:
         LOG.info("Players layer capture armed: %d frames, owner offset %d, back link %d",
                  frames, owner_offset, back_offset)
         folder = base.path.with_suffix("")
-        target = folder / layer / (layer + ".mp4")
+        # Match the color take's container: lossless FFV1 takes (stills) need .mkv.
+        target = folder / layer / (layer + base.path.suffix)
         target.parent.mkdir(parents=True, exist_ok=True)
         options = VideoOptions(target, base.fps, base.bitrate, base.codec, base.quality,
                                base.preset, base.ffmpeg_path, True, base.speed,
