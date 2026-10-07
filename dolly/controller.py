@@ -1109,8 +1109,11 @@ class Controller:
         self._remember_spectator_hero()
         if self._recorder_active():
             raise RuntimeError("Finish recording before reloading the replay.")
+        # A held own-health panel only needs to stay hidden; it must not block an
+        # export/recovery reload (mirrors play()). Other pending restorations, and
+        # the replay-HUD override, still block recovery as before.
         if (self._playback_restore or self._restore or
-                (self._game_ui_restore and not self._health_panel_held()) or
+                (self._game_ui_restore and not self._health_panel_held(require_full_hud=False)) or
                 self._replay_hud_restore or self._demo_speed_changed):
             raise RuntimeError("Use Stop / restore to restore pending settings before replay recovery.")
         if not self._console.supports("disconnect"):
@@ -2821,6 +2824,13 @@ class Controller:
                     return
                 except (RuntimeError, ValueError, OSError) as exc:
                     last_error = exc
+                    text = str(exc).lower()
+                    # A reviewed-build/predicate/identity mismatch is deterministic
+                    # and cannot settle; do not stall the F9 return for the whole
+                    # deadline when the profile simply does not match this build.
+                    if ("reviewed build" in text or "predicates differ" in text
+                            or "object type differs" in text):
+                        raise RuntimeError('Saved spectator hero handoff remains pending: ' + str(exc)) from exc
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Saved spectator hero handoff remains pending: ' + str(last_error))
                 time.sleep(.05)
@@ -2999,7 +3009,13 @@ class Controller:
             # Mode restoration must settle before checking the player context;
             # batching it with the reveal recreates the stock null-panel fault.
             self._restore_spectator_view()
-            self._restore_spectator_hero()
+            try:
+                self._restore_spectator_hero()
+            except (RuntimeError, ValueError, OSError) as exc:
+                # A hero handoff that cannot verify must not hold the whole HUD/
+                # cursor restore hostage; keep it pending and restore the rest so
+                # playback and export are not dead-ended by a cosmetic panel.
+                LOG.warning("Saved spectator hero handoff remains pending: %s", exc)
             requested = dict(self._game_ui_restore)
             values, health_pending = self._safe_health_hud_values(requested, keep_hud=True)
             values, deferred = self._require_own_health_hud(values, keep_hud=True)

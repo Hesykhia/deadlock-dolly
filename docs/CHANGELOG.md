@@ -1,5 +1,15 @@
 # Changes
 
+## 0.6.25 alpha - October 6 Deadlock updates and health-panel hardening
+
+**0.6.25-alpha**
+
+- **Works with the October 6 Deadlock updates (6757 and 6759).** *Before:* both October 6 game patches changed the client and server, and Dolly refused the updated client. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6757 and 6759, and the console unlocker is rebuilt for each server. Reconstructed clip audio stays disabled until its soundsystem review lands.
+- **Deleting the first camera now starts the shot there.** *Before:* removing the leading camera left the shot anchored to the old start, so a front-end mistake could not be corrected. *After:* the shot rebases onto the new first camera, effects shift with it, and Undo restores the original start.
+- **Export and F9 no longer stall on the health panel.** *Before:* a stale player-predicate value made the health-panel handoff retry for five seconds, so F9 was slow and exports were blocked with a pending-restoration error. *After:* the predicate is corrected, the handoff fails fast instead of retrying, and a cosmetic panel can no longer block export.
+
+Full details: [0.6.25 release notes](RELEASE_NOTES_0.6.25-alpha.md).
+
 ## 0.6.24 alpha - Playback no longer dead-ends on health-panel restoration
 
 **0.6.24-alpha**

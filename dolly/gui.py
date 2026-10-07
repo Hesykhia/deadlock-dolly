@@ -3036,7 +3036,10 @@ class DollyApp:
         return Keyframe(**values)
 
     def _commit_camera(self, keys, select_time=None):
-        self.project = shot_commands.commit_camera(self.project, keys)
+        self._commit_project(shot_commands.commit_camera(self.project, keys), select_time)
+
+    def _commit_project(self, candidate, select_time=None):
+        self.project = candidate
         self._mark_dirty()
         self._refresh_keys(select_time)
         history = getattr(self, "shot_history", None)
@@ -3078,14 +3081,24 @@ class DollyApp:
             return
         index = self._selection_index(self.camera_tree)
         if index is not None and 0 <= index < len(self.project.keyframes):
-            keys = [key for i, key in enumerate(self.project.keyframes) if i != index]
-            selected_time = keys[min(index, len(keys) - 1)].time if keys else None
             def operation():
-                self._commit_camera(keys, selected_time)
-                if not keys:
+                candidate = shot_commands.delete_camera(self.project, index)
+                rebased = index == 0 and bool(candidate.keyframes)
+                selected_time = (candidate.keyframes[min(index, len(candidate.keyframes) - 1)].time
+                                 if candidate.keyframes else None)
+                self._commit_project(candidate, selected_time)
+                if rebased:
+                    # Deleting the leading camera moved the shot start to the
+                    # new first camera; reflect the new anchor and shifted
+                    # effect times.
+                    self.start_tick.set(_number(candidate.start_tick))
+                    self._refresh_tracks()
+                if not candidate.keyframes:
                     self._set_time(0)
                     self.preview_attach = False
-                self.status_text.set(f"Camera {index + 1:02d} deleted. Undo restores it.")
+                self.status_text.set(
+                    f"Camera {index + 1:02d} deleted. The shot now starts at the new first camera."
+                    if rebased else f"Camera {index + 1:02d} deleted. Undo restores it.")
             self._guard("Delete keyframe", operation)
 
     def _select_key(self, _event=None):
