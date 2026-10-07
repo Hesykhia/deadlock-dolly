@@ -287,3 +287,56 @@ class PlayersTakeContainerTests(unittest.TestCase):
         options = app.video_export.start.call_args.args[0]
         self.assertEqual(options.path, (parent / "Dolly_Still_x" / "players" / "players.mkv").absolute())
         self.assertEqual(options.codec, screenshot.STILL_CODEC)
+
+
+def frame_meta(times):
+    """Players capture metadata: a header record, then (index, time bits) per frame."""
+    data = struct.pack("<8Q", 0x314154454d4c4f44, 1, 64, len(times), 0, 0, 0, 0)
+    for index, seconds in enumerate(times):
+        bits = struct.unpack("<Q", struct.pack("<d", seconds))[0]
+        data += struct.pack("<8Q", index, bits, 0, 32, 0, 0, 0, 0)
+    return data
+
+
+@unittest.skipUnless(FFMPEG, "FFmpeg is not on PATH")
+class ShortPlayersCaptureTests(unittest.TestCase):
+    """The players pass may end a frame short; only the settled frame matters."""
+
+    def setUp(self):
+        self.parent = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.parent, ignore_errors=True)
+        self.deployment = self.parent / "game"
+        self.deployment.mkdir()
+        self.path = self.parent / "Dolly_Still_s.mkv"
+        self.folder = self.path.with_suffix("")
+        (self.folder / "players").mkdir(parents=True)
+        self.color_times = [i * 0.000831604 for i in range(14)]
+        (self.folder / "shot.json").write_text(json.dumps({
+            "video_file": self.path.name, "frames_written": 14,
+            "clock_samples": [{"frame": i, "phase": t, "source": "native"}
+                              for i, t in enumerate(self.color_times)]}))
+        frames = b"".join(bundle_frame(8, 4, [0.5, 0.5, 0.5, 1.0] * 32) for _ in range(13))
+        (self.deployment / player_layer.BUNDLE_NAME).write_bytes(frames)
+        (self.deployment / player_layer.STATUS_NAME).write_text(
+            screenshot.SHORT_CAPTURE_STATUS + "; keep capture data\nrequest x\n")
+
+    def app(self):
+        from dolly import screenshot_ui
+        options = SimpleNamespace(path=self.path, ffmpeg_path=Path(FFMPEG))
+        return screenshot_ui, SimpleNamespace(
+            _still_run=screenshot.StillRun(None, options, False), _base_capture=options,
+            controller=SimpleNamespace(deployment_directory=lambda: self.deployment))
+
+    def test_aligned_settled_frame_is_used(self):
+        (self.deployment / player_layer.META_NAME).write_bytes(frame_meta(self.color_times[:13]))
+        module, app = self.app()
+        self.assertEqual(module.finish_player_capture(app, "players")["state"], "completed")
+        self.assertTrue((self.folder / "hero_alpha.png").is_file())
+
+    def test_shifted_capture_is_refused(self):
+        shifted = self.color_times[1:14]  # frame i holds the color take's frame i+1
+        (self.deployment / player_layer.META_NAME).write_bytes(frame_meta(shifted))
+        module, app = self.app()
+        with self.assertRaises(RuntimeError):
+            module.finish_player_capture(app, "players")
+        self.assertFalse((self.folder / "hero_alpha.png").exists())

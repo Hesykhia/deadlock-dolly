@@ -161,6 +161,49 @@ def settled_index(take_folder: Path, video_name: str) -> int:
     return min(SETTLED_INDEX, frames - 1)
 
 
+SHORT_CAPTURE_STATUS = "failed player capture missed shot frames"
+FRAME_TIME_TOLERANCE = 1e-6  # seconds of replay time
+
+
+def players_frame_time(meta: Path, index: int) -> float | None:
+    """Replay time the players capture recorded for one sealed frame.
+
+    The metadata is 64-byte records: a header, then (frame index, replay time
+    as float64 bits, ...) per sealed frame.
+    """
+    try:
+        data = Path(meta).read_bytes()
+    except OSError:
+        return None
+    for offset in range(64, len(data) - 63, 64):
+        frame, bits = struct.unpack_from("<2Q", data, offset)
+        if frame == index:
+            return struct.unpack("<d", struct.pack("<Q", bits))[0]
+    return None
+
+
+def color_frame_time(take_folder: Path, index: int) -> float | None:
+    """Replay time the color take recorded for one frame (shot.json samples)."""
+    try:
+        data = json.loads((Path(take_folder) / "shot.json").read_text(encoding="utf-8"))
+        for sample in data.get("clock_samples", ()):
+            if sample.get("frame") == index:
+                return float(sample["phase"])
+    except (OSError, ValueError, AttributeError, KeyError, TypeError):
+        pass
+    return None
+
+
+def settled_frame_aligned(meta: Path, take_folder: Path, index: int) -> bool:
+    """The players and color passes rendered the settled frame at one replay time.
+
+    A still only needs that frame, so a players pass that ends a frame short of
+    the color take is usable when this holds; a shifted capture is not.
+    """
+    players, color = players_frame_time(meta, index), color_frame_time(take_folder, index)
+    return players is not None and color is not None and abs(players - color) <= FRAME_TIME_TOLERANCE
+
+
 def _png(path: Path, width: int, height: int, depth: int, color: int, rows) -> None:
     """Stream a PNG from an iterable of raw rows (filter byte added here)."""
     def chunk(kind: bytes, data: bytes) -> bytes:

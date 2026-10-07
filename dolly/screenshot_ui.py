@@ -178,11 +178,16 @@ def finish_player_capture(app, layer):
     except OSError as exc:
         LOG.warning("Players stop request failed: %s", exc)
     status = player_layer.wait_for_capture(deployment, timeout=180.0)
-    if not status.startswith("complete"):
-        raise RuntimeError("The players capture did not finish cleanly: "
-                           + (status or "no status was reported"))
     folder = run.take_folder
     index = screenshot.settled_index(folder, Path(run.options.path).name)
+    if not status.startswith("complete"):
+        # The players pass can end a frame or two before the color take. A still
+        # only uses the settled frame, so accept it when that frame is aligned.
+        if not (status.startswith(screenshot.SHORT_CAPTURE_STATUS) and screenshot.settled_frame_aligned(
+                deployment / player_layer.META_NAME, folder, index)):
+            raise RuntimeError("The players capture did not finish cleanly: "
+                               + (status or "no status was reported"))
+        LOG.warning("Players capture ended short; settled frame %d is aligned, using it", index)
     width, height, pixels = screenshot.read_bundle_frame(deployment / player_layer.BUNDLE_NAME, index)
     alpha, _isolated = screenshot.write_hero_stills(width, height, pixels, folder)
     del pixels
