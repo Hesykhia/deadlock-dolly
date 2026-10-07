@@ -54,8 +54,12 @@ DOF_SHADER_SETTINGS = ("mat_disable_dynamic_shader_compile",)
 DOF_SHADER_RELOAD = "mat_forcereloadshaders dof"
 # Engine text observed when the game install cannot compile the Native DOF
 # material because its vfx shader compiler files are missing: the DOF pass
-# falls back to the engine error material, the magenta/black checkerboard.
-DOF_SHADER_COMPILE_ERRORS = ("dynamic shader compile unavailable", "can't load vfx dx dll")
+# falls back to the engine error material, the magenta/black checkerboard. The
+# markers are matched against a separator-normalized copy of the reload output,
+# so the exact punctuation ("vfx_dx", "InitDynamicShaderCompileDLL") is
+# irrelevant.
+DOF_SHADER_COMPILE_ERRORS = ("dynamic shader compile unavailable", "can't load vfx",
+                             "initdynamicshadercompiledll")
 # Raised when Native DOF cannot be rendered safely. Without the vfx compiler the
 # engine substitutes its error material for the full-screen pass (the magenta/
 # black checkerboard) and the corrupt pass has crashed Deadlock, so Dolly refuses
@@ -66,6 +70,15 @@ NATIVE_DOF_UNAVAILABLE = (
     "Deadlock. Dolly left Native DOF off. Repair the game files (Steam > Deadlock > "
     "Properties > Installed Files > Verify integrity of game files) to re-enable it, "
     "or use Citadel Depth of Field instead.")
+
+
+def _dof_shader_compile_failed(text):
+    """True when the engine's shader compiler could not load, ignoring punctuation."""
+    compact = re.sub(r"[^a-z0-9]+", "", str(text or "").casefold())
+    return any(re.sub(r"[^a-z0-9]+", "", marker) in compact
+               for marker in DOF_SHADER_COMPILE_ERRORS)
+
+
 CAMERA_AXES = ("x", "y", "z")
 CAMERA_SETTLE_INTERVAL = .05
 CAMERA_SETTLE_SAMPLES = 3
@@ -2308,11 +2321,10 @@ class Controller(PausedFlightMixin, GameUiHandoffMixin):
         # not readable through this build's console.
         try:
             evidence["reload"] = str(self._request(
-                DOF_SHADER_RELOAD, timeout=15, allow_error=True, allow_truncated=True) or "")[:400]
+                DOF_SHADER_RELOAD, timeout=15, allow_error=True, allow_truncated=True) or "")[:4000]
         except (RuntimeError, ValueError, OSError) as exc:
             evidence["reload"] = "reload unavailable: " + str(exc)[:200]
-        reload_text = str(evidence["reload"] or "").casefold()
-        if any(marker in reload_text for marker in DOF_SHADER_COMPILE_ERRORS):
+        if _dof_shader_compile_failed(evidence["reload"]):
             evidence["checkerboard_risk"] = True
             # Remember the failure for the whole session and refuse the pass at
             # every apply point; re-running the check would just warn again and
@@ -2336,7 +2348,11 @@ class Controller(PausedFlightMixin, GameUiHandoffMixin):
         guard is what keeps an authored override from reaching the engine, where
         the missing compiler would render the magenta/black checkerboard and has
         crashed Deadlock. Called at every point that applies DOF to the game.
+        Other DOF modes (Citadel) and projects without a native override do not
+        use the engine's dynamic-shader-compile pass, so they are never blocked.
         """
+        if not self._project_uses_native_dof(project):
+            return
         self.ensure_native_dof_shader_support(project)
         if self._native_dof_unavailable:
             raise RuntimeError(self._native_dof_unavailable)
