@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.25 alpha - Support for the October 6 Deadlock build (6757)
+
+**0.6.25-alpha**
+
+- **Works with the new Deadlock build (6757).** *Before:* Dolly refused the October 6 game update. *After:* the native camera, replay startup, Game Follow, the health panel and Players/Depth work on build 6757, and the console unlocker is rebuilt for the new server. Reconstructed clip audio stays disabled on 6757 until its soundsystem review lands.
+- **Deleting the first camera now starts the shot there.** *Before:* removing the leading camera left the shot anchored to the old start, so a front-end mistake could not be corrected. *After:* the shot rebases onto the new first camera, effects shift with it, and Undo restores the original start.
+
+Full details: [0.6.25 release notes](RELEASE_NOTES_0.6.25-alpha.md).
+
 ## 0.6.24 alpha - Playback no longer dead-ends on health-panel restoration
 
 **0.6.24-alpha**
