@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.26 alpha - Support for the October 6 hotfix (6759)
+
+**0.6.26-alpha**
+
+- **Works with the October 6 hotfix (6759).** *Before:* the second October 6 game patch changed the client and server again, and Dolly refused the updated client. *After:* native camera support follows the hotfix and the console unlocker is rebuilt for the new server; build 6757 remains accepted.
+
+Full details: [0.6.26 release notes](RELEASE_NOTES_0.6.26-alpha.md).
+
 ## 0.6.25 alpha - Support for the October 6 Deadlock build (6757)
 
 **0.6.25-alpha**
