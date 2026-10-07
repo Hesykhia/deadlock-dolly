@@ -21,6 +21,7 @@ import time
 import uuid
 
 from .native_effects import compile_shot, EFFECTS
+from .native_errors import NativeBridgeError
 from .path import (CONFETTI_SPAWN_HEIGHT_DEFAULT, CONFETTI_SPAWN_HEIGHT_MAX,
                    CONFETTI_SPAWN_HEIGHT_MIN)
 from .particles import (PARTICLE_DEFAULT, PARTICLE_IDS, PARTICLE_INTENSITY_DEFAULT,
@@ -64,10 +65,6 @@ CONFETTI_DIAGNOSTIC_FIELDS = ("state", "handles", "starts", "start_failures", "f
                               "running_frames", "resets", "stop_disabled", "stop_reconfigured",
                               "stop_seek", "stop_backward", "stop_invalid", "stop_shutdown",
                               "stop_create_failed", "state_changes", "max_backward_delta")
-
-
-class NativeBridgeError(RuntimeError):
-    """Native camera is unavailable or did not acknowledge a command."""
 
 
 def _load_atomic_library():
