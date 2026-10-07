@@ -1,9 +1,9 @@
 {
   "format": 1,
-  "reviewed": "2026-10-05",
+  "reviewed": "2026-10-06",
   "modules": {
     "client": {
-      "profile": "deadlock-2026-10-05-6753-complete.json",
+      "profile": "deadlock-2026-10-06-6757-complete.json",
       "section": "client",
       "hash_key": "client_sha256",
       "size_key": "size_of_image",
@@ -35,17 +35,17 @@
       "MANAGER": {
         "module": "client",
         "kind": "rva",
-        "value": "0x318d960"
+        "value": "0x31cda70"
       },
       "MANAGER_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x2657288"
+        "value": "0x2688ef8"
       },
       "RESOURCE_GLOBAL": {
         "module": "client",
         "kind": "rva",
-        "value": "0x3de1320"
+        "value": "0x3e38fc0"
       },
       "RESOURCE_VTABLE": {
         "module": "resource",
@@ -60,71 +60,71 @@
       "INTRO_GLOBAL": {
         "module": "client",
         "kind": "rva",
-        "value": "0x3c3fda8"
+        "value": "0x3c97a28"
       },
       "INTRO_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x2aea748"
+        "value": "0x2b25a68"
       },
       "CLIENT_CODE_SPANS": {
         "module": "client",
         "kind": "spans",
         "value": [
           {
-            "rva": "0x5f19c0",
+            "rva": "0x5f2ac0",
             "size": 8,
-            "sha256": "4ff13aaed9b7cd3c2c2069c2fec1e3a3e549a9c256293f8ccd74acc857e25545"
+            "sha256": "9f462c63f987fc8b294c8b9081ff66a63566734961c03b217a1a88ce048df9cb"
           },
           {
-            "rva": "0x5fac60",
+            "rva": "0x5fbd60",
             "size": 126,
-            "sha256": "01a81cc0be68d985a292fe602b154073c245dd06cee4299f7bc42831b5423635"
+            "sha256": "0885a8a700160607f9ba306d78bb521a42c95d404f3e76fb46200d51e83772dd"
           },
           {
-            "rva": "0x1cecc60",
+            "rva": "0x1d1d9e0",
             "size": 266,
-            "sha256": "f12ecfe9a567db529fcb6423e758d31f68ee71b1e0be4d1a82657fd90d61ac42"
+            "sha256": "cdbfefc0b117921a1e8cda7fd46ac906a62f54cb4d597c7ef1aa5494268504dc"
           },
           {
-            "rva": "0x5e2bee",
+            "rva": "0x5e3cee",
             "size": 51,
-            "sha256": "7fac102d523f261241952464716862cced4c4570abecc5a922cde6e17557961f"
+            "sha256": "49a25c2c2a9981fa4548161e8607fdc64666d06e1edf591663fc2c075507daeb"
           },
           {
-            "rva": "0x5fe000",
+            "rva": "0x5ff100",
             "size": 10,
             "sha256": "ca558903144932ecefc5d1fba8e3f77346d4229fac2e28aa94268c78652621a6"
           },
           {
-            "rva": "0x5d7270",
+            "rva": "0x5d8370",
             "size": 75,
-            "sha256": "4b582d2d71494fb9dbc8b0a77154f092ffb5a1527ca7d8122f643a04d4539295"
+            "sha256": "9ab2c6326eec493def661987ccb43cd51cb55f573ab7cab34df54cc8a496d436"
           },
           {
-            "rva": "0x1ab3915",
+            "rva": "0x1ae58f5",
             "size": 101,
-            "sha256": "6140b65884128ff6852f815c8b2aca4777c90ae7a5f07992849d0edec1411067"
+            "sha256": "b3292a8faef5240f73c8397a6a259e476d622eff4b416f7f4ad6b7ee5d547456"
           },
           {
-            "rva": "0x1acffe0",
+            "rva": "0x1b020c0",
             "size": 230,
-            "sha256": "21b97f03cc179282d82751bf6d3354c9eff02428f8ee022d11e3a9b0752c27f9"
+            "sha256": "ad895e14aad3783790de746cfb8e1aca270d9532f0d5199fa7bdb96bb697c47a"
           },
           {
-            "rva": "0x1af5ebe",
+            "rva": "0x1b2803e",
             "size": 465,
-            "sha256": "bab0dbf9dcc9eff4ab9f70a0818064a2ddd02202c3aec036f028aca3421a3d5e"
+            "sha256": "30c275c1f4d5bac7f7cfdf6bea0b2a093aaeb150e972ba97869374c6526642a6"
           },
           {
-            "rva": "0x1ade7c0",
+            "rva": "0x1b108d0",
             "size": 66,
-            "sha256": "2c3747b78c5fba7e37dd91f5b6c76d7fb74683591b6307c409f71a6a18b5a2fe"
+            "sha256": "b5352e99008aba9841da49ac697bea82546385b283a9a8037b638471653bd1dc"
           },
           {
-            "rva": "0x1abba80",
+            "rva": "0x1aedb60",
             "size": 554,
-            "sha256": "dbc47181f638f292b0e78a51aa4c5d584fe5e75b66a09b8906ec9225ddea7b62"
+            "sha256": "f3f27a3b8333a8678f53482a718e0061ecd26cb1386ae7759461bfd6a0537a11"
           }
         ]
       },
@@ -187,86 +187,86 @@
       "MANAGER": {
         "module": "client",
         "kind": "rva",
-        "value": "0x3642ef0"
+        "value": "0x3687bf0"
       },
       "MANAGER_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x2650b90"
+        "value": "0x26826b0"
       },
       "GAMEPLAY_CAMERA_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x26585f8"
+        "value": "0x268a0f8"
       },
       "RULES_GLOBAL": {
         "module": "client",
         "kind": "rva",
-        "value": "0x3c23060"
+        "value": "0x3c7ae60"
       },
       "RULES_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x268cd28"
+        "value": "0x26be898"
       },
       "CODE_SPANS": {
         "module": "client",
         "kind": "spans",
         "value": [
           {
-            "rva": "0x5d3c30",
+            "rva": "0x5d4d70",
             "size": 685,
-            "sha256": "0e46b58c99fb1aad5bcbc00fbb80848b22c86a7da639b2346ed21864a84dbc70"
+            "sha256": "5273e3a2193ef39d2d1f0d5266b50887ece114ba8d96b31872b54a94b71d7a53"
           },
           {
-            "rva": "0x5b6230",
+            "rva": "0x5b7950",
             "size": 181,
-            "sha256": "a43a3e270dff8aa50e06525b8446227aecd8a3fad5a22e90c932f7ea62c0af92"
+            "sha256": "3a9d61414a57f513103b52c5ead406f51ac73606df789e22fe2098bb38b2d9fe"
           },
           {
-            "rva": "0x180ccb0",
+            "rva": "0x1842820",
             "size": 261,
             "sha256": "8cf35733f23987bae0ebb26f0c19ff26e8078831bfa157a58c5d5e52d515216f"
           },
           {
-            "rva": "0x1821cf0",
+            "rva": "0x1857860",
             "size": 5,
             "sha256": "65040a475cbc284b30a6717ac7b2100df0a76073a263841fe754d2e27c2de90f"
           },
           {
-            "rva": "0x1825e10",
+            "rva": "0x185b980",
             "size": 6,
             "sha256": "227707a7be321c721db4b8a5f987779e948f14b9d2ca4874596398e76ef852d6"
           },
           {
-            "rva": "0x1b0dba0",
+            "rva": "0x1b3fd40",
             "size": 1642,
-            "sha256": "9c0ce9ef87d9aa71c63eba7c763436d4fcb6004dbb86d6da3d43084347c5a584"
+            "sha256": "491a86be57b37d5c8d8b5c93bd49f386d4fd269cc271d683652be6fee9b25c3a"
           },
           {
-            "rva": "0x18b0c70",
+            "rva": "0x18e69e0",
             "size": 88,
             "sha256": "ab72639d18a9838c2721bda5ce47534e953ee71d6c8096dbc7bec3f24142c0df"
           },
           {
-            "rva": "0x1abd760",
+            "rva": "0x1aef840",
             "size": 17,
             "sha256": "7e5c47d0bebda21cab80ad5023e7171b10976ddd4be72a7e3b3c63c24cc0b18a"
           },
           {
-            "rva": "0x1aefb91",
+            "rva": "0x1b21d19",
             "size": 112,
-            "sha256": "81882ccb7d4b55f64cd57391792dc80497b22a0180865bc67c0add3f66b96cdb"
+            "sha256": "41795f36aba40b4ab7ac9b72da328ce199f8c7fa9e81865e5ee9a9795251d7cc"
           },
           {
-            "rva": "0x1b073d0",
+            "rva": "0x1b39570",
             "size": 91,
-            "sha256": "1a580db01609bb44a6ed0cc1707a602b42470810349641188209b51f59a5dced"
+            "sha256": "06084ba3484c9a917c569de611e63ac188993ab4eacfd37b9944f1df992315bb"
           },
           {
-            "rva": "0x1b0d850",
+            "rva": "0x1b3f9f0",
             "size": 118,
-            "sha256": "54e63ae8b5c234c0dcda9b423b6c8c87bd94eb93238010c1f821f503b3bdd670"
+            "sha256": "a084a1d716309ee3155716d99326ae129397bdf191ed29414c173472a1f6c50e"
           }
         ]
       },
@@ -298,12 +298,12 @@
       "HUD_ROOT": {
         "module": "client",
         "kind": "rva",
-        "value": "0x3c3f1c0"
+        "value": "0x3c96e48"
       },
       "HUD_ROOT_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x2ae69b0"
+        "value": "0x2b21c90"
       },
       "HUD_TAKEOVER_COUNT": {
         "module": "client",
@@ -321,34 +321,34 @@
         "kind": "spans",
         "value": [
           {
-            "rva": "0x8f0b0",
+            "rva": "0x8f030",
             "size": 3430,
-            "sha256": "26ac7b8413924d76c22d4f2a796d1b37007edca68f7ad9458b8e98e9759f51ff"
+            "sha256": "ea7fa535a5b57920dbed995cd4c3519dc8e8534ea830308dcc36fc991c1db723"
           },
           {
-            "rva": "0x90b00",
+            "rva": "0x90780",
             "size": 166,
-            "sha256": "f0e781b0dc98eebd39a77e0ef908716148f97ea813e6b4a13aebd755c392d5d7"
+            "sha256": "f0f292200746355e6c277ee2225d2e955b8a1d4269d843d1f87aae8348cee28b"
           },
           {
-            "rva": "0x233950",
+            "rva": "0x234d90",
             "size": 115,
-            "sha256": "b3e1d699cb6401e70dc363e54981200b13ad9f6bf5ab60374f0dbedad3460004"
+            "sha256": "fc8b47ba06f66205953241cb5090c7300a33c9d1837994028d9d6aa2d48b4b5a"
           },
           {
-            "rva": "0x23d4160",
+            "rva": "0x2405860",
             "size": 129,
-            "sha256": "3ebbccddb778fc88cf7d5ca4077a773791f41ccd7a27e3d201472a4401b341ab"
+            "sha256": "9c77f620e56d77803018a82f262ed77f11c1578abb8a8598fbdebac67f9bd58c"
           },
           {
-            "rva": "0x251280",
+            "rva": "0x2526c0",
             "size": 10,
             "sha256": "05bc3e128bef3737806443acfded9929479a2329b03ac7b2410268030aba9f7d"
           },
           {
-            "rva": "0x609d46",
+            "rva": "0x60ae46",
             "size": 11,
-            "sha256": "eec4e8382c3aaf78ecbe632d1fd9556546480db96423d415403cd4cb222ebc8c"
+            "sha256": "0e95c6a8c2555c0a2384ffaf688cc280c64b1df13b7d6c07c099422c944f2d70"
           }
         ]
       },
@@ -367,23 +367,23 @@
         "module": "client",
         "kind": "rva_map",
         "value": {
-          "pivot_x_offset": "0x3644940",
-          "pivot_y_offset": "0x3644950",
-          "pivot_z_offset": "0x3644960",
-          "pivot_x_offset_crouching": "0x3644970",
-          "pivot_y_offset_crouching": "0x3644980",
-          "pivot_z_offset_crouching": "0x3644990",
-          "x_offset": "0x36449a0",
-          "y_offset": "0x36449b0",
-          "z_offset": "0x36449c0",
-          "x_worst_case_offset": "0x36449d0",
-          "y_worst_case_offset": "0x36449e0",
-          "z_worst_case_offset": "0x36449f0",
-          "ads_x_offset": "0x3644a00",
-          "ads_y_offset": "0x3644a10",
-          "ads_z_offset": "0x3644a20",
-          "fov": "0x3644a30",
-          "ads_fov": "0x3644a40"
+          "pivot_x_offset": "0x3689650",
+          "pivot_y_offset": "0x3689660",
+          "pivot_z_offset": "0x3689670",
+          "pivot_x_offset_crouching": "0x3689680",
+          "pivot_y_offset_crouching": "0x3689690",
+          "pivot_z_offset_crouching": "0x36896a0",
+          "x_offset": "0x36896b0",
+          "y_offset": "0x36896c0",
+          "z_offset": "0x36896d0",
+          "x_worst_case_offset": "0x36896e0",
+          "y_worst_case_offset": "0x36896f0",
+          "z_worst_case_offset": "0x3689700",
+          "ads_x_offset": "0x3689710",
+          "ads_y_offset": "0x3689720",
+          "ads_z_offset": "0x3689730",
+          "fov": "0x3689740",
+          "ads_fov": "0x3689750"
         }
       },
       "OWN_HEALTH_SPANS": {
@@ -391,36 +391,36 @@
         "kind": "spans",
         "value": [
           {
-            "rva": "0x1b8e00",
+            "rva": "0x1ba210",
             "size": 174,
-            "sha256": "1d33d60a121411e7cfb4fe9fe01e1053b5bc340bd5fba951ccfa272e62492e1e"
+            "sha256": "f8c21d008d990d5c6d9fa1251bbf8b4c7598d62b425c393c8ee783220855ecf0"
           },
           {
-            "rva": "0x1afa3c0",
+            "rva": "0x1b2c540",
             "size": 803,
-            "sha256": "66e8ce2d019189de31be014393634e9e20a9fea5cf3915873326c3e5e3cf2db2"
+            "sha256": "7b8ab6a2ef2ca11c4631bc71aaf185d7782e6465a5b9d2b74b0c001cccc1ad15"
           },
           {
-            "rva": "0x1adc550",
+            "rva": "0x1b0e630",
             "size": 47,
-            "sha256": "5f2d33438563c6ba7393d261b0cbc1093f4a74b0f0726d0c02e66832800cdd55"
+            "sha256": "5842cae6ed2a523b70232910a76d1188cd99971b7627720a57b8c6ec7853dcb4"
           }
         ]
       },
       "ENABLED_REF": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3644930"
+        "value": "0x3689640"
       },
       "FOLLOW_AIM_REF": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3644668"
+        "value": "0x3689378"
       },
       "OWN_HEALTH_REF": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3c3fb18"
+        "value": "0x3c97798"
       },
       "CLIENT_IMAGE_SIZE": {
         "kind": "module_size",
@@ -457,32 +457,32 @@
         "kind": "spans",
         "value": [
           {
-            "rva": "0x1619af0",
+            "rva": "0x164f9f0",
             "size": 121,
-            "sha256": "50cb8c04376341923492a677b300c3e8acc2e5fc65d721065f4c99f35aa89128"
+            "sha256": "e270956d073887065c9a0addb4ff44ca1b835df5a2037138ba83a7a13f0f8d91"
           },
           {
-            "rva": "0x866eb0",
+            "rva": "0x8682c0",
             "size": 5,
             "sha256": "ec570840fc39861c9310b17d397eca0b61da5d806b79edd4c04f18586aaf6fe2"
           },
           {
-            "rva": "0x866ec0",
+            "rva": "0x8682d0",
             "size": 92,
-            "sha256": "d3f96ddf3536abb37d151ba863ee6777c2397e49caad40330ab9457a6f2f1946"
+            "sha256": "fff32a70e474d877632bc79b142fc90ac353c52e7cc1f9ec2e1adcd7e396f5f4"
           },
           {
-            "rva": "0x838550",
+            "rva": "0x8390c0",
             "size": 193,
-            "sha256": "a110f697ecc5e65949fe6c564ac5a61987ce51d8906ef6a8fca2fdbd7c322e00"
+            "sha256": "0bb35332b35601c795da9bf08db32ccd8bf5e5ac11a7898cdf37c33a0e7799c2"
           },
           {
-            "rva": "0x8181c0",
+            "rva": "0x8192d0",
             "size": 17,
             "sha256": "f01ab0e29ffd2376f18134f0302fa70d76027db664593ba5faaa636d45982a1e"
           },
           {
-            "rva": "0x8181e0",
+            "rva": "0x8192f0",
             "size": 17,
             "sha256": "bae583882071a1886725f72a7c53f8f3a4cdaaf4a6c36108087cdaf0a1afb5b0"
           }
@@ -493,114 +493,114 @@
         "kind": "spans",
         "value": [
           {
-            "rva": "0x934240",
+            "rva": "0x936df0",
             "size": 33,
-            "sha256": "1b1eab3fcc73ff825b278669c8b84b229a79b4881169f37d2b5b028d0f2311f8"
+            "sha256": "ff487678bb716db32e5fbe5aa6cafd94aa6c73653b2e5e66b2d74dfbeb915ae2"
           },
           {
-            "rva": "0x1619ad0",
+            "rva": "0x164f9d0",
             "size": 23,
-            "sha256": "7c94ffb65a4dea04f82fc2ae8ff8d41e553a03e25646da3635e7216db4435760"
+            "sha256": "39b49f3fc1e12debdac3527641c6dac030a9679d4bd778cb35d40179488fae40"
           },
           {
-            "rva": "0x57bbe0",
+            "rva": "0x57d4f0",
             "size": 252,
-            "sha256": "f7042523e215705bb5a96949b65f67653c25790683576cb7fd85a6d7d5d257fb"
+            "sha256": "1f3c20a19af031d7f604da4605cde8871c9aaabf89030e89bdbdadb576c53015"
           },
           {
-            "rva": "0x8181c0",
+            "rva": "0x8192d0",
             "size": 17,
             "sha256": "f01ab0e29ffd2376f18134f0302fa70d76027db664593ba5faaa636d45982a1e"
           },
           {
-            "rva": "0x8181e0",
+            "rva": "0x8192f0",
             "size": 17,
             "sha256": "bae583882071a1886725f72a7c53f8f3a4cdaaf4a6c36108087cdaf0a1afb5b0"
           },
           {
-            "rva": "0x866f50",
+            "rva": "0x868360",
             "size": 137,
-            "sha256": "f10e41aef979a4f59957540611bd99182264be9a56c908326f62a07bc6fe7516"
+            "sha256": "b274d184eaed6d3651cf42597f0222e20357af537a00f7dc92154ee26ef9639f"
           },
           {
-            "rva": "0x1b3d5e0",
+            "rva": "0x1b6f550",
             "size": 297,
-            "sha256": "a0cbbf5afe21148d065d0ae38b05f175f5fc4bbce5bfc1ff27fc477f2f475306"
+            "sha256": "7df7c74398eed86d92cf1743e8264e867f0b5a5d2fcff43ca3efc5df9becbbee"
           },
           {
-            "rva": "0x1b3dc30",
+            "rva": "0x1b6fba0",
             "size": 65,
             "sha256": "df410f2d99b103f8361eed5acaa5be48b48d8794bc7602a507e1b03efd0eee28"
           },
           {
-            "rva": "0x816bb0",
+            "rva": "0x817cc0",
             "size": 55,
-            "sha256": "6374a7555b48d69bb53e41be62495f9ad546cf8204d7cf1c4a64d18bf4068f40"
+            "sha256": "ed4788a7c634e4d2e2e6c85bfcb7dac612ddc62afc101dda7d21e22e9c6dbcbc"
           },
           {
-            "rva": "0x4a5170",
+            "rva": "0x4a6e00",
             "size": 5,
             "sha256": "e6cd336783acd3d013ec3f5c32746e98823b46386f6d0f54fb5d6824240ff264"
           },
           {
-            "rva": "0x70be60",
+            "rva": "0x70d020",
             "size": 3,
             "sha256": "e18aacce29affcdddaa5f641ac1ec12552e0fe9d066e6408941b1792818b8619"
           },
           {
-            "rva": "0x15f5a50",
+            "rva": "0x15f2cd5",
             "size": 3,
             "sha256": "e18aacce29affcdddaa5f641ac1ec12552e0fe9d066e6408941b1792818b8619"
           },
           {
-            "rva": "0x52e750",
+            "rva": "0x530b50",
             "size": 3,
             "sha256": "e18aacce29affcdddaa5f641ac1ec12552e0fe9d066e6408941b1792818b8619"
           },
           {
-            "rva": "0x589c46",
+            "rva": "0x58b556",
             "size": 3,
             "sha256": "01cb47d078b4841b8408ec4fe278efa83115c6f6e101972987507d2b2b57dcf0"
           },
           {
-            "rva": "0x8507d0",
+            "rva": "0x851530",
             "size": 380,
-            "sha256": "06c4e628102e3cbe8f692fe286cae9f76543f453aee4b0c387272e86a72a2d64"
+            "sha256": "62c62569e99bd9475a9930ab98d4101967cb4e035d0e6c751d16f4f7fc3c7c62"
           }
         ]
       },
       "CONTROLLER_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x26b7958"
+        "value": "0x26e8fd8"
       },
       "OBSERVER_PAWN_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x2634338"
+        "value": "0x2665fc0"
       },
       "PLAYER_PAWN_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x2640ea8"
+        "value": "0x2672a20"
       },
       "FAMILIAR_CLONE_PAWN_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x27ee740"
+        "value": "0x282aaf0"
       },
       "SERVICES_VTABLES": {
         "module": "client",
         "kind": "rvas",
         "value": [
-          "0x26b83a0",
-          "0x2a5a4a8"
+          "0x26e9a20",
+          "0x2a96148"
         ]
       },
       "CONTROLLER_FINAL_VTABLE": {
         "module": "client",
         "kind": "rva",
-        "value": "0x26b7928"
+        "value": "0x26e8fa8"
       },
       "OBSERVER_SERVICES_OFFSET": {
         "module": "client",
@@ -610,42 +610,42 @@
       "ENTITY_LIST": {
         "kind": "rva",
         "module": "client",
-        "value": "0x34309b8"
+        "value": "0x34758b8"
       },
       "CONTROLLER": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3bdc430"
+        "value": "0x3c34270"
       },
       "OBSERVER_PREDICATE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x52e750"
+        "value": "0x530b50"
       },
       "GET_OBSERVER_MODE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x866eb0"
+        "value": "0x8682c0"
       },
       "GET_OBSERVER_TARGET": {
         "kind": "rva",
         "module": "client",
-        "value": "0x866ec0"
+        "value": "0x8682d0"
       },
       "PLAYER_PREDICATE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x15f5a50"
+        "value": "0x15f2cd5"
       },
       "PLAYER_DATA_PREDICATE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x589de0"
+        "value": "0x58b6f0"
       },
       "CONTROLLER_PREDICATE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x70be60"
+        "value": "0x70d020"
       },
       "IDENTITY_STRIDE": {
         "kind": "offset",
@@ -735,22 +735,22 @@
       "INITIALIZER": {
         "kind": "rva",
         "module": "client",
-        "value": "0x20381b0"
+        "value": "0x2068be0"
       },
       "ENTITY_VTABLE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x2a48f10"
+        "value": "0x2a84bb0"
       },
       "ENTITY_GLOBAL": {
         "kind": "rva",
         "module": "client",
-        "value": "0x3d5dd00"
+        "value": "0x3db59b0"
       },
       "INITIALIZER_BYTES": {
         "kind": "bytes",
         "module": "client",
-        "value": "0fb64424288844242848890d405bd201e99bbfffff"
+        "value": "0fb64424288844242848890dc0cdd401e99bbfffff"
       }
     }
   },
@@ -758,15 +758,15 @@
     "C_BasePlayerPawn.m_pObserverServices": {
       "module": "client",
       "offset": "0xe98",
-      "record_rva": "0x31ef830",
+      "record_rva": "0x322f8d0",
       "getters": [
         {
-          "rva": "0x8181c0",
+          "rva": "0x8192d0",
           "slot": "0xf0",
           "bytes": "488b89980e0000488b0148ffa0f0000000"
         },
         {
-          "rva": "0x8181e0",
+          "rva": "0x8192f0",
           "slot": "0x100",
           "bytes": "488b89980e0000488b0148ffa000010000"
         }
@@ -1036,6 +1036,11 @@
     },
     {
       "profile": "scenesystem-2026-10-05-6753.json",
+      "renderer_sha256": "08a30cbaaad05636295012cdd9db518e3cbbf213ddc81a5d749e5cc01d220c04",
+      "renderer_size": "0x4b7000"
+    },
+    {
+      "profile": "scenesystem-2026-10-06-6757.json",
       "renderer_sha256": "08a30cbaaad05636295012cdd9db518e3cbbf213ddc81a5d749e5cc01d220c04",
       "renderer_size": "0x4b7000"
     }
