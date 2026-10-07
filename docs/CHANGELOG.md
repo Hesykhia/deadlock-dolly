@@ -1,5 +1,15 @@
 # Changes
 
+## 0.6.26 alpha - Citadel DOF stays usable and error popups stop stacking
+
+**0.6.26-alpha**
+
+- **Citadel Depth of Field keeps working after a Native DOF problem.** *Before:* once Native DOF failed on a game install, every depth-of-field control (including Citadel DOF) was blocked and errored. *After:* only the Native DOF pass is held back, and Citadel DOF plus the rest of the editor keep working.
+- **Dolly no longer freezes on a repeated error.** *Before:* a repeated failure (for example moving a DOF slider after a Native DOF error) could stack error dialogs and leave Dolly needing a hard close. *After:* Dolly shows one clear message and stays responsive.
+- **The Native DOF checkerboard guard is more reliable.** *Before:* the guard depended on the exact engine wording for a failed shader compiler, so some installs could still show the magenta/black checkerboard. *After:* the guard recognizes the failure regardless of wording and leaves Native DOF off with an explanation.
+
+Full details: [0.6.26 release notes](RELEASE_NOTES_0.6.26-alpha.md).
+
 ## 0.6.25 alpha - October 6 Deadlock updates and health-panel hardening
 
 **0.6.25-alpha**
