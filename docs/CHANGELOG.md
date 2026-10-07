@@ -1,19 +1,12 @@
 # Changes
 
-## 0.6.26 alpha - Support for the October 6 hotfix (6759)
-
-**0.6.26-alpha**
-
-- **Works with the October 6 hotfix (6759).** *Before:* the second October 6 game patch changed the client and server again, and Dolly refused the updated client. *After:* native camera support follows the hotfix and the console unlocker is rebuilt for the new server; build 6757 remains accepted.
-
-Full details: [0.6.26 release notes](RELEASE_NOTES_0.6.26-alpha.md).
-
-## 0.6.25 alpha - Support for the October 6 Deadlock build (6757)
+## 0.6.25 alpha - October 6 Deadlock updates and health-panel hardening
 
 **0.6.25-alpha**
 
-- **Works with the new Deadlock build (6757).** *Before:* Dolly refused the October 6 game update. *After:* the native camera, replay startup, Game Follow, the health panel and Players/Depth work on build 6757, and the console unlocker is rebuilt for the new server. Reconstructed clip audio stays disabled on 6757 until its soundsystem review lands.
+- **Works with the October 6 Deadlock updates (6757 and 6759).** *Before:* both October 6 game patches changed the client and server, and Dolly refused the updated client. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6757 and 6759, and the console unlocker is rebuilt for each server. Reconstructed clip audio stays disabled until its soundsystem review lands.
 - **Deleting the first camera now starts the shot there.** *Before:* removing the leading camera left the shot anchored to the old start, so a front-end mistake could not be corrected. *After:* the shot rebases onto the new first camera, effects shift with it, and Undo restores the original start.
+- **Export and F9 no longer stall on the health panel.** *Before:* a stale player-predicate value made the health-panel handoff retry for five seconds, so F9 was slow and exports were blocked with a pending-restoration error. *After:* the predicate is corrected, the handoff fails fast instead of retrying, and a cosmetic panel can no longer block export.
 
 Full details: [0.6.25 release notes](RELEASE_NOTES_0.6.25-alpha.md).
 
