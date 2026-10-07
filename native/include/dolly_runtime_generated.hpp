@@ -62,7 +62,7 @@ inline constexpr std::uintptr_t CVAR_VALUE = 0x58;
 }
 namespace FollowTarget {
 inline constexpr CodeSpan TARGET_SPANS[] = {{0x164fab0, 121}, {0x8682c0, 5}, {0x8682d0, 92}, {0x8390c0, 193}, {0x8192d0, 17}, {0x8192f0, 17}};
-inline constexpr CodeSpan HEALTH_CONTEXT_SPANS[] = {{0x936df0, 33}, {0x164fa90, 23}, {0x57d4f0, 252}, {0x8192d0, 17}, {0x8192f0, 17}, {0x868360, 137}, {0x1b6f640, 297}, {0x1b6fc90, 65}, {0x817cc0, 55}, {0x4a6e00, 5}, {0x70d020, 3}, {0x15f2d95, 3}, {0x530b50, 3}, {0x58b556, 3}, {0x851530, 380}};
+inline constexpr CodeSpan HEALTH_CONTEXT_SPANS[] = {{0x936df0, 33}, {0x164fa90, 23}, {0x57d4f0, 252}, {0x8192d0, 17}, {0x8192f0, 17}, {0x868360, 137}, {0x1b6f640, 297}, {0x1b6fc90, 65}, {0x817cc0, 55}, {0x4a6e00, 5}, {0x70d020, 3}, {0x162b9e0, 3}, {0x530b50, 3}, {0x58b556, 3}, {0x851530, 380}};
 inline constexpr std::uintptr_t CONTROLLER_VTABLE = 0x26e8fd8;
 inline constexpr std::uintptr_t OBSERVER_PAWN_VTABLE = 0x2665fc0;
 inline constexpr std::uintptr_t PLAYER_PAWN_VTABLE = 0x2672a20;
@@ -75,7 +75,7 @@ inline constexpr std::uintptr_t CONTROLLER = 0x3c342a0;
 inline constexpr std::uintptr_t OBSERVER_PREDICATE = 0x530b50;
 inline constexpr std::uintptr_t GET_OBSERVER_MODE = 0x8682c0;
 inline constexpr std::uintptr_t GET_OBSERVER_TARGET = 0x8682d0;
-inline constexpr std::uintptr_t PLAYER_PREDICATE = 0x15f2d95;
+inline constexpr std::uintptr_t PLAYER_PREDICATE = 0x162b9e0;
 inline constexpr std::uintptr_t PLAYER_DATA_PREDICATE = 0x58b6f0;
 inline constexpr std::uintptr_t CONTROLLER_PREDICATE = 0x70d020;
 inline constexpr std::uintptr_t IDENTITY_STRIDE = 0x70;
