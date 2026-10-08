@@ -71,6 +71,11 @@ def finish_capture(candidate, action, key, tick, selected=None):
     elif action == "replace":
         candidate.keyframes[selected] = key
     else:
+        if key.time < 0:
+            # The in-game Capture path can report a tick before the shot's start
+            # (replay scrubbed back); refuse it clearly instead of failing later
+            # in Project.validate with "timestamps must be nonnegative".
+            raise ValueError("Replay is before this shot's start. Start a new path here or choose Timed shot.")
         if any(existing.time == key.time for existing in candidate.keyframes):
             raise ValueError("This replay moment already has a view. Advance the replay, use Replace selected camera, "
                              "or choose Timed shot to add several views while paused.")
