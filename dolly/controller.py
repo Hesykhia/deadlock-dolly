@@ -24,13 +24,18 @@ from . import __version__
 from .convar_response import NUMBER, read_cvar_value
 from .path import (Project, Keyframe, validate_cvar_name, STANDARD_ASPECT, ASPECT_MIN, ASPECT_MAX,
                    validate_cvar_value, format_cvar_value)
+# Camera command/parse layer, re-exported for existing callers and tests.
+from .camera_commands import (ASPECT_CVAR, DISCRETE, DOF_RANGES, LEGACY_FOV_CONTROLS, frame_commands,
+                              motion_clock_info, numeric, parse_camera, parse_camera_readback,
+                              _tail_file, tick_rate_advice, tick_rates_match)
+from .game_ui_handoff import GameUiHandoffMixin, OWN_HEALTH_HUD
+from .paused_flight import PausedFlightMixin, CAMERA_READBACK_INTERVAL
 from .console import ConsoleClient, ConsoleError, ConsoleTimeout, error_text, parse_demo_info, parse_demo_tick
 from .replays import same_replay_name
 from .demo_packets import packet_index, replay_header
 from .playback import ReplayClock
 from .smoothing import PhaseSmoother, smoothing_window
 from .display import client_aspect_ratio
-from .navigation import CameraMotion, move_camera
 from .pacing import FrameWait
 from .runtime import application_root
 from . import launcher
@@ -40,17 +45,6 @@ from .replay_camera import ReplayCameraMonitor
 
 ROOT = application_root(Path(__file__).resolve().parents[1])
 LOG = logging.getLogger("dolly")
-ASPECT_CVAR = "r_aspectratio"
-LEGACY_FOV_CONTROLS = {"citadel_camera_fov", "citadel_camera_spectator_fov"}
-DOF_RANGES = {
-    "r_citadel_depthoffield_enable": (0, 1),
-    "r_citadel_depthoffield_aperture_diameter": (0, 3),
-    "r_citadel_depthoffield_focus_distance": (0, 10000),
-    "r_citadel_depthoffield_mode": (0, 2),
-    "r_citadel_depthoffield_sensor_size": (0.5, 3),
-}
-DISCRETE = {"r_citadel_depthoffield_enable", "r_citadel_depthoffield_mode",
-            "r_depth_of_field", "r_dof_override", "cl_lock_camera"}
 # The engine's Native DOF material (materials/dev/dof1_general.vmat) is built
 # with DynamicShaderCompile 1. A session that disables dynamic shader
 # compilation makes the engine substitute its error material for the
@@ -60,8 +54,12 @@ DOF_SHADER_SETTINGS = ("mat_disable_dynamic_shader_compile",)
 DOF_SHADER_RELOAD = "mat_forcereloadshaders dof"
 # Engine text observed when the game install cannot compile the Native DOF
 # material because its vfx shader compiler files are missing: the DOF pass
-# falls back to the engine error material, the magenta/black checkerboard.
-DOF_SHADER_COMPILE_ERRORS = ("dynamic shader compile unavailable", "can't load vfx dx dll")
+# falls back to the engine error material, the magenta/black checkerboard. The
+# markers are matched against a separator-normalized copy of the reload output,
+# so the exact punctuation ("vfx_dx", "InitDynamicShaderCompileDLL") is
+# irrelevant.
+DOF_SHADER_COMPILE_ERRORS = ("dynamic shader compile unavailable", "can't load vfx",
+                             "initdynamicshadercompiledll")
 # Raised when Native DOF cannot be rendered safely. Without the vfx compiler the
 # engine substitutes its error material for the full-screen pass (the magenta/
 # black checkerboard) and the corrupt pass has crashed Deadlock, so Dolly refuses
@@ -72,6 +70,15 @@ NATIVE_DOF_UNAVAILABLE = (
     "Deadlock. Dolly left Native DOF off. Repair the game files (Steam > Deadlock > "
     "Properties > Installed Files > Verify integrity of game files) to re-enable it, "
     "or use Citadel Depth of Field instead.")
+
+
+def _dof_shader_compile_failed(text):
+    """True when the engine's shader compiler could not load, ignoring punctuation."""
+    compact = re.sub(r"[^a-z0-9]+", "", str(text or "").casefold())
+    return any(re.sub(r"[^a-z0-9]+", "", marker) in compact
+               for marker in DOF_SHADER_COMPILE_ERRORS)
+
+
 CAMERA_AXES = ("x", "y", "z")
 CAMERA_SETTLE_INTERVAL = .05
 CAMERA_SETTLE_SAMPLES = 3
@@ -83,7 +90,6 @@ CAMERA_HEIGHT_PROBE = 16.0
 CAMERA_CORRECTION_LIMIT = 12
 SEEK_SETTLE_INTERVAL = .04
 SEEK_SETTLE_SAMPLES = 3
-CAMERA_READBACK_INTERVAL = .25
 CAMERA_DRIFT_LIMIT = 64.0
 CAMERA_DRIFT_SAMPLES = 3
 NATIVE_PAUSE_TIMEOUT = 8.0
@@ -101,7 +107,6 @@ PRELOAD_INTRO_STALL_SECONDS = 45.0
 HEALTHBAR_SWITCH_CVARS = ("citadel_healthbars_enabled", "citadel_unit_status_use_new")
 HEALTHBAR_SWITCH_ON = {"citadel_healthbars_enabled": 1.0, "citadel_unit_status_use_new": 1.0}
 HEALTHBAR_SCALE_CVARS = ("citadel_unit_status_min_distance_scale", "citadel_unit_status_max_distance_scale")
-OWN_HEALTH_HUD = "citadel_hud_hide_own_health"
 
 
 class CameraPositionError(RuntimeError):
@@ -116,111 +121,7 @@ class PreloadUnavailableError(RuntimeError):
     """
 
 
-def motion_clock_info():
-    # Python 3.12's Windows monotonic clock can advance in 15/16 ms steps.
-    # All motion timestamps use the same high-resolution QPC-backed domain.
-    info = time.get_clock_info("perf_counter")
-    return {"name": "perf_counter", "implementation": info.implementation,
-            "resolution_seconds": info.resolution, "monotonic": info.monotonic}
-
-
-def numeric(value):
-    value = float(value)
-    if not math.isfinite(value):
-        raise ValueError("A camera value is not finite.")
-    return format(value, ".9g")
-
-
-def tick_rates_match(left, right, tolerance=.02):
-    """True when two replay tick rates describe the same clock.
-
-    Replay files are recorded at different rates (32 and 64 are both live
-    today), so a project's ticks/second must match the loaded replay before a
-    tick is converted to an authored shot second. The tolerance absorbs the
-    rounding in engine status text; half a tick is always accepted.
-    """
-    try:
-        left, right = float(left), float(right)
-    except (TypeError, ValueError):
-        return False
-    if not math.isfinite(left) or not math.isfinite(right) or left <= 0 or right <= 0:
-        return False
-    return abs(left - right) <= max(.5, tolerance * max(left, right))
-
-
-def tick_rate_advice(replay_rate, project_rate):
-    """Explain a replay/project tick-rate mismatch and how to repair it."""
-    return (f"This replay runs at {float(replay_rate):.3g} ticks/second, but the shot uses "
-            f"{float(project_rate):.3g}. Replay-timed cameras would arrive at the wrong replay "
-            "moments. Retime the shot to this replay (Shot settings) or set Ticks/second to "
-            "match before adding or replacing cameras.")
-
-
-def _tail_file(path, limit=2_000_000):
-    with Path(path).open("rb") as stream:
-        stream.seek(0, 2)
-        stream.seek(max(0, stream.tell() - limit))
-        return stream.read(limit)
-
-
-def parse_camera(output, fov=90.0, roll=0.0, *, aspect_ratio=STANDARD_ASPECT):
-    """spec_pos produces spec_goto X Y Z pitch yaw; getpos has a second form."""
-    match = re.search(r"\bspec_goto\s+" + r"\s+".join([f"({NUMBER})"] * 5), output)
-    if match:
-        xyzpy = [float(v) for v in match.groups()]
-        frame = Keyframe(0.0, *xyzpy, float(roll), float(fov), aspect_ratio=float(aspect_ratio))
-        Project(keyframes=[frame]).validate()
-        return frame
-    match = re.search(r"\bsetpos(?:_exact)?\s+" + r"\s+".join([f"({NUMBER})"] * 3)
-                      + r"\s*;\s*setang(?:_exact)?\s+" + r"\s+".join([f"({NUMBER})"] * 3), output)
-    if match:
-        frame = Keyframe(0.0, *[float(v) for v in match.groups()], float(fov), aspect_ratio=float(aspect_ratio))
-        Project(keyframes=[frame]).validate()
-        return frame
-    raise ValueError("The spectator camera position could not be read. Enter replay freecam, then export diagnostics if Capture still fails.")
-
-
-def parse_camera_readback(output, *, roll, aspect_ratio):
-    """Accept a printed position, never the outgoing multi-command echo."""
-    clean = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output)
-    pattern = (r"^[ \t]*(?:\[[^\]\r\n]*\][ \t]*)*spec_goto[ \t]+"
-               + r"[ \t]+".join([f"({NUMBER})"] * 5) + r"[ \t\r]*$")
-    matches = list(re.finditer(pattern, clean, re.M))
-    if not matches:
-        raise ValueError("The camera readback did not contain a printed spec_pos position. Movement stopped; export diagnostics.")
-    return parse_camera("spec_goto " + " ".join(matches[-1].groups()),
-                        roll=roll, aspect_ratio=aspect_ratio)
-
-
-def frame_commands(frame, lens_cvar=ASPECT_CVAR):
-    if lens_cvar != ASPECT_CVAR:
-        raise ValueError("Framing uses r_aspectratio. Degree-based FOV controls are no longer supported.")
-    aspect = float(frame["aspect_ratio"])
-    if not math.isfinite(aspect) or not ASPECT_MIN <= aspect <= ASPECT_MAX:
-        raise ValueError(f"Aspect ratio must be between {ASPECT_MIN:g} and {ASPECT_MAX:g}. These are the editor's framing limits.")
-    commands = ["spec_goto " + " ".join(numeric(frame[k]) for k in ("x", "y", "z", "pitch", "yaw")),
-                "cl_citadel_forceangles " + " ".join(numeric(frame[k]) for k in ("pitch", "yaw", "roll")),
-                ASPECT_CVAR + " " + numeric(aspect)]
-    cvars = frame.get("cvars", {})
-    for name, value in sorted(cvars.items()):
-        validate_cvar_name(name)
-        value = validate_cvar_value(name, value)
-        if (name == "r_dof_override_ranges" and cvars.get("r_citadel_depthoffield_enable", 0)
-                and cvars.get("r_dof_override") == 0):
-            value = (0.0,) * 4  # Suppress the override without changing authored curves.
-        if name == ASPECT_CVAR or name in LEGACY_FOV_CONTROLS:
-            raise ValueError("Use the Framing curve for aspect ratio. Legacy FOV and duplicate aspect tracks are disabled.")
-        if name in DOF_RANGES:
-            lo, hi = DOF_RANGES[name]
-            if not lo <= float(value) <= hi:
-                raise ValueError(f"{name} must be between {lo:g} and {hi:g}.")
-        if name in DISCRETE and float(value) != int(float(value)):
-            raise ValueError(f"{name} needs whole-number values and a Step track.")
-        commands.append(name + " " + format_cvar_value(value))
-    return "; ".join(commands)
-
-
-class Controller:
+class Controller(PausedFlightMixin, GameUiHandoffMixin):
     def __init__(self, log_callback=None):
         self._log_callback = log_callback
         self._session = None
@@ -2420,11 +2321,10 @@ class Controller:
         # not readable through this build's console.
         try:
             evidence["reload"] = str(self._request(
-                DOF_SHADER_RELOAD, timeout=15, allow_error=True, allow_truncated=True) or "")[:400]
+                DOF_SHADER_RELOAD, timeout=15, allow_error=True, allow_truncated=True) or "")[:4000]
         except (RuntimeError, ValueError, OSError) as exc:
             evidence["reload"] = "reload unavailable: " + str(exc)[:200]
-        reload_text = str(evidence["reload"] or "").casefold()
-        if any(marker in reload_text for marker in DOF_SHADER_COMPILE_ERRORS):
+        if _dof_shader_compile_failed(evidence["reload"]):
             evidence["checkerboard_risk"] = True
             # Remember the failure for the whole session and refuse the pass at
             # every apply point; re-running the check would just warn again and
@@ -2448,7 +2348,11 @@ class Controller:
         guard is what keeps an authored override from reaching the engine, where
         the missing compiler would render the magenta/black checkerboard and has
         crashed Deadlock. Called at every point that applies DOF to the game.
+        Other DOF modes (Citadel) and projects without a native override do not
+        use the engine's dynamic-shader-compile pass, so they are never blocked.
         """
+        if not self._project_uses_native_dof(project):
+            return
         self.ensure_native_dof_shader_support(project)
         if self._native_dof_unavailable:
             raise RuntimeError(self._native_dof_unavailable)
@@ -2657,382 +2561,6 @@ class Controller:
                 editor_configure(owner=return_owner)
             self._message("Console open. Editor movement is suspended while typing." if enabled else "Console closed. Return to the editor to continue.")
             return self.status()
-
-    def toggle_game_ui(self, enabled=None):
-        """Hand camera/mouse ownership to the game's replay UI, or return."""
-        with self._op_lock:
-            enabled = not self._game_ui_visible if enabled is None else enabled
-            if not isinstance(enabled, bool):
-                raise ValueError("Game UI visibility must be a boolean.")
-            if not enabled:
-                # Refuse unverified return before changing camera/input owner,
-                # hiding the console or taking new HUD restoration snapshots.
-                self._require_probe()
-            self._require_demo(require_tick=False)
-            # Deadlock has no registered `demoui` command in the reviewed build.
-            # These readable cvars control the replay HUD and its real cursor;
-            # explicit values also survive manual UI changes and delayed events.
-            self._remember_game_ui_settings()
-            bridge = self._native_bridge()
-            configure = getattr(bridge, "configure_editor", None)
-            if callable(configure):
-                # Keep ordinary game input available until native flight is
-                # actually ready on return; never optimistically enable flight.
-                configure(owner="game_ui")
-            if self._console_open:
-                self.toggle_console(enabled=False)
-                if callable(configure):
-                    configure(owner="game_ui")
-            if enabled:
-                self._halt(native_action="release")
-                self._invalidate_paused_camera()
-                restoration_error = self._restore_playback_settings()
-                if restoration_error:
-                    raise RuntimeError(restoration_error)
-                self._restore_spectator_view()
-                hero_pending = False
-                try:
-                    self._restore_spectator_hero()
-                except (RuntimeError, ValueError, OSError) as exc:
-                    # A stock HUD context that cannot be verified must not block
-                    # the replay-UI return; keep the saved hero pending instead.
-                    LOG.warning("Saved spectator hero handoff remains pending: %s", exc)
-                    hero_pending = True
-                values = {"citadel_hud_visible": 1, "citadel_hide_replay_hud": 0, "hud_free_cursor": 1}
-                if OWN_HEALTH_HUD in self._game_ui_restore:
-                    values[OWN_HEALTH_HUD] = self._game_ui_restore[OWN_HEALTH_HUD]
-                if hero_pending:
-                    values = self._defer_health_reveal(values, keep_hud=True)
-                    health_pending = True
-                else:
-                    values, health_pending = self._safe_health_hud_values(values, keep_hud=True)
-                    values, deferred = self._require_own_health_hud(values, keep_hud=True)
-                    health_pending = health_pending or deferred
-                self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
-                self._verify_game_ui_values(values)
-                self._game_ui_visible = True
-                self._message("Deadlock owns the camera and replay UI. Select a hero, then return to Dolly editing."
-                              + (" Health panel restoration awaits a valid hero view." if health_pending else ""))
-                return self.status()
-            camera_live = (bridge is not None and bridge.status().get("state") == "armed")
-            if self._game_ui_visible or not (self._native_active and self._native_manual and camera_live):
-                self.enter_native_flight()
-            else:
-                self._hide_game_ui()
-                if callable(configure):
-                    configure(owner="flight")
-            self._game_ui_visible = False
-            return self.status()
-
-    def _detach_spectator_view(self):
-        """Detach game hero effects only after native has captured the view.
-
-        Hiding the HUD and overriding the camera pose do not leave PlayerView:
-        the selected hero can still drive death effects behind Dolly's camera.
-        Switching first would lose the hero view used to seed a new camera.
-        POV recording deliberately never calls this helper.
-        """
-        self._remember_spectator_hero()
-        # Seeking or applying a pose can bypass playback HUD preparation.
-        # Suppress the ability container before invalidating its stock player.
-        self._suppress_own_health_hud()
-        name = "citadel_spectator_mode"
-        current = read_cvar_value(name, self._request(name))
-        if current not in (0, 1, 2, 3):
-            raise RuntimeError("The game's spectator mode is unrecognized; camera handoff stopped.")
-        self._game_ui_restore.setdefault(name, current)
-        if current != 1:
-            self._request(name + " 1")
-            self._verify_game_ui_values({name: 1})
-
-    def _restore_spectator_view(self):
-        """Return F9 to the user's selected viewing mode, retaining its target."""
-        name = "citadel_spectator_mode"
-        if name in self._game_ui_restore:
-            self._suppress_own_health_hud()
-            value = self._game_ui_restore[name]
-            self._request(name + " " + numeric(value))
-            self._verify_game_ui_values({name: value})
-            del self._game_ui_restore[name]
-
-    def _remember_spectator_hero(self):
-        """Retain hero intent, never an entity handle from before reload."""
-        command = getattr(self._session, 'command', ())
-        bridge = self._native_bridge()
-        if (self._game_hero_restore is not None or not isinstance(command, (tuple, list)) or not command
-                or not callable(getattr(bridge, 'editor_roster', None))):
-            return
-        from .follow_target import FollowTargetMonitor
-        monitor = None
-        try:
-            monitor = FollowTargetMonitor(self._session)
-            selected = monitor.sample_target(require_chase=False)
-            roster = bridge.editor_roster()
-            matches = [p for p in (roster or {}).get('players', [])
-                       if p.get('handle') == selected['handle'] and p.get('model_path')]
-            if len(matches) == 1:
-                self._game_hero_restore = (self._session, self._demo, matches[0]['model_path'])
-        except (RuntimeError, ValueError, OSError) as exc:
-            LOG.info('No verified spectator hero to preserve: %s', exc)
-        finally:
-            if monitor is not None:
-                monitor.close()
-
-    def _restore_spectator_hero(self):
-        """Explicit F9/Stop return; automatic shot completion never calls it."""
-        if self._game_hero_restore is None:
-            return
-        session, demo, model_path = self._game_hero_restore
-        if self._session is not session or self._demo != demo:
-            raise RuntimeError('Saved spectator hero belongs to a different replay session.')
-        if self._native_active or self._native_manual:
-            raise RuntimeError('Release Dolly camera before restoring the game hero.')
-        self._require_demo(require_tick=False)
-        from .follow_target import FollowTargetMonitor
-        bridge = self._native_bridge()
-        def fresh_player():
-            roster = bridge.editor_roster()
-            matches = [p for p in (roster or {}).get('players', []) if p.get('model_path') == model_path]
-            if not (roster or {}).get('available') or len(matches) != 1:
-                raise RuntimeError('Saved spectator hero is absent or ambiguous in the current replay.')
-            row = matches[0]
-            handle, index = row.get('handle'), row.get('entity_index')
-            if (type(handle) is not int or type(index) is not int
-                    or handle in (0xffffffff, 0xfffffffe) or not 0 < index < 0x7fff
-                    or handle & 0x7fff != index or not row.get('model')):
-                raise RuntimeError('Saved spectator hero has no verified current identity.')
-            return row
-        monitor = FollowTargetMonitor(session)
-        try:
-            monitor.sample_selection_context()
-            expected = fresh_player()
-            # Keep all HUD children asleep while the stock target setter runs.
-            self._suppress_own_health_hud()
-            self._request('spec_target ' + str(expected['entity_index']))
-            deadline = time.monotonic() + 5
-            last_error = None
-            while True:
-                self._require_demo(require_tick=False)
-                current = fresh_player()
-                if any(current.get(key) != expected.get(key) for key in ('handle', 'entity_index', 'model', 'model_path')):
-                    raise RuntimeError('Saved spectator hero identity changed during handoff.')
-                try:
-                    selected = monitor.sample_health_hud_context()
-                    if selected['handle'] != expected['handle']:
-                        raise RuntimeError('The game did not select the saved spectator hero.')
-                    self._game_hero_restore = None
-                    return
-                except (RuntimeError, ValueError, OSError) as exc:
-                    last_error = exc
-                    text = str(exc).lower()
-                    # A reviewed-build/predicate/identity mismatch is deterministic
-                    # and cannot settle; do not stall the F9 return for the whole
-                    # deadline when the profile simply does not match this build.
-                    if ("reviewed build" in text or "predicates differ" in text
-                            or "object type differs" in text):
-                        raise RuntimeError('Saved spectator hero handoff remains pending: ' + str(exc)) from exc
-                if time.monotonic() >= deadline:
-                    raise RuntimeError('Saved spectator hero handoff remains pending: ' + str(last_error))
-                time.sleep(.05)
-        finally:
-            monitor.close()
-
-    def _remember_game_ui_settings(self):
-        names = ("citadel_hud_visible", "citadel_hide_replay_hud", "hud_free_cursor")
-        missing = [name for name in names if name not in self._game_ui_restore]
-        # Validate all controls before releasing a camera or writing the HUD.
-        # Only missing originals are saved: repeated handoffs must never
-        # replace the baseline with temporary editing/playback values.
-        output = self._request("; ".join(names))
-        current = {name: read_cvar_value(name, output) for name in names}
-        own_health = self._own_health_hud_value()
-        if own_health is not None:
-            current[OWN_HEALTH_HUD] = own_health
-            if OWN_HEALTH_HUD not in self._game_ui_restore:
-                missing.append(OWN_HEALTH_HUD)
-        # Take one complete snapshot, before any UI write or camera release.
-        # A playing shot's temporary hidden values are not the restore target.
-        self._game_ui_restore.update({name: self._playback_restore.get(name, value)
-                                      for name, value in current.items() if name in missing})
-
-    def _hide_game_ui(self):
-        # Hiding only the replay controls leaves the spectated hero HUD on
-        # screen. Hide the full game HUD as well; Dolly's DX11 panel is separate.
-        values = {"citadel_hud_visible": 0, "citadel_hide_replay_hud": 1, "hud_free_cursor": 0}
-        if OWN_HEALTH_HUD in self._game_ui_restore:
-            values[OWN_HEALTH_HUD] = 1
-        values, _ = self._require_own_health_hud(values)
-        self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
-        self._verify_game_ui_values(values)
-
-    def _verify_game_ui_values(self, values):
-        output = self._request("; ".join(values))
-        for name, expected in values.items():
-            if read_cvar_value(name, output) != expected:
-                raise RuntimeError("The game did not apply " + name + ". Retry the replay UI control.")
-
-    def _own_health_hud_value(self):
-        """Optional exact-build panel control, independent of health renderers."""
-        command = getattr(self._session, 'command', ())
-        if not isinstance(command, (tuple, list)) or not command:
-            return None
-        from .follow_capabilities import FollowCapabilityMonitor
-        monitor = None
-        try:
-            monitor = FollowCapabilityMonitor(self._session)
-            return monitor.sample_own_health()['value']
-        except (RuntimeError, ValueError, OSError) as exc:
-            LOG.info("Optional health HUD panel control unavailable: %s", exc)
-            return None
-        finally:
-            if monitor is not None:
-                monitor.close()
-
-    def _suppress_own_health_hud(self):
-        # This collapses abilities as well as health. Its lifetime is camera
-        # ownership, not one shot; keep the first outer original for handoff.
-        value = self._own_health_hud_value()
-        if value is not None:
-            self._game_ui_restore.setdefault(OWN_HEALTH_HUD, value)
-            # Collapse alone does not stop stock ability child updates. Hide
-            # the main/replay HUD before changing its player/camera context.
-            for name, hidden in (('citadel_hud_visible', 0), ('citadel_hide_replay_hud', 1)):
-                current = read_cvar_value(name, self._request(name))
-                self._game_ui_restore.setdefault(name, self._playback_restore.get(name, current))
-                if current != hidden:
-                    self._request(name + ' ' + numeric(hidden))
-                    self._verify_game_ui_values({name: hidden})
-            if value != 1:
-                self._request(OWN_HEALTH_HUD + ' 1')
-                self._verify_game_ui_values({OWN_HEALTH_HUD: 1})
-
-    def _require_own_health_hud(self, values, *, keep_hud=False):
-        if OWN_HEALTH_HUD in values and self._own_health_hud_value() is None:
-            raise RuntimeError('Health HUD panel verification is unavailable; saved settings remain pending.')
-        if (values.get(OWN_HEALTH_HUD) == 0 or
-                ((values.get('citadel_hud_visible') == 1 or values.get('citadel_hide_replay_hud') == 0) and
-                 (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))):
-            try:
-                self._verify_health_hud_handoff()
-            except (RuntimeError, ValueError, OSError) as exc:
-                # Dolly's own mode handoff can transiently expose an invalid
-                # stock player context. Keep the panel hidden and retry later.
-                LOG.info('Health panel reveal deferred: %s', exc)
-                return self._defer_health_reveal(values, keep_hud=keep_hud), True
-        return dict(values), False
-
-    def _verify_health_hud_handoff(self):
-        """Expose ability UI only after a coherent stock player handoff."""
-        if self._native_active or self._native_manual:
-            raise RuntimeError('Dolly still owns the camera; health panel restoration remains pending.')
-        self._require_demo(require_tick=False)
-        from .follow_target import FollowTargetMonitor
-        monitor = None
-        try:
-            monitor = FollowTargetMonitor(self._session)
-            monitor.sample_health_hud_context()
-        finally:
-            if monitor is not None:
-                monitor.close()
-
-    def _safe_health_hud_values(self, values, *, keep_hud=False):
-        """Keep an unsafe reveal hidden, preserving the outer original."""
-        values = dict(values)
-        reveal_health = values.get(OWN_HEALTH_HUD) == 0
-        reveal_hud = (values.get('citadel_hud_visible') == 1 and
-                      (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))
-        reveal_replay = (values.get('citadel_hide_replay_hud') == 0 and
-                         (OWN_HEALTH_HUD in self._game_ui_restore or self._own_health_hud_value() is not None))
-        if not reveal_health and not reveal_hud and not reveal_replay:
-            return values, False
-        try:
-            self._verify_health_hud_handoff()
-        except (RuntimeError, ValueError, OSError) as exc:
-            LOG.info('Health panel reveal deferred: %s', exc)
-            return self._defer_health_reveal(values, keep_hud=keep_hud), True
-        return values, False
-
-    def _defer_health_reveal(self, values, *, keep_hud=False):
-        """Hide an unverifiable health reveal and retain its outer original.
-
-        ``keep_hud`` is used by the explicit F9/Stop handoff: the replay UI and
-        cursor must still return so the user can select a hero, which is what
-        makes a later verified handoff possible. Automatic playback completion
-        and preference application keep the conservative behavior and hold the
-        main HUD too, deferring its reveal to that explicit handoff.
-        """
-        values = dict(values)
-        if OWN_HEALTH_HUD in values and values[OWN_HEALTH_HUD] == 0:
-            self._game_ui_restore.setdefault(OWN_HEALTH_HUD, 0)
-            values[OWN_HEALTH_HUD] = 1
-        if not keep_hud:
-            if values.get('citadel_hud_visible') == 1:
-                self._game_ui_restore.setdefault('citadel_hud_visible', 1)
-                values['citadel_hud_visible'] = 0
-            if values.get('citadel_hide_replay_hud') == 0:
-                self._game_ui_restore.setdefault('citadel_hide_replay_hud', 0)
-                values['citadel_hide_replay_hud'] = 1
-        return values
-
-    def _health_panel_held(self, *, require_full_hud=True):
-        """An intentional own-health hide that can span shots or a guarded reload.
-
-        ``require_full_hud`` keeps the stricter reload rule: the main HUD hide
-        must still be in place so an in-process replay reload cannot expose the
-        panel. Playback only needs the own-health panel to stay safely hidden,
-        so it passes ``require_full_hud=False`` and is not dead-ended once the
-        main HUD has been restored and a verified health handoff is unavailable.
-        """
-        originals = self._game_ui_restore
-        if (self._native_active or self._native_manual or not originals
-                or set(originals) - {OWN_HEALTH_HUD, 'citadel_hud_visible', 'citadel_hide_replay_hud'}
-                or (OWN_HEALTH_HUD in originals and originals[OWN_HEALTH_HUD] != 0)
-                or self._own_health_hud_value() != 1):
-            return False
-        for name, original, hidden in (('citadel_hud_visible', 1, 0), ('citadel_hide_replay_hud', 0, 1)):
-            current = read_cvar_value(name, self._request(name))
-            if name not in originals:
-                # Already restored; only a full-HUD reload needs it still hidden.
-                if require_full_hud and current != hidden:
-                    return False
-                continue
-            if originals[name] != original or current != hidden:
-                return False
-        return True
-
-    def _restore_game_ui_settings(self):
-        """Restore the original automatic cursor/HUD on Stop or disconnect."""
-        if not self._game_ui_restore and self._game_hero_restore is None:
-            return None
-        try:
-            self._require_connection()
-            # Mode restoration must settle before checking the player context;
-            # batching it with the reveal recreates the stock null-panel fault.
-            self._restore_spectator_view()
-            try:
-                self._restore_spectator_hero()
-            except (RuntimeError, ValueError, OSError) as exc:
-                # A hero handoff that cannot verify must not hold the whole HUD/
-                # cursor restore hostage; keep it pending and restore the rest so
-                # playback and export are not dead-ended by a cosmetic panel.
-                LOG.warning("Saved spectator hero handoff remains pending: %s", exc)
-            requested = dict(self._game_ui_restore)
-            values, health_pending = self._safe_health_hud_values(requested, keep_hud=True)
-            values, deferred = self._require_own_health_hud(values, keep_hud=True)
-            health_pending = health_pending or deferred
-            self._request("; ".join(name + " " + numeric(value) for name, value in values.items()))
-            self._verify_game_ui_values(values)
-            for name in values:
-                if values[name] == requested.get(name):
-                    self._game_ui_restore.pop(name, None)
-            self._game_ui_visible = False
-            if health_pending:
-                return ('Health panel restoration is pending. Open replay controls, select a hero '
-                        'and wait for its camera, then return to Dolly and use Stop / restore.')
-        except (RuntimeError, ValueError, OSError) as exc:
-            LOG.warning("Replay UI restoration remains pending: %s", exc)
-            return "Replay UI settings could not be restored; reconnect and use Stop / restore. " + str(exc)
-        return None
 
     def destroy_ragdolls(self):
         """Clear accumulated ragdolls in the owned local replay."""
@@ -3403,149 +2931,6 @@ class Controller:
             result = self.enter_native_flight(pose=pose)
             self._message("Replay paused at the new time; camera position retained.")
             return result
-
-    @staticmethod
-    def _flight_options(move_speed, turn_speed, rate):
-        # Reuse the movement model's bounds before launching a worker or
-        # issuing any camera command. The frame is inert at zero elapsed time.
-        move_camera({"x": 0, "y": 0, "z": 0, "pitch": 0, "yaw": 0},
-                    CameraMotion(), 0, move_speed=move_speed, turn_speed=turn_speed)
-        if isinstance(rate, bool) or rate not in (30, 60, 120):
-            raise ValueError("Choose a command rate of 30, 60, or 120.")
-        return float(move_speed), float(turn_speed), float(rate)
-
-    def start_paused_flight(self, input_source=None, move_speed=240, turn_speed=60, rate=60):
-        """Run one bounded console writer using wall time, never replay time.
-
-        input_source is called on the worker and must be thread-safe. It must
-        return CameraMotion and must not call GUI functions.
-        """
-        if self._supports_native_flight():
-            self._flight_options(move_speed, turn_speed, rate)
-            return self.enter_native_flight()
-        if not callable(input_source):
-            raise ValueError("Paused camera input must be callable.")
-        move_speed, turn_speed, rate = self._flight_options(move_speed, turn_speed, rate)
-        with self._op_lock:
-            self._halt()
-            self._check_paused_tick()
-            self._stop_event.clear()
-            self._reset_motion_observations(self._paused_pose)
-            with self._state_lock:
-                self._paused_details.update(move_speed=move_speed, turn_speed=turn_speed,
-                                            requested_updates_per_second=rate, updates=0)
-                self._paused_details.pop("error", None)
-            self._message("Paused camera movement active. Escape stops movement; the replay stays paused.",
-                          playing=False, paused_flight=True)
-            self._thread = threading.Thread(target=self._run_paused_flight,
-                args=(input_source, move_speed, turn_speed, rate), daemon=True,
-                name="DollyPausedCamera")
-            try:
-                self._thread.start()
-            except Exception:
-                self._thread = None
-                with self._state_lock:
-                    self._state["paused_flight"] = False
-                raise
-
-    def _write_paused_pose(self, frame):
-        self._check_paused_tick()
-        if self._stop_event.is_set():
-            return False
-        sent_at = time.perf_counter()
-        sampled = sent_at >= self._next_camera_readback
-        command = self._position_commands(frame) + ("; spec_pos" if sampled else "") + "; demo_goto"
-        output = self._request(command)
-        received_at = time.perf_counter()
-        self._check_paused_tick(output)
-        if sampled:
-            self._next_camera_readback = received_at + CAMERA_READBACK_INTERVAL
-        self._observe_motion_frame(frame, output, sent_at, received_at, self._paused_tick,
-                                   sampled=sampled, manual=True)
-        self._set_paused_pose(frame, self._paused_tick)
-        return True
-
-    def _run_paused_flight(self, input_source, move_speed, turn_speed, rate):
-        began = previous = time.perf_counter()
-        next_frame = began
-        failure = None
-        escape = False
-        updates = 0
-        waiter = FrameWait()
-        try:
-            while not self._stop_event.is_set():
-                now = time.perf_counter()
-                motion = input_source()
-                if not isinstance(motion, CameraMotion):
-                    raise ValueError("Paused camera input must return CameraMotion.")
-                if motion.stop:
-                    escape = True
-                    break
-                # Delta includes command latency. move_camera caps long stalls
-                # so a delayed response cannot create a large camera jump.
-                frame = move_camera(self._paused_pose, motion, max(0.0, now - previous),
-                                    move_speed=move_speed, turn_speed=turn_speed)
-                previous = now
-                if frame != self._paused_pose:
-                    if not self._write_paused_pose(frame):
-                        break
-                    updates += 1
-                else:
-                    # Check external resume/seek even when no input is held.
-                    self._check_paused_tick()
-                elapsed = max(0.0, time.perf_counter() - began)
-                with self._state_lock:
-                    self._paused_details.update(updates=updates, elapsed_seconds=elapsed,
-                        achieved_updates_per_second=updates / elapsed if elapsed else 0)
-                next_frame += 1 / rate
-                now = time.perf_counter()
-                if next_frame < now:
-                    next_frame = now
-                waiter.wait(max(0, next_frame - now), self._stop_event)
-        except Exception as exc:
-            LOG.exception("Paused camera movement stopped")
-            failure = str(exc)
-            self._paused_details["error"] = failure
-            self._invalidate_paused_camera()
-        finally:
-            with self._state_lock:
-                self._paused_details.update(frame_wait_backend=waiter.backend,
-                                             frame_wait_error=waiter.error)
-            waiter.close()
-            with self._state_lock:
-                self._state["paused_flight"] = False
-            if failure:
-                self._message(failure)
-            elif escape:
-                self._message("Paused camera movement stopped. Replay and current view remain paused.")
-
-    def stop_paused_flight(self):
-        """End manual movement without restoring the current lens or seeking."""
-        with self._op_lock:
-            if self.status().get("paused_flight"):
-                self._halt()
-            self._message("Paused camera movement stopped. Current camera settings are held.", paused_flight=False)
-
-    def nudge_paused_camera(self, motion, seconds=.1, move_speed=240, turn_speed=60):
-        if self._supports_native_flight():
-            with self._op_lock:
-                self._halt(native_action="native_hold")
-                self._check_paused_tick()
-                native = self._native_bridge()
-                frame = self._native_pose(native.status())
-                frame = move_camera(frame, motion, seconds, move_speed=move_speed, turn_speed=turn_speed)
-                self.enter_native_flight(pose=frame)
-                self._halt(native_action="native_hold")
-                return deepcopy(self._paused_pose)
-        with self._op_lock:
-            self._halt()
-            self._check_paused_tick()
-            frame = move_camera(self._paused_pose, motion, seconds,
-                                move_speed=move_speed, turn_speed=turn_speed)
-            self._stop_event.clear()
-            if frame != self._paused_pose:
-                self._write_paused_pose(frame)
-            return deepcopy(self._paused_pose)
 
     def apply(self, project, shot_time):
         if self._supports_native_flight():

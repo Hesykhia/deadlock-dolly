@@ -97,3 +97,26 @@ class OperationLifecycleTests(unittest.TestCase):
         app._worker_loop()
         self.assertEqual(app.events.get_nowait(), ('done', 'Before', (1, None)))
         after.assert_not_called(); self.assertEqual(app.jobs.qsize(), 1)
+
+
+class ErrorDialogCoalescingTests(unittest.TestCase):
+    def test_reentrant_failure_does_not_stack_a_second_dialog(self):
+        app = DollyApp.__new__(DollyApp)
+        app.closed = False
+        app._error_dialog_open = False
+        app._log = Mock()
+        opened = []
+
+        def show(title, exc):
+            opened.append(title)
+            # The native dialog runs a nested Tk wait that keeps polling, so a
+            # second failure arrives while this dialog is still open.
+            app._report_operation_error("Second failure", RuntimeError("second"))
+
+        app._error = show
+        app._report_operation_error("First failure", RuntimeError("first"))
+        self.assertEqual(opened, ["First failure"])
+        self.assertFalse(app._error_dialog_open)
+        app._report_operation_error("Third failure", RuntimeError("third"))
+        self.assertEqual(opened, ["First failure", "Third failure"])
+

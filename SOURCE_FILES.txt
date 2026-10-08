@@ -38,6 +38,7 @@ dolly/assert_watcher.py
 dolly/bindings.py
 dolly/bootstrap.py
 dolly/branding.py
+dolly/camera_commands.py
 dolly/compatibility.py
 dolly/preload.py
 dolly/replay_camera.py
@@ -72,14 +73,17 @@ dolly/file_ops.py
 dolly/gameinfo_transaction.py
 dolly/game_installation.py
 dolly/game_processes.py
+dolly/game_ui_handoff.py
 dolly/session_recovery.py
 dolly/native_bridge.py
 dolly/native_capabilities.py
 dolly/_runtime_generated.py
 dolly/native_effects.py
+dolly/native_errors.py
 dolly/native_path.py
 dolly/navigation.py
 dolly/particles.py
+dolly/paused_flight.py
 dolly/pacing.py
 dolly/path.py
 dolly/player_layer.py
@@ -547,9 +551,12 @@ third_party/cvar_unlocker/unlocker-build-6753.patch
 native/profiles/deadlock-2026-10-06-6757-complete.json
 
 native/profiles/deadlock-2026-10-06-6759-complete.json
+native/profiles/deadlock-2026-10-07-6762-complete.json
 
 native/profiles/scenesystem-2026-10-06-6757.json
 third_party/cvar_unlocker/unlocker-build-6757.patch
+third_party/cvar_unlocker/unlocker-build-6759.patch
+third_party/cvar_unlocker/unlocker-build-6762.patch
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
@@ -577,3 +584,5 @@ docs/RELEASE_NOTES_0.6.23-alpha.md
 docs/RELEASE_NOTES_0.6.24-alpha.md
 
 docs/RELEASE_NOTES_0.6.25-alpha.md
+docs/RELEASE_NOTES_0.6.26-alpha.md
+docs/RELEASE_NOTES_0.6.27-alpha.md

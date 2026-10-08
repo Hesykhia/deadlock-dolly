@@ -283,6 +283,7 @@ class DollyApp:
         self._take_audit_reported = False
         self.closed = False
         self.busy = False
+        self._error_dialog_open = False
         self.dirty = False
         self.file_path: Path | None = None
         self.project = Project(name="Untitled shot", keyframes=[], tracks=[],
@@ -2748,11 +2749,25 @@ class DollyApp:
             label.configure(style=style)
 
     def _report_operation_error(self, title, exc):
-        """Deadlock's missing intro/preload gets an actionable manual load."""
-        if isinstance(exc, PreloadUnavailableError) and not self.closed:
-            self._offer_unverified_replay(title, exc)
-        else:
-            self._error(title, exc)
+        """Deadlock's missing intro/preload gets an actionable manual load.
+
+        Only one error dialog is allowed at a time. The native dialog runs a
+        nested Tk wait, so the interface poll keeps firing while it is open;
+        without this guard a burst of failures (for example a Native DOF failure
+        on every slider move) would stack modal dialogs and leave the window
+        disabled behind them, forcing a hard close.
+        """
+        if getattr(self, "_error_dialog_open", False):
+            self._log(f"{title}: {exc}")
+            return
+        self._error_dialog_open = True
+        try:
+            if isinstance(exc, PreloadUnavailableError) and not self.closed:
+                self._offer_unverified_replay(title, exc)
+            else:
+                self._error(title, exc)
+        finally:
+            self._error_dialog_open = False
 
     def _offer_unverified_replay(self, title, exc):
         text = str(exc) or type(exc).__name__

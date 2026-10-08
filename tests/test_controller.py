@@ -308,6 +308,30 @@ class ControllerTests(unittest.TestCase):
         self.controller._require_native_dof_support(make_project())
         self.assertFalse(self.controller.status()["native_dof_unavailable"])
 
+    def test_native_dof_guard_detects_the_captured_underscore_engine_text(self):
+        # The reported engine text uses "vfx_dx" (underscore); the guard must not
+        # depend on that exact punctuation.
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx_dx dll, "
+            "dynamic shader compile unavailable!")
+        project = make_project()
+        project.setup_values["r_dof_override"] = 1.0
+        self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        self.assertTrue(self.controller._startup_evidence["dof_shader"]["checkerboard_risk"])
+
+    def test_native_dof_guard_never_blocks_citadel_dof_after_a_native_failure(self):
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx_dx dll, "
+            "dynamic shader compile unavailable!")
+        native = make_project()
+        native.setup_values["r_dof_override"] = 1.0
+        with self.assertRaisesRegex(RuntimeError, "checkerboard"):
+            self.controller._require_native_dof_support(native)
+        self.assertTrue(self.controller.status()["native_dof_unavailable"])
+        # A Citadel DOF project (no native override) must still apply.
+        self.controller._require_native_dof_support(make_project())
+
     def test_native_dof_refreshes_shaders_without_changing_an_allowed_setting(self):
         self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
         project = make_project()
