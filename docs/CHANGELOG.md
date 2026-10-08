@@ -1,5 +1,16 @@
 # Changes
 
+## 0.6.27 alpha - Support for the October 7 Deadlock update (6762)
+
+**0.6.27-alpha**
+
+- **Works with the October 7 Deadlock update (6762).** *Before:* the updated client changed `client.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6762, and the bundled cvar unlocker is rebuilt for the new server.
+- **Citadel Depth of Field keeps working after a Native DOF problem.** *Before:* once Native DOF failed on a game install, every depth-of-field control (including Citadel DOF) was blocked and errored. *After:* only the Native DOF pass is held back, and Citadel DOF plus the rest of the editor keep working.
+- **Dolly no longer freezes on a repeated error.** *Before:* a repeated failure (for example moving a DOF slider after a Native DOF error) could stack error dialogs and leave Dolly needing a hard close. *After:* Dolly shows one clear message and stays responsive.
+- **The Native DOF checkerboard guard is more reliable.** *Before:* the guard depended on the exact engine wording for a failed shader compiler, so some installs could still show the magenta/black checkerboard. *After:* the guard recognizes the failure regardless of wording and leaves Native DOF off with an explanation.
+
+Full details: [0.6.27 release notes](RELEASE_NOTES_0.6.27-alpha.md).
+
 ## 0.6.26 alpha - Citadel DOF stays usable and error popups stop stacking
 
 **0.6.26-alpha**
