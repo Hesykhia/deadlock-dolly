@@ -69,6 +69,7 @@ dolly/ui_theme.py
 dolly/hotkey.py
 dolly/launcher.py
 dolly/launch_errors.py
+dolly/layer_modes.py
 dolly/keyvalues.py
 dolly/file_ops.py
 dolly/gameinfo_transaction.py
