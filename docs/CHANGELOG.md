@@ -1,9 +1,10 @@
 # Changes
 
-## 0.6.31 alpha - Follow-camera export without the replay HUD
+## 0.6.31 alpha - October 8 hotfix (6765) and follow-camera export without the replay HUD
 
 **0.6.31-alpha**
 
+- **Works with the October 8 Deadlock hotfix (6765).** *Before:* the updated client changed `client.dll` and `server.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow and Players/Depth work on 6765, and the bundled cvar unlocker is rebuilt for the new server.
 - **Export a follow camera without turning on the replay HUD.** *Before:* recording a Player POV (follow camera) required pressing F9 and selecting a hero, and starting the export stopped the Game Follow and brought the replay HUD back. *After:* pick a hero with Game Follow (the replay HUD stays hidden) and record or export straight away — the follow keeps running while you record.
 - **Busier fights no longer break a Players capture.** *Before:* a Players layer capture failed with "failed player layer exceeded 64 draws per image; incomplete output rejected" when a frame contained more than 64 player draws. *After:* the per-image budget is doubled to 128 draws, so crowded moments capture completely.
 
