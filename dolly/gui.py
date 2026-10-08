@@ -694,8 +694,10 @@ class DollyApp:
                     raise ValueError("Choose a POV duration between 0.1 and 120 replay seconds.")
                 state = self.controller.status()
                 tick = state.get("tick")
-                if tick is None or not state.get("game_ui_visible"):
-                    raise ValueError("Choose Player POV, press F9 to select a hero, then F8 to open Export.")
+                if tick is None or not (state.get("game_ui_visible")
+                                        or state.get("game_follow_active")):
+                    raise ValueError("Choose Player POV, then select a hero with Follow, "
+                                     "or press F9 to select a hero.")
                 self._pov_project = Project(name="Player POV", start_tick=int(tick),
                     confetti_enabled=self.project.confetti_enabled,
                     confetti_spawn_height=self.project.confetti_spawn_height,

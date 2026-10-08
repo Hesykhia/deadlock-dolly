@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.31 alpha - Follow-camera export without the replay HUD
+
+**0.6.31-alpha**
+
+- **Export a follow camera without turning on the replay HUD.** *Before:* recording a Player POV (follow camera) required pressing F9 and selecting a hero, and starting the export stopped the Game Follow and brought the replay HUD back. *After:* pick a hero with Game Follow (the replay HUD stays hidden) and record or export straight away — the follow keeps running while you record.
+- **Busier fights no longer break a Players capture.** *Before:* a Players layer capture failed with "failed player layer exceeded 64 draws per image; incomplete output rejected" when a frame contained more than 64 player draws. *After:* the per-image budget is doubled to 128 draws, so crowded moments capture completely.
+
+Full details: [0.6.31 release notes](RELEASE_NOTES_0.6.31-alpha.md).
+
 ## 0.6.30 alpha - High-resolution stills and a Players fix for the October 7 builds
 
 **0.6.30-alpha**

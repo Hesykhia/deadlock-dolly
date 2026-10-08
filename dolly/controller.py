@@ -1302,9 +1302,14 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                 raise RuntimeError("POV recording requires the native recorder.")
             if not bridge.status().get("paused"):
                 raise RuntimeError("Pause the replay at the POV segment's start before recording.")
-            if not self._game_ui_visible:
-                raise RuntimeError("Choose Player POV, press F9 to select the hero, then F8 to open Export.")
-            self.stop()
+            following = bool(self._follow_active)
+            if not self._game_ui_visible and not following:
+                raise RuntimeError("Choose Player POV, then select a hero with Follow, or press F9 to select a hero.")
+            # A roster-selected Game Follow already hands the camera to the
+            # game with the HUD hidden; stopping here would tear that rig down
+            # and reveal the replay UI before the POV segment records.
+            if not following:
+                self.stop()
             self._stop_event.clear()
             self._game_ui_visible = True
             self._pov_active = True
@@ -1349,12 +1354,22 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
     def finish_pov_recording(self):
         if not getattr(self, "_pov_active", False):
             return
-        self._halt(native_action="release")
+        following = bool(self._follow_active)
+        self._halt(native_action="release", preserve_follow=following)
         self._pov_active = False
         self._finish_playback()
+        bridge = self._native_bridge()
+        if following:
+            # A roster-selected Game Follow is the camera the user chose, so
+            # finishing a segment must not tear the rig down or reveal the
+            # replay UI (and its build-unverifiable health panel). Keep the
+            # follow active with the HUD hidden for the next segment.
+            self._game_ui_visible = False
+            if bridge is not None and self._alive():
+                bridge.configure_editor(owner="panel")
+            return
         error = self._restore_game_ui_settings()
         self._game_ui_visible = True
-        bridge = self._native_bridge()
         if bridge is not None and self._alive():
             bridge.configure_editor(owner="panel")
         if error:
@@ -3945,9 +3960,10 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             elif finished:
                 self._message("Shot finished. Replay paused and playback settings restored; Stop restores lens/cvar values.", playing=False)
 
-    def _halt(self, *, native_action="handoff"):
+    def _halt(self, *, native_action="handoff", preserve_follow=False):
         self._restore_replay_hud()
-        self.stop_game_follow()
+        if not preserve_follow:
+            self.stop_game_follow()
         self._stop_event.set()
         worker = self._thread
         if worker and worker is not threading.current_thread():

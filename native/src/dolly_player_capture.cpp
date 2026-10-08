@@ -204,8 +204,9 @@ struct GpuSlot {
     ULONGLONG polled = 0;
 };
 // Ownership staging is 36 bytes/draw. Bound each of the three frame slots to
-// 64 original draws (6912 staging bytes total); image-buffer count is unchanged.
-constexpr unsigned AggregateDrawLimit = 64;
+// 128 original draws (13824 staging bytes total); image-buffer count is unchanged.
+// Raised 64 -> 128 for player layers whose scene has more than 64 player draws.
+constexpr unsigned AggregateDrawLimit = 128;
 constexpr unsigned SequenceRing = 3;
 constexpr unsigned SequenceMaxCap = 2000000;
 std::array<GpuSlot, SequenceRing * AggregateDrawLimit> gpuSlots;
