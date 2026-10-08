@@ -2176,10 +2176,17 @@ class DollyApp:
 
     def _restore_completed(self, _result=None):
         status = self.controller.status()
-        if (status.get("connected") and status.get("camera_backend") == "console"
-                and status.get("health_panel_restore_pending")):
+        pending = bool(status.get("health_panel_restore_pending"))
+        if pending and status.get("connected"):
+            # Surface the held panel for every camera backend. The saved setting
+            # is only restored once a valid hero view exists, so tell the user how
+            # to finish it instead of leaving the panel silently hidden.
             self._show_restore_guidance()
-        elif not status.get("health_panel_restore_pending"):
+        elif pending:
+            # Keep it visible even after the game connection is gone.
+            self.status_text.set(
+                "The game health panel is still hidden. Reconnect to Deadlock and use Stop / restore to finish.")
+        else:
             dialog = getattr(self, "restore_guidance_dialog", None)
             if dialog is not None and dialog.winfo_exists():
                 dialog.destroy()
