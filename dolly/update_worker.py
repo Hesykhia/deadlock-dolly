@@ -49,6 +49,38 @@ def checked_file(root, name):
     return path
 
 
+def _clear_readonly(path):
+    """An executable extracted from a ZIP can carry the read-only attribute.
+
+    os.replace onto a read-only file fails with WinError 5 (access denied) even
+    though nothing holds it open, so clear the flag before moving the new file in.
+    """
+    try:
+        if path.exists() and not os.access(path, os.W_OK):
+            os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _replace_retrying(temporary, target, attempts=6, delay=0.25):
+    """Move a staged file into place, tolerating transient Windows locks.
+
+    Real-time antivirus scanning routinely holds a just-written executable for a
+    moment, so os.replace can fail with WinError 5 (access denied) or 32 (sharing
+    violation) with no Dolly process running. Clear read-only and retry briefly;
+    a genuine lock (for example a protected folder) still fails closed.
+    """
+    _clear_readonly(target)
+    for attempt in range(attempts):
+        try:
+            os.replace(temporary, target)
+            return
+        except OSError as error:
+            if getattr(error, "winerror", None) not in (5, 32) or attempt == attempts - 1:
+                raise
+            time.sleep(delay * (attempt + 1))
+
+
 def replace_file(source, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".dolly-new-", delete=False) as out:
@@ -58,7 +90,7 @@ def replace_file(source, target):
         with temporary.open("ab") as durable:
             durable.flush()
             os.fsync(durable.fileno())
-        os.replace(temporary, target)
+        _replace_retrying(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -413,7 +445,15 @@ def main(argv=None):
                 install(plan, lambda path: smoke(path, work))
     except Exception as error:
         atomic_json(work / "result.json", {"passed": False, "error": str(error)})
-        notify("Dolly could not finish updating. Your previous files were retained or restored.\n\n" + str(error) + "\n\nUpdate details: " + str(work))
+        message = ("Dolly could not finish updating. Your previous files were retained or restored."
+                   "\n\n" + str(error))
+        if isinstance(error, PermissionError) or getattr(error, "winerror", None) in (5, 32):
+            message += ("\n\nWindows blocked writing to the Dolly folder. Close any other Dolly "
+                        "window, and if a security tool or a protected location (for example "
+                        "Downloads with Controlled Folder Access) is holding the files, move Dolly "
+                        "to another folder or allow it there, then open Dolly.exe again to finish "
+                        "the update.")
+        notify(message + "\n\nUpdate details: " + str(work))
         # A failure before the parent exits must not launch a duplicate instance.
         if (target / PENDING).exists():
             return 1
