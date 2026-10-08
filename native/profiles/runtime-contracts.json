@@ -635,7 +635,7 @@
       "PLAYER_PREDICATE": {
         "kind": "rva",
         "module": "client",
-        "value": "0x162ac90"
+        "value": "0x162aac0"
       },
       "PLAYER_DATA_PREDICATE": {
         "kind": "rva",
