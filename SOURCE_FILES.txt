@@ -585,3 +585,4 @@ docs/RELEASE_NOTES_0.6.25-alpha.md
 docs/RELEASE_NOTES_0.6.26-alpha.md
 docs/RELEASE_NOTES_0.6.27-alpha.md
 docs/RELEASE_NOTES_0.6.28-alpha.md
+docs/RELEASE_NOTES_0.6.29-alpha.md

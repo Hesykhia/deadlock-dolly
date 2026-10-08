@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.29 alpha - More reliable automatic updates
+
+**0.6.29-alpha**
+
+- **Automatic updates are more reliable.** *Before:* on some installs the update failed with "[WinError 5] Access is denied" while replacing a file, so the update never finished (your previous files were kept). *After:* Dolly clears a read-only attribute left by ZIP extraction, retries the file move briefly, and if Windows still blocks it, explains what to do (move Dolly out of a protected folder such as Downloads, or allow it in Controlled Folder Access) instead of just failing.
+
+Full details: [0.6.29 release notes](RELEASE_NOTES_0.6.29-alpha.md).
+
 ## 0.6.28 alpha - Support for the October 7 Deadlock hotfix (6763)
 
 **0.6.28-alpha**
