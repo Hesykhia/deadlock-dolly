@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.28 alpha - Support for the October 7 Deadlock hotfix (6763)
+
+**0.6.28-alpha**
+
+- **Works with the October 7 Deadlock hotfix (6763).** *Before:* the updated client changed `client.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6763, and the bundled cvar unlocker is rebuilt for the new server.
+
+Full details: [0.6.28 release notes](RELEASE_NOTES_0.6.28-alpha.md).
+
 ## 0.6.27 alpha - Support for the October 7 Deadlock update (6762)
 
 **0.6.27-alpha**

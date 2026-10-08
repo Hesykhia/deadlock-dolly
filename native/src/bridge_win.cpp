@@ -70,7 +70,7 @@ constexpr char kBuild6757EngineHash[] =
     "084c45473667c65174a9a19c428359ac335c3e990008dbf26c0eef91be44784c";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
-constexpr char kUnlockerHash[] = "c7eb94693a8cd87a64c61f2d8cc5811f944ab02fde27301ba512483bb2153312";
+constexpr char kUnlockerHash[] = "e2d1141ad023753e7491a616e21a1691daf92207392e529fa710d47c1a13d8f5";
 constexpr char kSoundSystemHash[] =
     "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr char kSeptemberSoundSystemHash[] =

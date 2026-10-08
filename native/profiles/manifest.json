@@ -8,7 +8,7 @@
     "citadel/bin/win64/client.dll": {
       "role": "client",
       "reviewed_utc": "2026-10-07",
-      "latest_timestamp": 1791410817,
+      "latest_timestamp": 1791419109,
       "accepted": [
         "c7d068857c617c9c41d2c501865a94d93c52f3081864623ae23146e495f3021b",
         "769bf1e74afd67ab0aa02fa94c0c7eb3c133991d32c43e099289210511551a2b",
@@ -32,11 +32,12 @@
         "678aec94adb44623e335ee7ec76c08f4477a0ea88a85cea5cb70abace1bacaa8",
         "efb29f4a92516539c509aecd1988db3051b2ada03e5fefed338c84568b835b6b",
         "b48636d0282a3f6916725e1701c0454738bb5a4903e83fc96a27b01dce800d23",
-        "b4e6a6e5aac9350afd5c7e40654e1349923f38a4a89347c4850346db43d559db"
+        "b4e6a6e5aac9350afd5c7e40654e1349923f38a4a89347c4850346db43d559db",
+        "0e2db1f7d705ec8a8cd9ed43bf6d762c0a62b4228a1fc5fd1856278a7f4e003a"
       ],
       "feature_pins": {
         "automatic preload": [
-          "b4e6a6e5aac9350afd5c7e40654e1349923f38a4a89347c4850346db43d559db"
+          "0e2db1f7d705ec8a8cd9ed43bf6d762c0a62b4228a1fc5fd1856278a7f4e003a"
         ]
       }
     },
@@ -150,6 +151,7 @@
     "deadlock-2026-10-06-6757-complete.json",
     "scenesystem-2026-10-06-6757.json",
     "deadlock-2026-10-06-6759-complete.json",
-    "deadlock-2026-10-07-6762-complete.json"
+    "deadlock-2026-10-07-6762-complete.json",
+    "deadlock-2026-10-07-6763-complete.json"
   ]
 }
