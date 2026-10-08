@@ -60,6 +60,7 @@ dolly/editor_publication.py
 dolly/editor_dispatch.py
 dolly/editor_wire.py
 dolly/export_audit.py
+dolly/export_timing.py
 dolly/graphics_diagnostics.py
 dolly/graphics_profiles.py
 dolly/graphics_profiles_ui.py
