@@ -340,3 +340,28 @@ class ShortPlayersCaptureTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             module.finish_player_capture(app, "players")
         self.assertFalse((self.folder / "hero_alpha.png").exists())
+
+
+class FfmpegLaunchTests(unittest.TestCase):
+    """Still assembly launches FFmpeg like the players encoder: clean env, no console."""
+
+    def test_ffmpeg_uses_external_environment_without_a_window(self):
+        from contextlib import contextmanager
+        from unittest.mock import patch
+        seen = {}
+
+        @contextmanager
+        def fake_environment():
+            seen["entered"] = True
+            yield {"PATH": "clean"}
+
+        def fake_run(command, **kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with patch.object(screenshot, "external_program_environment", fake_environment),              patch.object(screenshot.subprocess, "run", fake_run):
+            screenshot._ffmpeg(Path("ffmpeg.exe"), "-version")
+        self.assertTrue(seen["entered"])
+        self.assertEqual(seen["env"], {"PATH": "clean"})
+        self.assertEqual(seen["creationflags"], getattr(subprocess, "CREATE_NO_WINDOW", 0))
+

@@ -33,6 +33,7 @@ import zlib
 
 from . import player_layer
 from .path import Keyframe, Project
+from .runtime import external_program_environment
 
 STILL_FPS = 60
 # Slowest supported export speed: the replay advances ~1/1200 s per frame.
@@ -285,7 +286,12 @@ def write_hero_stills(width: int, height: int, pixels: bytes, folder: Path) -> t
 
 def _ffmpeg(ffmpeg: Path, *args: str, timeout: float = 300.0) -> None:
     command = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y", *args]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    # Same as the players MOV encoder: in the packaged app, don't hand FFmpeg the
+    # frozen editor's DLL search path, and don't open a console window for it.
+    with external_program_environment() as environment:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
+                                env=environment,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode != 0:
         detail = (result.stderr or "").strip().splitlines()
         raise RuntimeError("FFmpeg failed: " + (detail[-1] if detail else "unknown error"))
