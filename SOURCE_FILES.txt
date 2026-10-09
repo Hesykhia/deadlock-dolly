@@ -557,6 +557,7 @@ native/profiles/deadlock-2026-10-06-6759-complete.json
 native/profiles/deadlock-2026-10-07-6762-complete.json
 native/profiles/deadlock-2026-10-07-6763-complete.json
 native/profiles/deadlock-2026-10-08-6765-complete.json
+native/profiles/deadlock-2026-10-08-6766-complete.json
 
 native/profiles/scenesystem-2026-10-06-6757.json
 third_party/cvar_unlocker/unlocker-build-6757.patch
@@ -564,6 +565,7 @@ third_party/cvar_unlocker/unlocker-build-6759.patch
 third_party/cvar_unlocker/unlocker-build-6762.patch
 third_party/cvar_unlocker/unlocker-build-6763.patch
 third_party/cvar_unlocker/unlocker-build-6765.patch
+third_party/cvar_unlocker/unlocker-build-6766.patch
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
@@ -598,3 +600,4 @@ docs/RELEASE_NOTES_0.6.29-alpha.md
 docs/RELEASE_NOTES_0.6.30-alpha.md
 docs/RELEASE_NOTES_0.6.31-alpha.md
 docs/RELEASE_NOTES_0.6.32-alpha.md
+docs/RELEASE_NOTES_0.6.33-alpha.md

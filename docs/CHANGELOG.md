@@ -1,5 +1,14 @@
 # Changes
 
+## 0.6.33 alpha - October 8 hotfix (6766)
+
+**0.6.33-alpha**
+
+- **Works with the October 8 Deadlock hotfix (6766).** *Before:* the updated client changed `client.dll` and `server.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow and Players/Depth work on 6766, and the bundled cvar unlocker is rebuilt for the new server.
+- **A Players layer export no longer leaves a stuck command window.** *Before:* starting a Players layer export could pop up a command window that stayed open, and the encoder could fail if it picked up the wrong libraries. *After:* the bundled encoder runs hidden in its own clean environment and reports a clear error instead of leaving a window open.
+
+Full details: [0.6.33 release notes](RELEASE_NOTES_0.6.33-alpha.md).
+
 ## 0.6.32 alpha - The health/ability panel restores after editing
 
 **0.6.32-alpha**

@@ -5,7 +5,7 @@
 A camera-path editor for local Deadlock replays. Capture the free camera,
 shape a shot and play it back with animated framing and camera variables.
 
-**Current source: 0.6.32-alpha.** The portable Windows build opens through
+**Current source: 0.6.33-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.
 
 **THIS MOD INJECTS CODE INTO DEADLOCK — USE AT YOUR OWN RISK.**
@@ -51,15 +51,15 @@ Deadlock normally.
 - Startup update check with manual checks in Settings.
 - Optional game-only audio for real-time video, plus a separate advanced reconstructed-audio workflow.
 
-### 0.6.32 highlights
+### 0.6.33 highlights
 
-Health-panel restoration after **Stop / restore**, support for the October 8
-Deadlock hotfix (6765), and follow-camera (Player POV) export with the replay HUD
+Support for the October 8 Deadlock hotfix (6766), health-panel restoration after
+**Stop / restore**, and follow-camera (Player POV) export with the replay HUD
 hidden. Recent releases also added high-resolution stills (plate, players-only
 matte and depth up to 8K), a camera-feel chooser, vendor-aware automatic
 encoding, capture-clean UI overrides, more reliable automatic updates, and a
 larger Players capture draw budget. See the
-[0.6.32 release notes](docs/RELEASE_NOTES_0.6.32-alpha.md).
+[0.6.33 release notes](docs/RELEASE_NOTES_0.6.33-alpha.md).
 
 ### 0.6.14 highlights
 

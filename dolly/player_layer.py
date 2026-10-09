@@ -30,6 +30,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+from .runtime import external_program_environment
+
 CAPTURE_MODE = "color-sequence-v3"
 OWNER_LAYOUT_CLASS = "CGameSceneNode"
 OWNER_FIELD_NAME = "m_pOwner"
@@ -331,8 +333,14 @@ def encode_bundle(ffmpeg: Path, bundle: Path, output: Path, *, fps: int = 60) ->
     process = None; timer = None
     try:
         with tempfile.TemporaryFile() as errors:
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                       stderr=errors)
+            # FFmpeg is a separate runtime, including when shipped beside Dolly.
+            # Do not inherit the frozen editor's DLL search path or open a console
+            # window whose Close button can terminate the encoder mid-stream.
+            with external_program_environment() as environment:
+                process = subprocess.Popen(
+                    command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                    stderr=errors, env=environment,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             estimated_frames = max(1, Path(bundle).stat().st_size // (64 + width * height * 8))
             timer = threading.Timer(max(120, 30 * estimated_frames), process.kill)
             timer.daemon = True; timer.start()
@@ -349,13 +357,20 @@ def encode_bundle(ffmpeg: Path, bundle: Path, output: Path, *, fps: int = 60) ->
                     process.stdin.write(preview)
                 process.stdin.close()
                 code = process.wait(timeout=120)
-            except (BrokenPipeError, OSError) as exc:
-                process.kill(); process.wait()
-                errors.seek(0)
-                raise RuntimeError("Could not encode the players MOV: " + errors.read(1000).decode(errors="replace")) from exc
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                # A Windows pipe write can raise EINVAL when the reader exits.
+                # Give the exited reader time to publish its real exit status;
+                # killing it first can replace that evidence with our kill code.
+                try:
+                    code = process.wait(timeout=1)
+                    stopped = False
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    code = process.wait()
+                    stopped = True
+                raise RuntimeError(_encode_failure(errors, code, exc, stopped=stopped)) from exc
             if code or not temporary.is_file() or not temporary.stat().st_size:
-                errors.seek(0)
-                raise RuntimeError("Could not encode the players MOV: " + errors.read(1000).decode(errors="replace"))
+                raise RuntimeError(_encode_failure(errors, code))
         os.replace(temporary, output)
         return output
     finally:
@@ -369,6 +384,19 @@ def encode_bundle(ffmpeg: Path, bundle: Path, output: Path, *, fps: int = 60) ->
                 pass
         frames.close()
         temporary.unlink(missing_ok=True)
+
+
+def _encode_failure(errors, code: int, cause=None, *, stopped: bool = False) -> str:
+    errors.seek(0)
+    detail = errors.read(1000).decode(errors="replace").strip()
+    status = "FFmpeg exit %d (0x%08X)" % (code, code & 0xFFFFFFFF)
+    if stopped:
+        status += "; stopped after an input/timeout failure"
+    if cause is not None:
+        status += "; " + str(cause)
+    return ("Could not encode the players MOV: " + status + ". "
+            + (detail or "FFmpeg produced no error text.")
+            + " The existing MOV was not replaced.")
 
 
 def cleanup_capture(deployment: Path, layer_dir: Path) -> list[str]:
