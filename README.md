@@ -1,9 +1,26 @@
-<img src="assets/dolly.png" width="96" alt="Deadlock Dolly logo">
+<div align="center">
+
+<img src="assets/dolly.png" width="120" alt="Deadlock Dolly logo">
 
 # Deadlock Dolly
 
-A camera-path editor for local Deadlock replays. Capture the free camera,
-shape a shot and play it back with animated framing and camera variables.
+**A camera-path editor for local Deadlock replays.**
+
+[![Download](https://img.shields.io/badge/Download-Releases-2ea44f?logo=github&logoColor=white)](https://github.com/cravvnn/deadlock-dolly/releases)
+[![Sponsor](https://img.shields.io/badge/Sponsor-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/cravvnn)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/PGVPEp4bT)
+[![Report an issue](https://img.shields.io/badge/Report%20an%20issue-6e7781?logo=github&logoColor=white)](https://github.com/cravvnn/deadlock-dolly/issues)
+
+![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
+![License](https://img.shields.io/badge/license-MIT-2ea44f)
+![Version](https://img.shields.io/github/v/release/cravvnn/deadlock-dolly?include_prereleases&label=version)
+
+![Deadlock Dolly demo](assets/dolly-demo.gif)
+
+</div>
+
+Capture the free camera, shape a shot and play it back with animated framing and
+camera variables.
 
 **Current source: 0.6.34-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.

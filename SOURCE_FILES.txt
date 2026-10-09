@@ -14,6 +14,7 @@ assets/editing/gameinfo.gi
 assets/editing/profile.json
 assets/dolly.ico
 assets/dolly.png
+assets/dolly-demo.gif
 assets/logo-original.png
 docs/BUILDING.md
 docs/CHANGELOG.md
