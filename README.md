@@ -40,97 +40,74 @@ setting is a safety belt for the brief window before Dolly restores
 exit that game before continuing. Close the editing session before launching
 Deadlock normally.
 
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Using the Windows app](#using-the-windows-app)
+- [Application updates](#application-updates)
+- [Video and ReShade](#video-and-reshade)
+- [Recorded demos](#recorded-demos)
+- [Compatibility](#compatibility)
+- [Session files](#session-files)
+- [Development](#development)
+- [Support](#support)
+- [License](#license)
+- [Releases](#releases)
+
+## Quick start
+
+1. Download the **Windows x64** ZIP from [Releases](https://github.com/cravvnn/deadlock-dolly/releases) and extract it completely — keep `_internal` beside `Dolly.exe`.
+2. Keep `-insecure` in Deadlock's launch options, open Steam and close any running Deadlock.
+3. Run **Dolly.exe**, choose your game executable and a local `.dem` replay, then click **Open replay in Dolly**.
+4. Move to a view and press **Ctrl+Alt+K** to capture it; **F8** opens the in-game panel.
+
+See [Using the Windows app](#using-the-windows-app) for the full walkthrough.
+
 ## Features
+
+### Editing and cameras
 
 - In-game camera list: click to select, double-click to view, and delete the selected camera.
 - Shared shot Undo/Redo in the desktop and in-game editors.
+- Capture cameras from the game with configurable keyboard or mouse bindings.
+- Smooth position paths, rotation and camera bank.
+- Captured lens metadata preserved through replay reloads, playback, save/reopen and history.
+- Numbered in-game camera guides and spline preview during paused editing.
+- Replay playback with HUD handling, settings restoration and diagnostics.
+- In-game playback speed and monitoring rate shared with desktop controls.
+- Console fallback with Off, Light, Balanced and Strong smoothing choices.
+
+### Native camera, Follow and Bone Picker
+
+- Native camera playback evaluated for each main rendered view.
+- Native paused-camera movement with WASD and mouse look.
 - Game Follow with hero selection, adjustable distance/shoulder/height, slider resets and optional game HUD.
 - Follow-camera (Player POV) export without the replay HUD: pick a hero with Game Follow and record or export while the HUD stays hidden.
 - Bone-camera preview and attachment, including direct transfer from paused Follow.
-- Captured lens metadata preserved through replay reloads, playback, save/reopen and history.
-- Capture cameras from the game with configurable keyboard or mouse bindings.
-- Smooth position paths, rotation and camera bank.
-- Native camera playback evaluated for each main rendered view.
-- Native paused-camera movement with WASD and mouse look.
 - In-game panel for capture, saved views, replay controls and movement speed.
 - Replay browser and automatic startup, with the unlocker initialized before the demo loads.
+
+### Framing and depth of field
+
 - Animated `r_aspectratio` framing with an editable desktop curve.
 - Fourteen supported DOF controls synchronized with the native camera, including four-value range tracks.
-- Numbered in-game camera guides and spline preview during paused editing.
-- In-game playback speed and monitoring rate shared with desktop controls.
-- Replay playback with HUD handling, settings restoration and diagnostics.
-- Console fallback with Off, Light, Balanced and Strong smoothing choices.
-- High-resolution screenshots: plate, 16-bit players-only matte, cut-out hero and depth from one paused view, up to 8192 × 8192 (see [High-resolution screenshots](docs/SCREENSHOTS.md)).
+
+### Recording and export
+
 - Video recording at the game resolution: real-time or fixed-step, 30 to 600 FPS, hardware or software H.264/HEVC encoders, or lossless FFV1.
 - Paired depth master as a 10-bit ProRes `.mov`, with an optional float EXR sequence and a normalized preview video.
 - Isolated world, players and effects layer takes; players and effects get a real alpha channel from black and white matte passes.
-- Optional ReShade color effects, its in-game menu on a configurable F11 key, and the verified scene depth published to ReShade for depth-based effects.
-- Startup update check with manual checks in Settings.
 - Optional game-only audio for real-time video, plus a separate advanced reconstructed-audio workflow.
 
-### 0.6.34 highlights
+### Stills and layers
 
-Native Depth of Field works on installs that previously showed the black
-checkerboard, alongside October 8 hotfix (6766) support, health-panel restoration
-after **Stop / restore**, and follow-camera (Player POV) export with the replay
-HUD hidden. Recent releases also added high-resolution stills (plate,
-players-only matte and depth up to 8K), a camera-feel chooser, vendor-aware
-automatic encoding, capture-clean UI overrides, more reliable automatic updates,
-and a larger Players capture draw budget. See the
-[0.6.34 release notes](docs/RELEASE_NOTES_0.6.34-alpha.md).
+- High-resolution screenshots: plate, 16-bit players-only matte, cut-out hero and depth from one paused view, up to 8192 × 8192 (see [High-resolution screenshots](docs/SCREENSHOTS.md)).
 
-### 0.6.14 highlights
+### ReShade and updates
 
-Maintenance across the desktop and in-game editors: shared controls and theme
-setup, clearer page and operation ownership, separated native editor publication
-and panel rendering. Existing layouts, shortcuts, camera/export features and
-settings remain intact, including the 0.6.13 mod-loading repair. Clean source
-builds use a refreshed, checksum-pinned LGPL FFmpeg runtime. See the
-[release notes](docs/RELEASE_NOTES_0.6.14-alpha.md) for changes and offline validation limits.
-
-### 0.6.13 fixes
-
-Mods load again while Dolly drives the game. Dolly carries your installed addon
-mounts (Deadlock Mod Manager, Grimoire or a manual setup) into its temporary
-game configuration and still restores your original file exactly on exit.
-Uncompiled Panorama files inside mounted mod folders are still refused with
-their exact path. Existing camera, graphics-profile and export features are
-retained. See the [release notes](docs/RELEASE_NOTES_0.6.13-alpha.md).
-
-### 0.6.4 highlights
-
-Reviewed compatibility for **Deadlock build 6731 / Steam build 25658155**:
-native camera, automatic replay loading and the cvar unlocker are updated.
-The Bone Picker and Game Follow cameras read player IDs again, and pressing F9
-during playback brings back Deadlock's replay UI and timeline for scrubbing.
-
-### 0.6.3 highlights
-
-Reviewed compatibility for **Deadlock build 6728 / Steam build 25658155**:
-native camera, automatic replay loading and the cvar unlocker are updated.
-Dolly now steps over Deadlock's own assertion dialogs instead of appearing
-frozen, checks native depth-of-field shader support and warns when the game
-cannot compile the effect (the magenta/black checkerboard), and the editing
-configuration tolerates a read-only `gameinfo.gi`.
-
-### 0.6.1 fixes
-
-Saved-camera markers now keep their anchored size and a consistent shape at any
-framing or aspect, including while previewing a camera path. If Deadlock never
-runs its hideout intro or starts the map/shader preload, Dolly stops automatic
-startup early and offers to load the selected replay without that check instead
-of waiting for a state that cannot change.
-
-### 0.6.0 highlights
-
-This release updates reviewed compatibility for **Deadlock build 6726 / Steam
-build 25639407**, restores player discovery in local `tv_record` demos, and
-adds the in-game camera list and shared Undo/Redo. It also fixes captured-lens
-framing, floating health-bar controls, real-time recording gaps caused by
-repeated replay-clock values, and final-frame loss when adding audio.
-
-See the [changelog](docs/CHANGELOG.md) for details. Older custom-lens shots that
-lack lens metadata may need recapture; new captures preserve their framing.
+- Optional ReShade color effects, its in-game menu on a configurable F11 key, and the verified scene depth published to ReShade for depth-based effects.
+- Startup update check with manual checks in Settings.
 
 ## Using the Windows app
 
@@ -349,149 +326,11 @@ Dolly source uses the [MIT license](LICENSE.txt). Bundled components retain
 their own notices under `third_party/` and `native/vendor/`. Artwork has
 separate terms in [assets/README.md](assets/README.md).
 
-## Updates
+## Releases
 
-**0.5.22:** recording a World layer before the Players layer no longer hides the characters from it, and Stop / restore always brings every scene class back.
+Recent releases and the complete history live in the [changelog](docs/CHANGELOG.md)
+and the per-version [release notes](docs/).
 
-**0.5.21:** the Players layer records real players and their equipment with no NPCs, scenery occlusion kept and real alpha, on the current game build.
-
-**0.5.20:** supports the September 17 Deadlock client builds (including the 25379260 hotfix) and re-verifies capture and playback on them. The players-only layer export is built in but not available yet: the update moved the render-side draw records behind its selection, so the **Players layer** option stays disabled until the gates are re-derived and verified live.
-
-**0.5.18:** reads each replay's own tick rate and uses it for replay-timed
-cameras, so 32-tick replays line up instead of running the shot at double
-speed. New shots adopt the detected rate, saved shots are offered a one-step
-retime, and a capture that would mix two clocks is refused with instructions.
-
-**0.5.17:** skips unverifiable transition frames at the start of a depth take
-(for example a full-viewport `ALWAYS` depth write before the world pass)
-instead of failing the take, and reports the skip count in zero-frame
-diagnostics. Any scene failure after the first captured frame still stops the
-take.
-
-**0.5.16:** keeps the verified scene depth when a full-viewport `EQUAL` depth
-write touches the chosen scene texture instead of failing the take
-(`why=depth function=EQUAL`), names the failing FFmpeg pipe and appends its
-stderr tail to a stopped take's error, and re-applies a disabled Citadel glow
-after the replay reset that recording preparation performs.
-
-**0.5.15:** supports the September 16, 2026 Deadlock client build
-(`client.dll` `472dad57…`). The reviewed compatibility profile, bundled manifest
-and generated native profile table list the new build and the native helper was
-rebuilt against it; the camera symbols and all view and field offsets were
-re-verified, and `scenesystem.dll`, `rendersystemdx11.dll`, `tier0.dll` and
-`engine2.dll` are unchanged by this game update. The new client keeps the
-reviewed `globals+0x30` clock fallback until a render-fraction observation is
-recorded for it.
-
-**0.5.14:** builds the Windows package from an explicit file list so a Dolly
-folder that was run in place can no longer leak its session journals or staged
-updates into a shared ZIP, and names the observed depth comparison (for example
-`why=depth function=LESS`) when the scene-depth guard rejects a frame, so a
-failed depth take identifies the offending pass from its own message.
-
-**0.5.13:** fixes the health-bar toggle hang: it no longer writes the
-`citadel_unit_status_enabled` or `citadel_hud_objective_health_enabled` master
-switches, which could hang the game with a DX11 device error while a replay
-rendered. The toggle uses the two live-verified switches again, written one
-command at a time, and still restores the exact prior values on the next press.
-
-**0.5.12:** keeps update downloads, staging and backups inside a
-`.dolly-update-*` folder in the Dolly folder and removes the folder once the
-update completes or rolls back safely, instead of leaving folders beside Dolly.
-A deferred or retried update reuses its verified download, and a locally
-modified managed file (for example a hand-built native DLL) is backed up and
-replaced rather than blocking the update.
-
-**0.5.11:** makes **Playback speed** apply immediately through the replay's
-demo timescale, so a playing or paused replay slows or speeds up without a
-restart (Stop / restore still returns a Dolly-owned speed to 1×), and turns the
-health-bar button into **Toggle health bars**, a master hide/restore for unit,
-HUD and objective bars that snapshots and restores their exact prior values.
-Bar glow stays with Toggle Citadel glow.
-
-**0.5.10:** adds in-game Camera-tab buttons for Citadel glow, health bars and
-the near-player opacity fix, and a **Citadel Depth of Field** card in both UIs
-with an Enable DOF switch plus log-scale sensor-size and focus-distance
-sliders. The native DOF card is renamed to **Native Depth of Field** so the
-two systems cannot be confused. ReShade depth effects now keep working in
-online sessions: Dolly publishes its own verified scene depth from its Present
-path, which ReShade's network-traffic pause does not cover.
-
-**0.5.9:** states the export take order in the UI — the color video records
-first and ticked passes follow automatically — and announces that handoff in
-the status line, so Finish recording no longer looks like it starts a surprise
-take. The **In-game capture** switch now also sits on the Library page, so it
-is reachable without the Full editor. Includes the current user guide and
-start-here wording.
-
-**0.5.8:** fixes layered export take paths nesting inside the previous take,
-replaces stale bundled ReShade search paths instead of listing each effect
-several times, publishes the verified scene depth to ReShade for depth-based
-effects, and stops depth takes failing on the scene tracker's observation
-budget or on a later scene pass without per-view constants. Diagnostics now
-include the newest game crash dumps and name the depth rejection reason.
-
-**0.5.7:** matches the desktop and in-game panels to the wireframe layout and
-keeps Windows builds manual.
-
-**0.5.6:** embeds the startup update check in Dolly.exe and moves the desktop
-to the launcher-first layout with the Camera, Lens and Export panels.
-
-**0.5.5:** adds verified public-release updates that preserve tool paths, the
-paired depth master, isolated layer takes with black and white matte alpha,
-scroll-wheel framing fixes and a recording-failure dialog.
-
-**0.5.4:** adds recorded-shot sidecar metadata (`<video>.shot.json`) with the
-exact first/last shot frame and replay time, waits for a live recorder before
-playing a prepared shot, and bundles a patched cvar unlocker whose Disconnect
-cleanup removes the normal-quit access violation. Internal live-depth work is
-default-off.
-
-**0.5.3:** adds the bundled compatibility manifest and per-launch build scanner,
-a native AOB fallback for game updates whose camera code is byte-identical
-modulo relocated addresses, reviewed support for the September 11 client, and
-`tools/generate_profile.py` to generate a new profile, manifest and native
-header from a real install.
-
-**0.5.2:** adds 120 FPS recording. Layer export requirements are documented; depth, hero-only and world-only passes are not included yet.
-
-**0.5.1:** keeps recording active through camera handoffs and desktop controls.
-
-**0.5.0:** adds real-time MP4 recording, optional ReShade color effects/menu,
-configurable F11, and the REPLAY home heading.
-
-**0.4.8:** handles native shot starts between recorded packets, preserves the
-current scene for frozen native previews, and records bounded view history for
-slowdown diagnosis. The native DLL is unchanged. ReShade and layer-export
-research is documented in [STAGE3_PLAN.md](docs/internal/STAGE3_PLAN.md); those features
-are not implemented in this update.
-
-**0.4.7:** restores paused flight when closing F8 from a held camera, waits for
-rendered pause acknowledgement before spectator handoff, and accepts dotted
-custom replay names consistently. Input and graphics diagnostics share observation
-timestamps. The reported renderer slowdown and overflow remain unresolved.
-
-**0.4.6:** corrects the initial flight HUD/cursor handoff and delayed camera
-readiness, adds mouse and expanded graphics diagnostics, and consistently
-formats owned C++ sources. The reported renderer overflow remains unresolved.
-
-**0.4.5:** adds paused in-game camera/path guides, shared playback controls,
-four-component range DOF and a portable supported-cvar list.
-
-**0.4.4:** cleans temporary session folders after game exit, recovers older
-leftovers and retains read-only DX11 diagnostics after a crash. The reported
-vertex-buffer overflow is not yet fixed.
-
-**0.4.3:** hides the full game HUD when returning from F9 and corrects overlay
-mouse handling during UI transitions.
-
-**0.4.2:** fixes capture during replay playback and restarting shots at the
-replay's first available tick. Saved keyframes retain their authored timing.
-
-**0.4.0:** adds the replay browser, automatic startup, configurable editor
-bindings, native paused movement and the DX11 in-game panel.
-
-**0.3.13:** compatibility update for the reviewed September 9 client, engine2
-and tier0 builds. Previous build support remains.
-
-Earlier changes are in [CHANGELOG.md](docs/CHANGELOG.md).
+- **0.6.34-alpha** — Native Depth of Field works on installs that previously showed the black checkerboard.
+- **0.6.33-alpha** — October 8 hotfix (6766) support, and a Players layer export that no longer leaves a stuck command window.
+- **0.6.32-alpha** — the health/ability panel restores after editing.
