@@ -601,3 +601,4 @@ docs/RELEASE_NOTES_0.6.30-alpha.md
 docs/RELEASE_NOTES_0.6.31-alpha.md
 docs/RELEASE_NOTES_0.6.32-alpha.md
 docs/RELEASE_NOTES_0.6.33-alpha.md
+docs/RELEASE_NOTES_0.6.34-alpha.md

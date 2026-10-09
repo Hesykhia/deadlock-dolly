@@ -54,6 +54,14 @@ LOG = logging.getLogger("dolly")
 # enables it for the session and forces one reload of the DOF shaders.
 DOF_SHADER_SETTINGS = ("mat_disable_dynamic_shader_compile",)
 DOF_SHADER_RELOAD = "mat_forcereloadshaders dof"
+# Game-bin DLLs the engine needs to compile the Native DOF material at runtime.
+# ``vfx_dx11.dll`` is the DX11 dynamic shader compiler and it statically imports
+# ``slang.dll``; when either is absent the engine cannot compile the developer
+# DOF material and substitutes its error material (the magenta/black
+# checkerboard). Testing for them lets Dolly refuse the pass without forcing a
+# shader reload that would itself swap a working precompiled shader for the
+# error material.
+DOF_COMPILER_FILES = ("vfx_dx11.dll", "slang.dll")
 # Engine text observed when the game install cannot compile the Native DOF
 # material because its vfx shader compiler files are missing: the DOF pass
 # falls back to the engine error material, the magenta/black checkerboard. The
@@ -2297,6 +2305,35 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         return any(getattr(track, "name", "") == "r_dof_override"
                    for track in getattr(project, "tracks", ()))
 
+    def _dof_compiler_bin_dir(self):
+        """The game's ``bin/win64`` folder from the last launch, or None."""
+        raw = str((self._launch_attempt or {}).get("game_path") or "").strip()
+        if not raw:
+            return None
+        base = Path(raw)
+        if base.suffix.casefold() == ".exe":
+            return base.parent
+        if base.name.casefold() == "win64" and base.parent.name.casefold() == "bin":
+            return base
+        if base.name.casefold() == "game":
+            return base / "bin" / "win64"
+        return base / "game" / "bin" / "win64"
+
+    def _missing_dof_compiler_files(self):
+        """Game-bin compiler DLLs absent for the launched install.
+
+        Returns the missing names, or an empty list when the install looks
+        complete or the game path is unknown, which keeps the reload-based
+        detection in :meth:`ensure_native_dof_shader_support`.
+        """
+        bin_dir = self._dof_compiler_bin_dir()
+        if bin_dir is None:
+            return []
+        try:
+            return [name for name in DOF_COMPILER_FILES if not (bin_dir / name).is_file()]
+        except OSError:
+            return []
+
     def ensure_native_dof_shader_support(self, project):
         """Keep the engine able to compile its Native DOF pass in this session.
 
@@ -2333,6 +2370,22 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                     evidence["settings"][name] = 0
             except (RuntimeError, ValueError):
                 continue
+        missing = self._missing_dof_compiler_files()
+        if missing:
+            # Retail Deadlock ships no shader source and no vfx compiler, so
+            # ``mat_forcereloadshaders dof`` can only fail and swap in the engine
+            # error material (the magenta/black checkerboard). The engine renders
+            # the pass from its shipped compiled ``dof`` shader, so skip the
+            # reload instead of refusing the pass.
+            evidence["missing_compiler_files"] = missing
+            evidence["reload"] = "skipped (vfx compiler files missing)"
+            if changed:
+                self._message("Native DOF enabled the engine's dynamic shader compilation for this session; "
+                              "your shader setting is restored when you disconnect.", playing=False)
+            self._startup_evidence["dof_shader"] = evidence
+            LOG.warning("Native DOF compiler files are missing; skipping the forced reload: %s",
+                        ", ".join(missing))
+            return changed
         # Always refresh the DOF shaders once so a stale compile cannot keep
         # the engine's error material on screen, even when the setting above is
         # not readable through this build's console.

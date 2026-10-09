@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.34 alpha - Native Depth of Field without the game's shader compiler
+
+**0.6.34-alpha**
+
+- **Native Depth of Field works on installs that showed the black checkerboard.** *Before:* applying Native DOF forced the game to recompile its DOF shader, which fails on many installs, so the engine drew its magenta/black error material over the view. *After:* Dolly skips that forced recompile and the engine renders Native DOF from the shader it already ships, so the effect works and the checkerboard is gone.
+
+Full details: [0.6.34 release notes](RELEASE_NOTES_0.6.34-alpha.md).
+
 ## 0.6.33 alpha - October 8 hotfix (6766)
 
 **0.6.33-alpha**
