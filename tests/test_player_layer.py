@@ -3,7 +3,9 @@ import struct
 import json
 import tempfile
 import unittest
-from unittest.mock import patch
+import subprocess
+from contextlib import contextmanager
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -203,6 +205,101 @@ class CaptureDiagnosticsTests(unittest.TestCase):
             (deployment / player_layer.STATUS_NAME).unlink()
             player_layer.preserve_diagnostics(deployment, session)
             self.assertEqual((session / player_layer.STATUS_NAME).read_text(), "complete")
+
+
+class BundleEncodingTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.bundle = self.root / player_layer.BUNDLE_NAME
+        self.output = self.root / "players.mov"
+        # Two distinct alpha planes and a nonzero, premultiplied foreground.
+        self.alpha = []
+        with self.bundle.open("wb") as stream:
+            for frame in range(2):
+                stream.write(struct.pack("<8Q", player_layer.BUNDLE_MAGIC, 16, 16, 1, 0, 0, 0, 8))
+                for i in range(256):
+                    alpha = (0, 1)[(i + frame) % 2]
+                    self.alpha.append(alpha * 255)
+                    stream.write(struct.pack("<4e", .5 * alpha, .25 * alpha, .125 * alpha, alpha))
+        self.raw = self.bundle.read_bytes()
+        self.output.write_bytes(b"previous successful master")
+
+    def test_pipe_failure_keeps_exit_status_and_original_error_without_stderr(self):
+        process = Mock()
+        process.stdin.write.side_effect = OSError(22, "Invalid argument")
+        process.wait.return_value = 0xC0000135
+        process.poll.return_value = 0xC0000135
+        active = []
+
+        @contextmanager
+        def environment():
+            active.append(True)
+            try:
+                yield {"PATH": "clean"}
+            finally:
+                active.pop()
+
+        def spawn(command, **kwargs):
+            self.assertEqual(active, [True])
+            self.assertEqual(kwargs["env"], {"PATH": "clean"})
+            self.assertEqual(kwargs["creationflags"], 0x08000000)
+            Path(command[-1]).write_bytes(b"partial")
+            return process
+
+        with patch.object(player_layer, "external_program_environment", environment), \
+                patch.object(player_layer.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True), \
+                patch.object(player_layer.subprocess, "Popen", side_effect=spawn):
+            with self.assertRaisesRegex(RuntimeError, r"0xC0000135.*Invalid argument.*no error text"):
+                player_layer.encode_bundle(Path("ffmpeg.exe"), self.bundle, self.output)
+        process.kill.assert_not_called()
+        self.assertEqual(active, [])
+        self.assertEqual(self.output.read_bytes(), b"previous successful master")
+        self.assertEqual(self.bundle.read_bytes(), self.raw)
+        self.assertEqual(list(self.root.glob("*.partial.mov")), [])
+
+    def test_failure_with_running_encoder_is_bounded_and_identifies_forced_stop(self):
+        process = Mock()
+        process.stdin.write.side_effect = OSError(22, "Invalid argument")
+        process.wait.side_effect = [subprocess.TimeoutExpired("ffmpeg", 1), 1]
+        process.poll.return_value = 1
+        with patch.object(player_layer.subprocess, "Popen", return_value=process):
+            with self.assertRaisesRegex(RuntimeError, "stopped after an input/timeout failure"):
+                player_layer.encode_bundle(Path("ffmpeg.exe"), self.bundle, self.output)
+        process.kill.assert_called_once_with()
+        self.assertEqual(self.output.read_bytes(), b"previous successful master")
+
+    def test_encoder_stderr_is_retained_and_empty_success_is_rejected(self):
+        for code, detail in ((1, b"No space left on device"), (0, b"")):
+            with self.subTest(code=code):
+                process = Mock()
+                process.wait.return_value = code
+                process.poll.return_value = code
+                def spawn(command, **kwargs):
+                    kwargs["stderr"].write(detail)
+                    return process
+                with patch.object(player_layer.subprocess, "Popen", side_effect=spawn):
+                    with self.assertRaisesRegex(RuntimeError, detail.decode() or "no error text"):
+                        player_layer.encode_bundle(Path("ffmpeg.exe"), self.bundle, self.output)
+                self.assertEqual(self.output.read_bytes(), b"previous successful master")
+
+    def test_real_bundled_encoder_preserves_frames_and_alpha(self):
+        from dolly.video_export import bundled_ffmpeg_path
+        ffmpeg = bundled_ffmpeg_path()
+        if ffmpeg is None:
+            self.skipTest("Bundled FFmpeg is unavailable")
+        self.assertEqual(player_layer.encode_bundle(ffmpeg, self.bundle, self.output, fps=120), self.output)
+        decoded = subprocess.run(
+            [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-i", str(self.output),
+             "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"],
+            capture_output=True, check=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+        self.assertEqual(len(decoded), 2 * 16 * 16 * 4)
+        self.assertEqual(decoded[3::4], bytes(self.alpha))
+        self.assertTrue(any(decoded[0::4]))
+        self.assertEqual(self.bundle.read_bytes(), self.raw)
+        self.assertEqual(list(self.root.glob("*.partial.mov")), [])
 
 
 if __name__ == "__main__":

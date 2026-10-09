@@ -347,6 +347,39 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.console.values["mat_disable_dynamic_shader_compile"], 1.0)
         self.assertEqual(self.controller._dof_shader_restore, {})
 
+    def test_native_dof_skips_the_forced_reload_when_compiler_files_are_missing(self):
+        # Retail ships the compiled ``dof`` shader but no compiler/source, so
+        # ``mat_forcereloadshaders dof`` can only fail and swap in the error
+        # material. Skip it and let the engine use the shipped compiled shader.
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        with tempfile.TemporaryDirectory() as folder:
+            bin_dir = Path(folder) / "game" / "bin" / "win64"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "deadlock.exe").write_bytes(b"")
+            self.controller._launch_attempt = {"game_path": folder, "status": "started"}
+            project = make_project()
+            project.setup_values["r_dof_override"] = 1.0
+            self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        evidence = self.controller._startup_evidence["dof_shader"]
+        self.assertEqual(evidence["missing_compiler_files"], ["vfx_dx11.dll", "slang.dll"])
+        self.assertNotIn("checkerboard_risk", evidence)
+        self.assertNotIn("mat_forcereloadshaders dof", self.console.requests)
+        self.assertFalse(self.controller.status()["native_dof_unavailable"])
+
+    def test_native_dof_reloads_when_the_compiler_files_are_present(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        with tempfile.TemporaryDirectory() as folder:
+            bin_dir = Path(folder) / "game" / "bin" / "win64"
+            bin_dir.mkdir(parents=True)
+            for name in ("deadlock.exe", "vfx_dx11.dll", "slang.dll"):
+                (bin_dir / name).write_bytes(b"")
+            self.controller._launch_attempt = {"game_path": folder, "status": "started"}
+            project = make_project()
+            project.setup_values["r_dof_override"] = 1.0
+            self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        self.assertIn("mat_forcereloadshaders dof", self.console.requests)
+        self.assertFalse(self.controller._startup_evidence["dof_shader"].get("checkerboard_risk"))
+
     def test_dead_process_console_failure_reports_the_crash_not_the_socket(self):
         process = self.process
 
