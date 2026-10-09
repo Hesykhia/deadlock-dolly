@@ -60,6 +60,7 @@ dolly/editor_publication.py
 dolly/editor_dispatch.py
 dolly/editor_wire.py
 dolly/export_audit.py
+dolly/export_timing.py
 dolly/graphics_diagnostics.py
 dolly/graphics_profiles.py
 dolly/graphics_profiles_ui.py
@@ -68,6 +69,7 @@ dolly/ui_theme.py
 dolly/hotkey.py
 dolly/launcher.py
 dolly/launch_errors.py
+dolly/layer_modes.py
 dolly/keyvalues.py
 dolly/file_ops.py
 dolly/gameinfo_transaction.py
@@ -255,6 +257,7 @@ tests/test_generated_compatibility.py
 tests/test_native_capture_timing.py
 tests/test_native_controller.py
 tests/test_replay_recovery.py
+tests/test_restore_guidance.py
 tests/test_native_effects.py
 tests/test_native_flight_controller.py
 tests/test_native_packaging.py
@@ -553,12 +556,14 @@ native/profiles/deadlock-2026-10-06-6757-complete.json
 native/profiles/deadlock-2026-10-06-6759-complete.json
 native/profiles/deadlock-2026-10-07-6762-complete.json
 native/profiles/deadlock-2026-10-07-6763-complete.json
+native/profiles/deadlock-2026-10-08-6765-complete.json
 
 native/profiles/scenesystem-2026-10-06-6757.json
 third_party/cvar_unlocker/unlocker-build-6757.patch
 third_party/cvar_unlocker/unlocker-build-6759.patch
 third_party/cvar_unlocker/unlocker-build-6762.patch
 third_party/cvar_unlocker/unlocker-build-6763.patch
+third_party/cvar_unlocker/unlocker-build-6765.patch
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
@@ -590,3 +595,6 @@ docs/RELEASE_NOTES_0.6.26-alpha.md
 docs/RELEASE_NOTES_0.6.27-alpha.md
 docs/RELEASE_NOTES_0.6.28-alpha.md
 docs/RELEASE_NOTES_0.6.29-alpha.md
+docs/RELEASE_NOTES_0.6.30-alpha.md
+docs/RELEASE_NOTES_0.6.31-alpha.md
+docs/RELEASE_NOTES_0.6.32-alpha.md

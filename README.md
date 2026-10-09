@@ -5,13 +5,7 @@
 A camera-path editor for local Deadlock replays. Capture the free camera,
 shape a shot and play it back with animated framing and camera variables.
 
-> **Screenshot fork.** This fork of [cravvnn/deadlock-dolly](https://github.com/cravvnn/deadlock-dolly)
-> adds high-resolution thumbnail stills: one click saves the plate, a 16-bit
-> players-only matte, a cut-out hero and depth from the current paused view,
-> at up to 7680 × 4320. Everything else tracks upstream Dolly. See
-> [High-resolution screenshots](docs/SCREENSHOTS.md).
-
-**Current source: 0.6.15-alpha.** The portable Windows build opens through
+**Current source: 0.6.32-alpha.** The portable Windows build opens through
 `Dolly.exe`. Python and Tcl/Tk are bundled; no separate installation is needed.
 
 **THIS MOD INJECTS CODE INTO DEADLOCK — USE AT YOUR OWN RISK.**
@@ -34,6 +28,7 @@ Deadlock normally.
 - In-game camera list: click to select, double-click to view, and delete the selected camera.
 - Shared shot Undo/Redo in the desktop and in-game editors.
 - Game Follow with hero selection, adjustable distance/shoulder/height, slider resets and optional game HUD.
+- Follow-camera (Player POV) export without the replay HUD: pick a hero with Game Follow and record or export while the HUD stays hidden.
 - Bone-camera preview and attachment, including direct transfer from paused Follow.
 - Captured lens metadata preserved through replay reloads, playback, save/reopen and history.
 - Capture cameras from the game with configurable keyboard or mouse bindings.
@@ -48,13 +43,23 @@ Deadlock normally.
 - In-game playback speed and monitoring rate shared with desktop controls.
 - Replay playback with HUD handling, settings restoration and diagnostics.
 - Console fallback with Off, Light, Balanced and Strong smoothing choices.
-- High-resolution screenshots: plate, 16-bit players-only matte, cut-out hero and depth from one paused view (fork feature, see docs/SCREENSHOTS.md).
+- High-resolution screenshots: plate, 16-bit players-only matte, cut-out hero and depth from one paused view, up to 8192 × 8192 (see [High-resolution screenshots](docs/SCREENSHOTS.md)).
 - Video recording at the game resolution: real-time or fixed-step, 30 to 600 FPS, hardware or software H.264/HEVC encoders, or lossless FFV1.
 - Paired depth master as a 10-bit ProRes `.mov`, with an optional float EXR sequence and a normalized preview video.
 - Isolated world, players and effects layer takes; players and effects get a real alpha channel from black and white matte passes.
 - Optional ReShade color effects, its in-game menu on a configurable F11 key, and the verified scene depth published to ReShade for depth-based effects.
 - Startup update check with manual checks in Settings.
 - Optional game-only audio for real-time video, plus a separate advanced reconstructed-audio workflow.
+
+### 0.6.32 highlights
+
+Health-panel restoration after **Stop / restore**, support for the October 8
+Deadlock hotfix (6765), and follow-camera (Player POV) export with the replay HUD
+hidden. Recent releases also added high-resolution stills (plate, players-only
+matte and depth up to 8K), a camera-feel chooser, vendor-aware automatic
+encoding, capture-clean UI overrides, more reliable automatic updates, and a
+larger Players capture draw budget. See the
+[0.6.32 release notes](docs/RELEASE_NOTES_0.6.32-alpha.md).
 
 ### 0.6.14 highlights
 

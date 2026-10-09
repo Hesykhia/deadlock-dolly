@@ -28,6 +28,8 @@ from .path import (Project, Keyframe, validate_cvar_name, STANDARD_ASPECT, ASPEC
 from .camera_commands import (ASPECT_CVAR, DISCRETE, DOF_RANGES, LEGACY_FOV_CONTROLS, frame_commands,
                               motion_clock_info, numeric, parse_camera, parse_camera_readback,
                               _tail_file, tick_rate_advice, tick_rates_match)
+from .export_timing import ExportTimingMixin
+from .layer_modes import LayerModesMixin
 from .game_ui_handoff import GameUiHandoffMixin, OWN_HEALTH_HUD
 from .paused_flight import PausedFlightMixin, CAMERA_READBACK_INTERVAL
 from .console import ConsoleClient, ConsoleError, ConsoleTimeout, error_text, parse_demo_info, parse_demo_tick
@@ -121,7 +123,7 @@ class PreloadUnavailableError(RuntimeError):
     """
 
 
-class Controller(PausedFlightMixin, GameUiHandoffMixin):
+class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHandoffMixin):
     def __init__(self, log_callback=None):
         self._log_callback = log_callback
         self._session = None
@@ -1300,9 +1302,14 @@ class Controller(PausedFlightMixin, GameUiHandoffMixin):
                 raise RuntimeError("POV recording requires the native recorder.")
             if not bridge.status().get("paused"):
                 raise RuntimeError("Pause the replay at the POV segment's start before recording.")
-            if not self._game_ui_visible:
-                raise RuntimeError("Choose Player POV, press F9 to select the hero, then F8 to open Export.")
-            self.stop()
+            following = bool(self._follow_active)
+            if not self._game_ui_visible and not following:
+                raise RuntimeError("Choose Player POV, then select a hero with Follow, or press F9 to select a hero.")
+            # A roster-selected Game Follow already hands the camera to the
+            # game with the HUD hidden; stopping here would tear that rig down
+            # and reveal the replay UI before the POV segment records.
+            if not following:
+                self.stop()
             self._stop_event.clear()
             self._game_ui_visible = True
             self._pov_active = True
@@ -1347,12 +1354,22 @@ class Controller(PausedFlightMixin, GameUiHandoffMixin):
     def finish_pov_recording(self):
         if not getattr(self, "_pov_active", False):
             return
-        self._halt(native_action="release")
+        following = bool(self._follow_active)
+        self._halt(native_action="release", preserve_follow=following)
         self._pov_active = False
         self._finish_playback()
+        bridge = self._native_bridge()
+        if following:
+            # A roster-selected Game Follow is the camera the user chose, so
+            # finishing a segment must not tear the rig down or reveal the
+            # replay UI (and its build-unverifiable health panel). Keep the
+            # follow active with the HUD hidden for the next segment.
+            self._game_ui_visible = False
+            if bridge is not None and self._alive():
+                bridge.configure_editor(owner="panel")
+            return
         error = self._restore_game_ui_settings()
         self._game_ui_visible = True
-        bridge = self._native_bridge()
         if bridge is not None and self._alive():
             bridge.configure_editor(owner="panel")
         if error:
@@ -3943,9 +3960,10 @@ class Controller(PausedFlightMixin, GameUiHandoffMixin):
             elif finished:
                 self._message("Shot finished. Replay paused and playback settings restored; Stop restores lens/cvar values.", playing=False)
 
-    def _halt(self, *, native_action="handoff"):
+    def _halt(self, *, native_action="handoff", preserve_follow=False):
         self._restore_replay_hud()
-        self.stop_game_follow()
+        if not preserve_follow:
+            self.stop_game_follow()
         self._stop_event.set()
         worker = self._thread
         if worker and worker is not threading.current_thread():
@@ -4051,305 +4069,6 @@ class Controller(PausedFlightMixin, GameUiHandoffMixin):
                 LOG.warning("Could not restore scene classes: %s", exc)
         if restoration_error:
             self._message(restoration_error, playing=False)
-
-    def set_export_resolution(self):
-        """Use a verified full-target depth pass, independent of render scaling.
-
-        Reduced viewport rendering is later overwritten by an unverified upscale
-        pass. Keep this snapshot separate from playback: Play calls Stop before
-        dispatching the take, and must not undo the recording's resolution.
-        """
-        if self._console is None or not self._console.is_connected or not self._alive():
-            raise RuntimeError("Connect to the game before depth export.")
-        if getattr(self, "_export_resolution", None) is None:
-            original = float(read_cvar_value("mat_viewportscale", self._request("mat_viewportscale")))
-            if not math.isfinite(original) or original <= 0:
-                raise RuntimeError("Could not read the game's render scale before depth export.")
-            self._export_resolution = original
-        self._request("mat_viewportscale 1")
-        if read_cvar_value("mat_viewportscale", self._request("mat_viewportscale")) != 1:
-            raise RuntimeError("Depth export needs 100% render scale, but the game did not accept it.")
-        self._message("Depth export and its layers use 100% render scale; the previous scale is restored after each take.")
-
-    def clear_export_resolution(self):
-        original = getattr(self, "_export_resolution", None)
-        if original is None:
-            return
-        if self._alive():
-            if self._console is None or not self._console.is_connected:
-                raise RuntimeError("Reconnect and finish the recording to restore the game render scale.")
-            self._request("mat_viewportscale " + numeric(original))
-            actual = read_cvar_value("mat_viewportscale", self._request("mat_viewportscale"))
-            if not math.isclose(actual, original, rel_tol=1e-6):
-                raise RuntimeError("Could not restore the game's render scale. Reconnect and finish the recording to retry.")
-        self._export_resolution = None
-
-    def set_export_timing(self, fps, speed=1.0):
-        """Enter deterministic fixed-step engine timing for an export.
-
-        ``host_framerate`` makes each rendered frame advance a fixed slice of
-        engine time (independent of wall-clock), ``r_wait_on_present`` keeps the
-        renderer from coalescing frames. The engine ignores ``demo_timescale``
-        for this fixed step, so use fps / speed to advance speed / fps replay
-        seconds per output frame. :meth:`play` preserves the selected speed.
-        Previous values are restored by :meth:`clear_export_timing`.
-        """
-        fps = int(fps)
-        if fps not in (30, 60, 120, 300, 600):
-            raise ValueError("Fixed-step export requires 30, 60, 120, 300 or 600 FPS.")
-        try:
-            speed = float(speed)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Export speed must be a number between 0.05 and 4.") from exc
-        if not math.isfinite(speed) or not .05 <= speed <= 4:
-            raise ValueError("Export speed must be between 0.05 and 4.")
-        previous = getattr(self, "_export_timing", None)
-        if previous is not None:
-            if previous.get("restore_pending"):
-                raise RuntimeError("Restore the previous export timing before starting another export.")
-            return
-        if self._console is None or not self._console.is_connected or not self._alive():
-            raise RuntimeError("Connect to the game before fixed-step export.")
-        snapshot = {name: float(read_cvar_value(name, self._request(name)))
-                    for name in ("host_framerate", "r_wait_on_present")}
-        engine_fps = fps / speed
-        self._export_timing = {"fps": fps, "speed": speed, "restore": snapshot}
-        try:
-            self._request(
-                f"host_framerate {numeric(engine_fps)}; r_wait_on_present 1; demo_timescale {numeric(speed)}")
-            actual = read_cvar_value("host_framerate", self._request("host_framerate"))
-            synchronized = read_cvar_value("r_wait_on_present", self._request("r_wait_on_present"))
-            if not math.isclose(actual, engine_fps, rel_tol=1e-6) or synchronized != 1:
-                raise RuntimeError("The game did not accept fixed-step export timing. Choose a lower video FPS or a higher export speed.")
-        except Exception:
-            self.clear_export_timing()
-            raise
-        self._message(
-            f"Fixed-step export at {fps} FPS, {numeric(speed)}x; each rendered frame is captured.")
-
-    def clear_export_timing(self):
-        state = getattr(self, "_export_timing", None)
-        if state is None:
-            return
-        if not self._alive():
-            self._export_timing = None
-            return
-        state["restore_pending"] = True
-        if self._console is None or not self._console.is_connected:
-            raise RuntimeError("Reconnect and finish the recording to restore export timing.")
-        restore = state.get("restore") or {}
-        host = restore.get("host_framerate")
-        wait = restore.get("r_wait_on_present")
-        commands = ["host_framerate " + (numeric(host) if host else "0"),
-                    "r_wait_on_present " + (numeric(wait) if wait is not None else "0"),
-                    "demo_timescale 1"]
-        self._request("; ".join(commands))
-        for name, expected in restore.items():
-            actual = read_cvar_value(name, self._request(name))
-            if not math.isclose(actual, expected, rel_tol=1e-6):
-                raise RuntimeError("Could not restore export timing. Finish the recording again to retry.")
-        self._export_timing = None
-
-    def suspend_export_timing(self):
-        """Restore normal engine pacing for a paused-camera calibration.
-
-        Fixed-step export timing (``host_framerate`` + ``r_wait_on_present``)
-        can make a paused camera apply only part of a position command, which
-        the position check must reject. Keep the configured export timing and
-        re-apply it with :meth:`resume_export_timing` before the shot
-        dispatches.
-        """
-        state = getattr(self, "_export_timing", None)
-        if state is None or state.get("suspended"):
-            return
-        if state.get("restore_pending"):
-            raise RuntimeError("Restore the previous export timing before continuing playback.")
-        if self._console is None or not self._console.is_connected or not self._alive():
-            return
-        restore = state.get("restore") or {}
-        host = restore.get("host_framerate")
-        wait = restore.get("r_wait_on_present")
-        commands = ["host_framerate " + (numeric(host) if host else "0"),
-                    "r_wait_on_present " + (numeric(wait) if wait is not None else "0")]
-        if self._demo_speed_changed:
-            commands.append("demo_timescale 1")
-        self._request("; ".join(commands))
-        state["suspended"] = True
-
-    def resume_export_timing(self):
-        state = getattr(self, "_export_timing", None)
-        if state is None or not state.get("suspended"):
-            return
-        if state.get("restore_pending"):
-            raise RuntimeError("Restore the previous export timing before continuing playback.")
-        if self._console is None or not self._console.is_connected or not self._alive():
-            return
-        engine_fps = state["fps"] / state["speed"]
-        self._request(f"host_framerate {numeric(engine_fps)}; r_wait_on_present 1; "
-                      f"demo_timescale {numeric(state['speed'])}")
-        state["suspended"] = False
-
-    # Scene-system classes used to isolate recording layers. Flags byte 8
-    # hides a class for the current frames; 0 restores it. The live registry
-    # is read with sc_showclasses so a game update is detected instead of
-    # silently producing a wrong layer.
-    #
-    # Every mode is expressed as a KEEP-list: the layer shows exactly the listed
-    # classes and hides the rest of the live registry. This is deliberate — the
-    # registry is dynamic (a build can add or drop classes such as
-    # ``projectedDecal``), so a hide-list would silently leak an unlisted class
-    # into the layer. A keep-list excludes unknown classes by default and fails
-    # closed when a required class disappears (`apply_layer_mode`). Reviewed
-    # legacy classes absent from current builds are optional; if registered,
-    # they are still kept. Unknown classes remain hidden.
-    #
-    # Owners (verified live 2026-09-27 by hiding each class and comparing the
-    # rendered frame): characters -> SkinnedObject, effects -> ParticleSystem,
-    # static world/lighting -> AggregateDesc/BarnLight/Default and the remaining
-    # scene classes.
-    LAYER_MODES = {
-        "world": {"keep": ("AggregateDesc", "BarnLight", "OmniLight",
-                           "LightProbeVolume", "Default", "MeshBuilderObject",
-                           "ZipLineRopeSegment", "InstancedMesh", "EnvMap", "Skybox"),
-                  "optional_keep": ("DirectionalLight", "projectedDecal")},
-        "players": {"keep": ("SkinnedObject",)},
-        "effects": {"keep": ("ParticleSystem",)},
-    }
-
-    def scene_classes(self):
-        output = self._request("sc_showclasses")
-        classes = []
-        for line in str(output).splitlines():
-            name = line.strip().split()[0] if line.strip() else ""
-            if name:
-                classes.append(name)
-        if not classes:
-            raise RuntimeError("The game did not list its scene classes; layer export is unavailable.")
-        return classes
-
-    def apply_layer_mode(self, mode):
-        """Show exactly the selected layer's keep-list; hide every other class.
-
-        Owners verified live: characters -> SkinnedObject, effects ->
-        ParticleSystem, static world/lighting -> AggregateDesc/BarnLight/Default
-        and the remaining scene classes. Unknown/new registry classes are hidden
-        by default (keep-list), so the layer fails closed instead of leaking.
-        """
-        if mode not in self.LAYER_MODES:
-            raise ValueError("Unknown layer mode: " + str(mode))
-        classes = self.scene_classes()
-        spec = self.LAYER_MODES[mode]
-        keep = set(spec.get("keep", ()))
-        hide = set(spec.get("hide", ()))
-        required = keep | hide
-        missing = sorted(required - set(classes))
-        if missing:
-            raise RuntimeError("The game no longer reports the scene classes needed for the "
-                               + mode + " layer: " + ", ".join(missing))
-        keep.update(spec.get("optional_keep", ()))
-        targets = [name for name in classes if name not in keep] if keep else [
-            name for name in classes if name in hide]
-        # A console batch can fail after earlier classes were hidden. Retain
-        # every possible owned change before the first command, for retry.
-        self._layer_hidden = set(targets) | set(self._layer_hidden or ())
-        # Start from a clean slate: flags left by a previous layer must never
-        # hide the class this layer keeps. Each class is its own short command
-        # because the engine silently drops over-long multi-command lines.
-        failures = []
-        for name in classes:
-            try:
-                self._request("sc_setclassflags " + name + " 0")
-            except (RuntimeError, ValueError, OSError) as exc:
-                failures.append(name + " reset (" + str(exc) + ")")
-        for name in targets:
-            try:
-                self._request("sc_setclassflags " + name + " 8")
-            except (RuntimeError, ValueError, OSError) as exc:
-                failures.append(name + " (" + str(exc) + ")")
-        if failures:
-            raise RuntimeError("Could not hide scene classes for the " + mode + " layer: "
-                               + ", ".join(failures))
-        # Remember exactly which classes this layer hid so reset restores only
-        # what needs restoring (the registry is dynamic; a keep-list can hide
-        # many classes).
-        self._layer_hidden = set(targets)
-        return {"mode": mode, "hidden": targets, "classes": classes}
-
-    def reset_layer_modes(self):
-        """Restore every scene class the layer export can hide.
-
-        Raises when any class could not be shown again: a silently failed
-        restore would leave the game hiding players or effects.
-        """
-        pending = getattr(self, "_layer_hidden", None)
-        if pending is None:
-            # No layer applied this session; try the live registry so a stray
-            # flag cannot persist, but send nothing if it is unreadable.
-            try:
-                classes = self.scene_classes()
-            except (RuntimeError, ValueError, OSError):
-                classes = []
-        else:
-            classes = sorted(pending)
-        failures = []
-        for name in classes:
-            try:
-                self._request("sc_setclassflags " + name + " 0")
-            except (RuntimeError, ValueError, OSError) as exc:
-                failures.append(name + " (" + str(exc) + ")")
-        if failures:
-            raise RuntimeError("Could not restore scene classes: " + ", ".join(failures))
-        self._layer_hidden = None
-
-    # Screen post-processing that contaminates black/white matte passes.
-    # Bloom spills over the layer and the forced white clear; eye-adaptation
-    # then washes the layer out of the white pass and makes the derived alpha
-    # opaque. Tonemapping itself stays on so the white clear stays white.
-    MATTE_CVARS = ("r_effects_bloom", "r_post_bloom", "r_post_bloom_strength")
-
-    def begin_matte_layer(self):
-        """Disable screen post-processing for clean matte passes.
-
-        Values are saved and restored by :meth:`end_matte_layer`; a cvar that
-        cannot be read or written is skipped instead of failing the take.
-        """
-        if getattr(self, "_matte_cvar_restore", None) is not None:
-            return
-        saved = {}
-        for name in self.MATTE_CVARS:
-            try:
-                output = self._request(name)
-                read_cvar_value(name, output)
-                saved[name] = output
-            except (RuntimeError, ValueError, OSError):
-                continue
-        commands = [name + " 0" for name in saved]
-        # A failed batch may have applied a prefix. Keep originals until a
-        # successful restore rather than losing them on either failure path.
-        self._matte_cvar_restore = saved
-        if commands:
-            self._request("; ".join(commands))
-
-    def end_matte_layer(self):
-        saved = getattr(self, "_matte_cvar_restore", None)
-        if not saved:
-            self._matte_cvar_restore = None
-            return
-        commands = []
-        for name, output in saved.items():
-            try:
-                value = read_cvar_value(name, output)
-                commands.append(name + " " + format_cvar_value(value))
-            except (ValueError, TypeError) as exc:
-                raise RuntimeError("Could not read the saved matte setting for " + name) from exc
-        if commands:
-            self._request("; ".join(commands))
-        for name, output in saved.items():
-            expected = float(read_cvar_value(name, output))
-            actual = float(read_cvar_value(name, self._request(name)))
-            if not math.isfinite(actual) or not math.isclose(actual, expected, rel_tol=1e-6, abs_tol=1e-6):
-                raise RuntimeError("Could not restore the matte setting for " + name + "; use Stop / restore to retry")
-        self._matte_cvar_restore = None
 
     def disconnect(self):
         self._recording_replay = None

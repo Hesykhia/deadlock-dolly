@@ -1,5 +1,34 @@
 # Changes
 
+## 0.6.32 alpha - The health/ability panel restores after editing
+
+**0.6.32-alpha**
+
+- **The health/ability panel restores after editing.** *Before:* after Stop, Dolly could report the health panel as "pending" and leave the ability panel hidden until you re-selected a hero. *After:* Dolly reads the player-pawn predicate straight from the reviewed pawn vtable, so the panel restores on Stop.
+
+Full details: [0.6.32 release notes](RELEASE_NOTES_0.6.32-alpha.md).
+
+## 0.6.31 alpha - October 8 hotfix (6765) and follow-camera export without the replay HUD
+
+**0.6.31-alpha**
+
+- **Works with the October 8 Deadlock hotfix (6765).** *Before:* the updated client changed `client.dll` and `server.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow and Players/Depth work on 6765, and the bundled cvar unlocker is rebuilt for the new server.
+- **Export a follow camera without turning on the replay HUD.** *Before:* recording a Player POV (follow camera) required pressing F9 and selecting a hero, and starting the export stopped the Game Follow and brought the replay HUD back. *After:* pick a hero with Game Follow (the replay HUD stays hidden) and record or export straight away — the follow keeps running while you record.
+- **Busier fights no longer break a Players capture.** *Before:* a Players layer capture failed with "failed player layer exceeded 64 draws per image; incomplete output rejected" when a frame contained more than 64 player draws. *After:* the per-image budget is doubled to 128 draws, so crowded moments capture completely.
+
+Full details: [0.6.31 release notes](RELEASE_NOTES_0.6.31-alpha.md).
+
+## 0.6.30 alpha - High-resolution stills and a Players fix for the October 7 builds
+
+**0.6.30-alpha**
+
+- **High-resolution stills (plate + players matte + depth).** New: capture a high-resolution still of the paused view from the in-game panel or the desktop Export tab. It records the color plate, a players-only matte and a depth pass; the capture resolution ceiling is raised to 8K.
+- **Players capture works on the October 7 builds.** *Before:* the reviewed scene-system vtable was pinned to the wrong address on 6757/6759 and the 6762/6763 hotfixes, so a Players capture could not resolve the scene. *After:* the CSceneSystem vtable is corrected and Players capture resolves.
+- **Clearer message when a camera is captured before the shot start.** *Before:* capturing a view with the replay positioned before the shot's start failed with "Camera keyframes timestamps must be nonnegative". *After:* Dolly explains the replay is before the shot's start and how to fix it.
+- **The held health panel is surfaced.** *Before:* a health/ability panel that could not be restored after Stop produced no prompt. *After:* Dolly shows the "Restore the game health panel" guidance for every camera backend.
+
+Full details: [0.6.30 release notes](RELEASE_NOTES_0.6.30-alpha.md).
+
 ## 0.6.29 alpha - More reliable automatic updates
 
 **0.6.29-alpha**

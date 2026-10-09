@@ -694,8 +694,10 @@ class DollyApp:
                     raise ValueError("Choose a POV duration between 0.1 and 120 replay seconds.")
                 state = self.controller.status()
                 tick = state.get("tick")
-                if tick is None or not state.get("game_ui_visible"):
-                    raise ValueError("Choose Player POV, press F9 to select a hero, then F8 to open Export.")
+                if tick is None or not (state.get("game_ui_visible")
+                                        or state.get("game_follow_active")):
+                    raise ValueError("Choose Player POV, then select a hero with Follow, "
+                                     "or press F9 to select a hero.")
                 self._pov_project = Project(name="Player POV", start_tick=int(tick),
                     confetti_enabled=self.project.confetti_enabled,
                     confetti_spawn_height=self.project.confetti_spawn_height,
@@ -2176,10 +2178,17 @@ class DollyApp:
 
     def _restore_completed(self, _result=None):
         status = self.controller.status()
-        if (status.get("connected") and status.get("camera_backend") == "console"
-                and status.get("health_panel_restore_pending")):
+        pending = bool(status.get("health_panel_restore_pending"))
+        if pending and status.get("connected"):
+            # Surface the held panel for every camera backend. The saved setting
+            # is only restored once a valid hero view exists, so tell the user how
+            # to finish it instead of leaving the panel silently hidden.
             self._show_restore_guidance()
-        elif not status.get("health_panel_restore_pending"):
+        elif pending:
+            # Keep it visible even after the game connection is gone.
+            self.status_text.set(
+                "The game health panel is still hidden. Reconnect to Deadlock and use Stop / restore to finish.")
+        else:
             dialog = getattr(self, "restore_guidance_dialog", None)
             if dialog is not None and dialog.winfo_exists():
                 dialog.destroy()

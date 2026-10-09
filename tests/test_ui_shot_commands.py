@@ -34,6 +34,13 @@ class ShotCommandTests(unittest.TestCase):
             commands.finish_capture(project, 'append', key(0), None)
         self.assertEqual(project, before)
 
+    def test_appending_before_the_shot_start_is_refused_with_a_clear_message(self):
+        project = Project(name='Shot', start_tick=1000, tick_rate=64.0, keyframes=[key(0)])
+        before = copy.deepcopy(project)
+        with self.assertRaisesRegex(ValueError, "before this shot's start"):
+            commands.finish_capture(project, 'append', key(-1.5), None)
+        self.assertEqual(project, before)
+
     def test_curve_and_aspect_resets_keep_original_keys_and_other_fields(self):
         project = Project(name='Shot', keyframes=[key(0)])
         project.keyframes[0].curve_yaw = 77
