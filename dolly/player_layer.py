@@ -294,7 +294,10 @@ def encode_layer(ffmpeg: Path, previews: list[Path], output: Path, *, fps: int =
                "-i", str(previews[0].with_name(previews[0].name.replace("000", "%03d"))),
                "-frames:v", str(len(previews)), "-an", "-c:v", "prores_ks", "-profile:v", "4444",
                "-pix_fmt", "yuva444p10le", "-vendor", "apl0", "-threads", "2", str(output)]
-    result = subprocess.run(command, capture_output=True, timeout=max(120, 30 * len(previews)))
+    with external_program_environment() as environment:
+        result = subprocess.run(command, capture_output=True, timeout=max(120, 30 * len(previews)),
+                                env=environment,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if result.returncode != 0 or not output.is_file():
         raise RuntimeError("Could not encode the player layer video: " +
                            result.stderr.decode(errors="replace")[:400])

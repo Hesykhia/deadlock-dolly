@@ -18,6 +18,7 @@ import threading
 import time
 
 from . import encoder_select, player_layer
+from .runtime import external_program_environment
 from .display import client_size
 
 
@@ -679,8 +680,11 @@ class VideoExport:
         args.append(str(target))
         try:
             frames = max(1, source.stat().st_size // max(1, width * height))
-            result = subprocess.run(args, capture_output=True, text=True,
-                                    timeout=max(120.0, frames * 0.5))
+            with external_program_environment() as environment:
+                result = subprocess.run(args, capture_output=True, text=True,
+                                        timeout=max(120.0, frames * 0.5),
+                                        env=environment,
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("Depth preview could not be encoded: %s", exc)
             return status

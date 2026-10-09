@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.35 alpha - Every FFmpeg output step runs hidden in a clean environment
+
+**0.6.35-alpha**
+
+- **Every FFmpeg output step runs hidden in a clean environment.** *Before:* assembling a high-resolution still, encoding a Players layer, combining a layer's alpha, muxing clip audio, or encoding a depth preview could flash a console window that stayed open, and in the packaged app FFmpeg could load the editor's bundled libraries. *After:* every FFmpeg call runs hidden with a clean environment, the same way the Players MOV encoder already did.
+
+Full details: [0.6.35 release notes](RELEASE_NOTES_0.6.35-alpha.md).
+
 ## 0.6.34 alpha - Native Depth of Field without the game's shader compiler
 
 **0.6.34-alpha**

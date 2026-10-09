@@ -302,5 +302,36 @@ class BundleEncodingTests(unittest.TestCase):
         self.assertEqual(list(self.root.glob("*.partial.mov")), [])
 
 
+class LayerEncodeEnvironmentTests(unittest.TestCase):
+    """Layer encoding launches FFmpeg like the other encoders: clean env, no console."""
+
+    def test_encode_layer_uses_external_environment_without_a_window(self):
+        seen = {}
+
+        @contextmanager
+        def environment():
+            seen["entered"] = True
+            yield {"PATH": "clean"}
+
+        def spawn(command, **kwargs):
+            seen.update(kwargs)
+            Path(command[-1]).write_bytes(b"mov")
+            return SimpleNamespace(returncode=0, stderr=b"")
+
+        with tempfile.TemporaryDirectory() as folder:
+            ffmpeg = Path(folder) / "ffmpeg.exe"
+            ffmpeg.write_bytes(b"MZ")
+            previews = [Path(folder) / "frame000.png", Path(folder) / "frame001.png"]
+            for preview in previews:
+                preview.write_bytes(b"png")
+            output = Path(folder) / "layer.mov"
+            with patch.object(player_layer, "external_program_environment", environment), \
+                    patch.object(player_layer.subprocess, "run", spawn):
+                self.assertEqual(player_layer.encode_layer(ffmpeg, previews, output), output)
+        self.assertTrue(seen["entered"])
+        self.assertEqual(seen["env"], {"PATH": "clean"})
+        self.assertEqual(seen["creationflags"], getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
 if __name__ == "__main__":
     unittest.main()
