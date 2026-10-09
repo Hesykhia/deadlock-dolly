@@ -331,7 +331,7 @@ separate terms in [assets/README.md](assets/README.md).
 Recent releases and the complete history live in the [changelog](docs/CHANGELOG.md)
 and the per-version [release notes](docs/).
 
-- **0.6.35-alpha** — high-resolution screenshot assembly no longer leaves a stuck command window.
+- **0.6.35-alpha** — every FFmpeg output step (stills, Players layer, alpha combine, clip audio, depth preview) runs hidden in a clean environment.
 - **0.6.34-alpha** — Native Depth of Field works on installs that previously showed the black checkerboard.
 - **0.6.33-alpha** — October 8 hotfix (6766) support, and a Players layer export that no longer leaves a stuck command window.
 - **0.6.32-alpha** — the health/ability panel restores after editing.

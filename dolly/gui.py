@@ -1099,8 +1099,12 @@ class DollyApp:
                 "-map", "[out]", "-an",
                 "-c:v", "prores_ks", "-profile:v", "4444",
                 "-pix_fmt", "yuva444p10le", "-vendor", "apl0", str(master)]
-        result = subprocess.run(args, capture_output=True, text=True,
-                                timeout=max(300.0, 1.0))
+        from dolly.runtime import external_program_environment
+        with external_program_environment() as environment:
+            result = subprocess.run(args, capture_output=True, text=True,
+                                    timeout=max(300.0, 1.0),
+                                    env=environment,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode != 0 or not master.is_file():
             detail = (result.stderr or "").strip().splitlines()
             raise RuntimeError("The " + layer + " alpha combine failed: "
