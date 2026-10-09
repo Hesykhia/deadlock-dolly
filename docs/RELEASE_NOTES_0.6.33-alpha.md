@@ -16,7 +16,7 @@ Support for the October 8 Deadlock hotfix (6766).
 
 ## Validation
 
-Offline: 1,916 Python tests pass with 22 skipped; the native build and the packaged portable-editor self-test pass, and `generate_compatibility.py --check --verify-game-dir` passes against the installed build. Live (build 6766): a bounded owned-replay session is pending.
+Offline: 1,916 Python tests pass with 22 skipped; the native build and the packaged portable-editor self-test pass, and `generate_compatibility.py --check --verify-game-dir` passes against the installed build. Live (build 6766): a bounded startup / Game Follow / Player-POV run passed with the HUD hidden, the follow preserved through preparation and segment finish, the health panel restored on Stop, clean exit and exact config restoration.
 
 ## Preserved behavior and limits
 
