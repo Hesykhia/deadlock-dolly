@@ -1,5 +1,13 @@
 # Changes
 
+## 0.6.35 alpha - High-resolution screenshot assembly without a console window
+
+**0.6.35-alpha**
+
+- **High-resolution screenshot assembly no longer leaves a stuck command window.** *Before:* assembling a high-resolution still (plate extraction and alpha merge) could flash a console window that stayed open, and in the packaged app FFmpeg could load the editor's libraries. *After:* the still assembler runs FFmpeg hidden in its own clean environment, matching the Players layer encoder.
+
+Full details: [0.6.35 release notes](RELEASE_NOTES_0.6.35-alpha.md).
+
 ## 0.6.34 alpha - Native Depth of Field without the game's shader compiler
 
 **0.6.34-alpha**
