@@ -301,6 +301,8 @@ third_party/notices/tk-license.terms
 tools/build_native.py
 tools/build_ui_override.py
 tools/build_windows.py
+tools/check_game_update.py
+tools/update_game.py
 tools/fetch_ffmpeg.py
 tools/release_files.py
 .clang-format
@@ -548,6 +550,7 @@ native/profiles/deadlock-2026-10-05-6753-complete.json
 native/profiles/scenesystem-2026-10-05-6753.json
 
 native/profiles/soundsystem-2026-10-05-6753.json
+native/profiles/soundsystem-2026-10-06-6757.json
 third_party/cvar_unlocker/unlocker-build-6746.patch
 
 third_party/cvar_unlocker/unlocker-build-6753.patch

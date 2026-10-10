@@ -84,14 +84,15 @@
     },
     "bin/win64/soundsystem.dll": {
       "role": "soundsystem",
-      "reviewed_utc": "2026-10-05",
-      "latest_timestamp": 1791223638,
+      "reviewed_utc": "2026-10-06",
+      "latest_timestamp": 1791315757,
       "accepted": [
         "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0",
         "42123ba07ab346b781c27038eff41f8ae39714b0d3936904d108956c71d8e281",
         "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c",
         "15b30cb326d8bbeb7c5fbe7a20aabd3d58d6d790ed344989f8d015c2c290981b",
-        "1df6e097125504ac6d4863edd4169928697f1f1d440397033b20f2b1e52aa8c2"
+        "1df6e097125504ac6d4863edd4169928697f1f1d440397033b20f2b1e52aa8c2",
+        "dcc87930af3a5e3ad993d3819e71c5c22355eeab2a05919bc35014a7cab316ca"
       ]
     },
     "bin/win64/resourcesystem.dll": {
@@ -156,6 +157,7 @@
     "deadlock-2026-10-07-6762-complete.json",
     "deadlock-2026-10-07-6763-complete.json",
     "deadlock-2026-10-08-6765-complete.json",
-    "deadlock-2026-10-08-6766-complete.json"
+    "deadlock-2026-10-08-6766-complete.json",
+    "soundsystem-2026-10-06-6757.json"
   ]
 }

@@ -70,7 +70,7 @@ ADDON_MOUNT_KEYS = {
     "addonroot": "AddonRoot",
     "officialaddonroot": "OfficialAddonRoot",
 }
-ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons)(?:/.*)?$", re.IGNORECASE)
+ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons|hyperline)(?:/.*)?$", re.IGNORECASE)
 ADDON_WRITE_PATHS = {"citadel", "core"}
 
 
@@ -765,13 +765,6 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     from .replays import parse_launch_options
     parse_launch_options(launch_options)  # Validate before changing game files.
     paths = validate_game(game_path)
-    try:
-        original_data = paths.gameinfo.read_bytes()
-        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
-    except (OSError, UnicodeError) as exc:
-        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
-    addon_mounts = tuple(mod_search_paths(original_text))
-    _refuse_loose_ui_sources(paths, addon_mounts)
     port = _validate_port(port)
     if protocol not in ("vconsole", "netcon"):
         raise LaunchError("Console protocol must be vconsole or netcon.")
@@ -782,9 +775,18 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     if not isinstance(native, bool):
         raise LaunchError("Native camera selection must be a boolean.")
     native_dll = _verified_native(paths) if native else None
+    # Recover any unfinished previous session first, so the original we back up
+    # and journal is the user's true file, not a still-mounted Dolly session.
     recover_pending(paths.root)
     if "steam.exe" not in processes:
         raise LaunchError("Open Steam and sign in before launching Deadlock through Dolly.")
+    try:
+        original_data = paths.gameinfo.read_bytes()
+        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
+    except (OSError, UnicodeError) as exc:
+        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
+    addon_mounts = tuple(mod_search_paths(original_text))
+    _refuse_loose_ui_sources(paths, addon_mounts)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         try:
             # Exclusive bind on Windows prevents claiming another app's listener.
@@ -845,6 +847,10 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         if hashlib.sha256(paths.gameinfo.read_bytes()).hexdigest() != metadata["original_sha256"]:
             raise LaunchError("Deadlock gameinfo.gi changed while Dolly was preparing. Launch was refused without overwriting the newer file.")
         _atomic_write(paths.gameinfo, patched_data, metadata["original_mode"])
+        if hashlib.sha256(paths.gameinfo.read_bytes()).hexdigest() != metadata["patched_sha256"]:
+            raise LaunchError("Dolly's gameinfo.gi swap did not read back correctly. Another program may be "
+                              "rewriting the file (close mod managers or Steam), or the file is locked; "
+                              "the original was backed up in this session's logs.")
         metadata["config_state"] = "mounted"
         _save_record(session_dir, metadata)
         if graphics_profile:
