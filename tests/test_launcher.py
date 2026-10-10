@@ -50,6 +50,14 @@ GRIMOIRE_GAMEINFO = GAMEINFO.replace('Game "citadel"', '''Game "citadel/grimoire
             Mod "core"
             Write "core"''')
 
+HYPERLINE_GAMEINFO = GAMEINFO.replace('Game "citadel"', '''// HYPERLINE PANORAMA BEGIN
+            Game "citadel/hyperline/5dff341cdedf6cda8525a90c4ed21800e26f2052e17535f793a929c8275cdb76"
+            Mod "citadel"
+            Write "citadel"
+            AddonRoot citadel/hyperline_addons
+            // HYPERLINE PANORAMA END
+            Game "citadel"''')
+
 
 def fake_game(root: Path, executable_name: str = "citadel.exe") -> launcher.GamePaths:
     exe = root / "game/bin/win64" / executable_name
@@ -187,6 +195,14 @@ class GameInfoTests(unittest.TestCase):
         merged = launcher.merge_addon_mounts(user, GAMEINFO)
         self.assertIn('Game\t"citadel/addons/profile_x"', merged)
         self.assertIn('Game\t"citadel/addons2/profile_x"', merged)
+
+    def test_hyperline_panorama_mount_is_carried(self):
+        merged = launcher.merge_addon_mounts(HYPERLINE_GAMEINFO, GAMEINFO)
+        self.assertIn('Game\t"citadel/hyperline/5dff341cdedf6cda8525a90c4ed21800e26f2052e17535f793a929c8275cdb76"', merged)
+        self.assertIn('Mod\t"citadel"', merged)
+        self.assertIn('Write\t"citadel"', merged)
+        self.assertIn('AddonRoot\t"citadel/hyperline_addons"', merged)
+        self.assertLess(merged.index('citadel/hyperline/5dff341c'), merged.index('Game "citadel"'))
 
     def test_addon_mounts_without_write_paths_get_the_manager_defaults(self):
         user = GAMEINFO.replace('Game "citadel"', 'Game "citadel/addons"\n            Game "citadel"', 1)
@@ -768,7 +784,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(dll.read_bytes()).hexdigest(), meta["bundled_file_sha256"])
         self.assertEqual(meta["bundled_file_sha256"], launcher.UNLOCKER_SHA256)
         self.assertEqual(meta["license"], "MIT")
-        self.assertEqual(meta["version"], "v0.5.2-dolly-build-6753")
+        self.assertEqual(meta["version"], "v0.5.2-dolly-build-6766")
         self.assertEqual(dll.stat().st_size, meta["bundled_file_size"])
         self.assertIn("unlocker-build-6712.patch", meta["patches"])
         self.assertIn("unlocker-build-6722.patch", meta["patches"])

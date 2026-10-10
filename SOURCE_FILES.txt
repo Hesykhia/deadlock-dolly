@@ -14,6 +14,7 @@ assets/editing/gameinfo.gi
 assets/editing/profile.json
 assets/dolly.ico
 assets/dolly.png
+assets/dolly-demo.gif
 assets/logo-original.png
 docs/BUILDING.md
 docs/CHANGELOG.md
@@ -29,6 +30,7 @@ docs/internal/STAGE1_TESTING.md
 docs/internal/STAGE2_TESTING.md
 docs/SUPPORTED_CAMERA_CVARS.json
 docs/SUPPORTED_CAMERA_CVARS.md
+docs/SCREENSHOTS.md
 docs/USER_GUIDE.md
 docs/internal/VALIDATION.md
 dolly/__init__.py
@@ -37,6 +39,7 @@ dolly/assert_watcher.py
 dolly/bindings.py
 dolly/bootstrap.py
 dolly/branding.py
+dolly/camera_commands.py
 dolly/compatibility.py
 dolly/preload.py
 dolly/replay_camera.py
@@ -58,6 +61,7 @@ dolly/editor_publication.py
 dolly/editor_dispatch.py
 dolly/editor_wire.py
 dolly/export_audit.py
+dolly/export_timing.py
 dolly/graphics_diagnostics.py
 dolly/graphics_profiles.py
 dolly/graphics_profiles_ui.py
@@ -66,25 +70,31 @@ dolly/ui_theme.py
 dolly/hotkey.py
 dolly/launcher.py
 dolly/launch_errors.py
+dolly/layer_modes.py
 dolly/keyvalues.py
 dolly/file_ops.py
 dolly/gameinfo_transaction.py
 dolly/game_installation.py
 dolly/game_processes.py
+dolly/game_ui_handoff.py
 dolly/session_recovery.py
 dolly/native_bridge.py
 dolly/native_capabilities.py
 dolly/_runtime_generated.py
 dolly/native_effects.py
+dolly/native_errors.py
 dolly/native_path.py
 dolly/navigation.py
 dolly/particles.py
+dolly/paused_flight.py
 dolly/pacing.py
 dolly/path.py
 dolly/player_layer.py
 dolly/playback.py
 dolly/replays.py
 dolly/runtime.py
+dolly/screenshot.py
+dolly/screenshot_ui.py
 dolly/session_cleanup.py
 dolly/settings.py
 dolly/smoothing.py
@@ -248,6 +258,7 @@ tests/test_generated_compatibility.py
 tests/test_native_capture_timing.py
 tests/test_native_controller.py
 tests/test_replay_recovery.py
+tests/test_restore_guidance.py
 tests/test_native_effects.py
 tests/test_native_flight_controller.py
 tests/test_native_packaging.py
@@ -265,6 +276,7 @@ tests/test_portable.py
 tests/test_preview_convergence.py
 tests/test_release_packaging.py
 tests/test_replays.py
+tests/test_screenshot.py
 tests/test_seek_boundary.py
 tests/test_seek_overshoot.py
 tests/test_session_cleanup.py
@@ -289,6 +301,8 @@ third_party/notices/tk-license.terms
 tools/build_native.py
 tools/build_ui_override.py
 tools/build_windows.py
+tools/check_game_update.py
+tools/update_game.py
 tools/fetch_ffmpeg.py
 tools/release_files.py
 .clang-format
@@ -536,9 +550,26 @@ native/profiles/deadlock-2026-10-05-6753-complete.json
 native/profiles/scenesystem-2026-10-05-6753.json
 
 native/profiles/soundsystem-2026-10-05-6753.json
+native/profiles/soundsystem-2026-10-06-6757.json
 third_party/cvar_unlocker/unlocker-build-6746.patch
 
 third_party/cvar_unlocker/unlocker-build-6753.patch
+
+native/profiles/deadlock-2026-10-06-6757-complete.json
+
+native/profiles/deadlock-2026-10-06-6759-complete.json
+native/profiles/deadlock-2026-10-07-6762-complete.json
+native/profiles/deadlock-2026-10-07-6763-complete.json
+native/profiles/deadlock-2026-10-08-6765-complete.json
+native/profiles/deadlock-2026-10-08-6766-complete.json
+
+native/profiles/scenesystem-2026-10-06-6757.json
+third_party/cvar_unlocker/unlocker-build-6757.patch
+third_party/cvar_unlocker/unlocker-build-6759.patch
+third_party/cvar_unlocker/unlocker-build-6762.patch
+third_party/cvar_unlocker/unlocker-build-6763.patch
+third_party/cvar_unlocker/unlocker-build-6765.patch
+third_party/cvar_unlocker/unlocker-build-6766.patch
 docs/RELEASE_NOTES_0.6.12-alpha.md
 
 docs/RELEASE_NOTES_0.6.13-alpha.md
@@ -564,3 +595,15 @@ docs/RELEASE_NOTES_0.6.22-alpha.md
 docs/RELEASE_NOTES_0.6.23-alpha.md
 
 docs/RELEASE_NOTES_0.6.24-alpha.md
+
+docs/RELEASE_NOTES_0.6.25-alpha.md
+docs/RELEASE_NOTES_0.6.26-alpha.md
+docs/RELEASE_NOTES_0.6.27-alpha.md
+docs/RELEASE_NOTES_0.6.28-alpha.md
+docs/RELEASE_NOTES_0.6.29-alpha.md
+docs/RELEASE_NOTES_0.6.30-alpha.md
+docs/RELEASE_NOTES_0.6.31-alpha.md
+docs/RELEASE_NOTES_0.6.32-alpha.md
+docs/RELEASE_NOTES_0.6.33-alpha.md
+docs/RELEASE_NOTES_0.6.34-alpha.md
+docs/RELEASE_NOTES_0.6.35-alpha.md

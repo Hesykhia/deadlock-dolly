@@ -51,7 +51,7 @@ CONFETTI_PACK = NATIVE_ROOT / "assets" / "confetti" / "pak01_dir.vpk"
 CONFETTI_PACK_SHA256 = "99c0325fe333bfa12c3f23a2808767c2fd27b49fe0e5abe4531fa472519f8ae6"
 UI_OVERRIDE_PACK = NATIVE_ROOT / "assets" / "ui" / "pak02_dir.vpk"
 UI_OVERRIDE_PACK_SHA256 = "160c23f2b4ef670469833a193b2fa3d4ed5f027a4b9310607391008f39054cc0"
-UNLOCKER_SHA256 = "1d491c14e335ec38f279475ce03bfa9d98f5b444f0250d4cdb1dc35e63018a8a"
+UNLOCKER_SHA256 = "005129711605ba32d20b19fd5fc81e87cac4d22aa6e030d0b197ffc82176c696"
 # Accepted game-module SHA-256 pins come from native/profiles/manifest.json, the
 # single source of truth shared with the native bridge and its build tests.
 try:
@@ -70,7 +70,7 @@ ADDON_MOUNT_KEYS = {
     "addonroot": "AddonRoot",
     "officialaddonroot": "OfficialAddonRoot",
 }
-ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons)(?:/.*)?$", re.IGNORECASE)
+ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons|hyperline)(?:/.*)?$", re.IGNORECASE)
 ADDON_WRITE_PATHS = {"citadel", "core"}
 
 
@@ -765,13 +765,6 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     from .replays import parse_launch_options
     parse_launch_options(launch_options)  # Validate before changing game files.
     paths = validate_game(game_path)
-    try:
-        original_data = paths.gameinfo.read_bytes()
-        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
-    except (OSError, UnicodeError) as exc:
-        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
-    addon_mounts = tuple(mod_search_paths(original_text))
-    _refuse_loose_ui_sources(paths, addon_mounts)
     port = _validate_port(port)
     if protocol not in ("vconsole", "netcon"):
         raise LaunchError("Console protocol must be vconsole or netcon.")
@@ -782,9 +775,18 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     if not isinstance(native, bool):
         raise LaunchError("Native camera selection must be a boolean.")
     native_dll = _verified_native(paths) if native else None
+    # Recover any unfinished previous session first, so the original we back up
+    # and journal is the user's true file, not a still-mounted Dolly session.
     recover_pending(paths.root)
     if "steam.exe" not in processes:
         raise LaunchError("Open Steam and sign in before launching Deadlock through Dolly.")
+    try:
+        original_data = paths.gameinfo.read_bytes()
+        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
+    except (OSError, UnicodeError) as exc:
+        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
+    addon_mounts = tuple(mod_search_paths(original_text))
+    _refuse_loose_ui_sources(paths, addon_mounts)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         try:
             # Exclusive bind on Windows prevents claiming another app's listener.
@@ -826,7 +828,7 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
                 f"DOLLY_NATIVE_1\n{bridge.token}\n{bridge.editor_pid}\n",
                 encoding="ascii", newline="\n")
         command = build_command(paths, overlay, port, demo, protocol, launch_options, native=native)
-        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6753", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
+        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6765", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
         metadata["editing_gameinfo_sha256"] = hashlib.sha256(editing.encode("utf-8")).hexdigest()
         metadata["carried_addon_mounts"] = [{"key": key, "path": path} for key, path in addon_mounts]
         if native:
@@ -845,6 +847,10 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         if hashlib.sha256(paths.gameinfo.read_bytes()).hexdigest() != metadata["original_sha256"]:
             raise LaunchError("Deadlock gameinfo.gi changed while Dolly was preparing. Launch was refused without overwriting the newer file.")
         _atomic_write(paths.gameinfo, patched_data, metadata["original_mode"])
+        if hashlib.sha256(paths.gameinfo.read_bytes()).hexdigest() != metadata["patched_sha256"]:
+            raise LaunchError("Dolly's gameinfo.gi swap did not read back correctly. Another program may be "
+                              "rewriting the file (close mod managers or Steam), or the file is locked; "
+                              "the original was backed up in this session's logs.")
         metadata["config_state"] = "mounted"
         _save_record(session_dir, metadata)
         if graphics_profile:

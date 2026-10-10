@@ -20,7 +20,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer, ui_theme
+from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer, screenshot_ui, ui_theme
 from .ui import shot_commands
 from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, BINDABLE_ORDER, EDITOR_KEY_CHOICES, EditorBinding, default_action_bindings, validate_action_bindings
 from dolly.replays import discover_replays, find_replay_folder, parse_launch_options
@@ -283,6 +283,7 @@ class DollyApp:
         self._take_audit_reported = False
         self.closed = False
         self.busy = False
+        self._error_dialog_open = False
         self.dirty = False
         self.file_path: Path | None = None
         self.project = Project(name="Untitled shot", keyframes=[], tracks=[],
@@ -375,6 +376,7 @@ class DollyApp:
         self.demo_path.set(self.app_settings.demo_path)
         self.replay_folder = tk.StringVar(value=self.app_settings.replay_folder)
         self.launch_options = tk.StringVar(value=self.app_settings.launch_options)
+        screenshot_ui.init(self)
         self.editor_move_speed = tk.StringVar(value=_number(self.app_settings.movement_speed))
         self.editor_sensitivity = tk.StringVar(value=_number(self.app_settings.mouse_sensitivity))
         self.replay_search = tk.StringVar()
@@ -692,8 +694,10 @@ class DollyApp:
                     raise ValueError("Choose a POV duration between 0.1 and 120 replay seconds.")
                 state = self.controller.status()
                 tick = state.get("tick")
-                if tick is None or not state.get("game_ui_visible"):
-                    raise ValueError("Choose Player POV, press F9 to select a hero, then F8 to open Export.")
+                if tick is None or not (state.get("game_ui_visible")
+                                        or state.get("game_follow_active")):
+                    raise ValueError("Choose Player POV, then select a hero with Follow, "
+                                     "or press F9 to select a hero.")
                 self._pov_project = Project(name="Player POV", start_tick=int(tick),
                     confetti_enabled=self.project.confetti_enabled,
                     confetti_spawn_height=self.project.confetti_spawn_height,
@@ -846,6 +850,7 @@ class DollyApp:
                 # the selected pass takes start immediately afterwards.
                 self.status_text.set("Color take saved. Recording the selected passes…")
         elif state in ("failed", "cancelled"):
+            screenshot_ui.abandon(self)
             layered = self.layer_pipeline.failed()
             if layered:
                 self._submit("Restoring scene layers", self._restore_scene_state,
@@ -881,6 +886,7 @@ class DollyApp:
 
     def _clear_layer_pipeline(self):
         self.layer_pipeline.clear()
+        screenshot_ui.abandon(self)
 
     def _recover_export_failure(self):
         recover_export_failure(self.video_export.stop, self.controller.stop, self._restore_scene_state)
@@ -894,8 +900,9 @@ class DollyApp:
             combine=self._combine_layer,
             start_next=self._start_next_layer_take,
             complete=self._video_operation_done,
-            audit=self._audit_finished_layers,
-            restore=self._restore_scene_state,
+            audit=lambda base: screenshot_ui.audit(self, base),
+            restore=lambda: screenshot_ui.restore(self),
+            restored=lambda folder: screenshot_ui.restored(self, folder),
         )
 
     def _report_take_audit(self, findings, *, final=False):
@@ -1007,7 +1014,8 @@ class DollyApp:
         LOG.info("Players layer capture armed: %d frames, owner offset %d, back link %d",
                  frames, owner_offset, back_offset)
         folder = base.path.with_suffix("")
-        target = folder / layer / (layer + ".mp4")
+        # Match the color take's container: lossless FFV1 takes (stills) need .mkv.
+        target = folder / layer / (layer + base.path.suffix)
         target.parent.mkdir(parents=True, exist_ok=True)
         options = VideoOptions(target, base.fps, base.bitrate, base.codec, base.quality,
                                base.preset, base.ffmpeg_path, True, base.speed,
@@ -1022,6 +1030,8 @@ class DollyApp:
 
     def _finish_player_capture(self, layer):
         """Worker step: wait for the capture, then write the alpha layer master."""
+        if getattr(self, "_still_run", None) is not None:
+            return screenshot_ui.finish_player_capture(self, layer)
         base = self._base_capture
         if base is None:
             # A cancel, discard or competing stop tore the layered run down after
@@ -1089,8 +1099,12 @@ class DollyApp:
                 "-map", "[out]", "-an",
                 "-c:v", "prores_ks", "-profile:v", "4444",
                 "-pix_fmt", "yuva444p10le", "-vendor", "apl0", str(master)]
-        result = subprocess.run(args, capture_output=True, text=True,
-                                timeout=max(300.0, 1.0))
+        from dolly.runtime import external_program_environment
+        with external_program_environment() as environment:
+            result = subprocess.run(args, capture_output=True, text=True,
+                                    timeout=max(300.0, 1.0),
+                                    env=environment,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode != 0 or not master.is_file():
             detail = (result.stderr or "").strip().splitlines()
             raise RuntimeError("The " + layer + " alpha combine failed: "
@@ -1164,6 +1178,7 @@ class DollyApp:
                  else format_video_status(status))
         _set_widget_state(self.video_start_button,
                           "normal" if ready and not active and not self.busy else "disabled")
+        screenshot_ui.refresh(self, ready and not active and not self.busy)
         can_stop = state in ("starting", "recording") and not self.busy
         _set_widget_state(self.video_stop_button, "normal" if can_stop else "disabled")
         _set_widget_state(self.video_cancel_button, "normal" if can_stop else "disabled")
@@ -2167,10 +2182,17 @@ class DollyApp:
 
     def _restore_completed(self, _result=None):
         status = self.controller.status()
-        if (status.get("connected") and status.get("camera_backend") == "console"
-                and status.get("health_panel_restore_pending")):
+        pending = bool(status.get("health_panel_restore_pending"))
+        if pending and status.get("connected"):
+            # Surface the held panel for every camera backend. The saved setting
+            # is only restored once a valid hero view exists, so tell the user how
+            # to finish it instead of leaving the panel silently hidden.
             self._show_restore_guidance()
-        elif not status.get("health_panel_restore_pending"):
+        elif pending:
+            # Keep it visible even after the game connection is gone.
+            self.status_text.set(
+                "The game health panel is still hidden. Reconnect to Deadlock and use Stop / restore to finish.")
+        else:
             dialog = getattr(self, "restore_guidance_dialog", None)
             if dialog is not None and dialog.winfo_exists():
                 dialog.destroy()
@@ -2740,11 +2762,25 @@ class DollyApp:
             label.configure(style=style)
 
     def _report_operation_error(self, title, exc):
-        """Deadlock's missing intro/preload gets an actionable manual load."""
-        if isinstance(exc, PreloadUnavailableError) and not self.closed:
-            self._offer_unverified_replay(title, exc)
-        else:
-            self._error(title, exc)
+        """Deadlock's missing intro/preload gets an actionable manual load.
+
+        Only one error dialog is allowed at a time. The native dialog runs a
+        nested Tk wait, so the interface poll keeps firing while it is open;
+        without this guard a burst of failures (for example a Native DOF failure
+        on every slider move) would stack modal dialogs and leave the window
+        disabled behind them, forcing a hard close.
+        """
+        if getattr(self, "_error_dialog_open", False):
+            self._log(f"{title}: {exc}")
+            return
+        self._error_dialog_open = True
+        try:
+            if isinstance(exc, PreloadUnavailableError) and not self.closed:
+                self._offer_unverified_replay(title, exc)
+            else:
+                self._error(title, exc)
+        finally:
+            self._error_dialog_open = False
 
     def _offer_unverified_replay(self, title, exc):
         text = str(exc) or type(exc).__name__
@@ -3011,6 +3047,9 @@ class DollyApp:
         self.status_text.set("Shot timing and framing are ready.")
 
     def _snapshot(self):
+        still = screenshot_ui.snapshot(self)
+        if still is not None:
+            return still
         self._sync_options()
         candidate = copy.deepcopy(self.project)
         candidate.validate()
@@ -3026,7 +3065,10 @@ class DollyApp:
         return Keyframe(**values)
 
     def _commit_camera(self, keys, select_time=None):
-        self.project = shot_commands.commit_camera(self.project, keys)
+        self._commit_project(shot_commands.commit_camera(self.project, keys), select_time)
+
+    def _commit_project(self, candidate, select_time=None):
+        self.project = candidate
         self._mark_dirty()
         self._refresh_keys(select_time)
         history = getattr(self, "shot_history", None)
@@ -3068,14 +3110,24 @@ class DollyApp:
             return
         index = self._selection_index(self.camera_tree)
         if index is not None and 0 <= index < len(self.project.keyframes):
-            keys = [key for i, key in enumerate(self.project.keyframes) if i != index]
-            selected_time = keys[min(index, len(keys) - 1)].time if keys else None
             def operation():
-                self._commit_camera(keys, selected_time)
-                if not keys:
+                candidate = shot_commands.delete_camera(self.project, index)
+                rebased = index == 0 and bool(candidate.keyframes)
+                selected_time = (candidate.keyframes[min(index, len(candidate.keyframes) - 1)].time
+                                 if candidate.keyframes else None)
+                self._commit_project(candidate, selected_time)
+                if rebased:
+                    # Deleting the leading camera moved the shot start to the
+                    # new first camera; reflect the new anchor and shifted
+                    # effect times.
+                    self.start_tick.set(_number(candidate.start_tick))
+                    self._refresh_tracks()
+                if not candidate.keyframes:
                     self._set_time(0)
                     self.preview_attach = False
-                self.status_text.set(f"Camera {index + 1:02d} deleted. Undo restores it.")
+                self.status_text.set(
+                    f"Camera {index + 1:02d} deleted. The shot now starts at the new first camera."
+                    if rebased else f"Camera {index + 1:02d} deleted. Undo restores it.")
             self._guard("Delete keyframe", operation)
 
     def _select_key(self, _event=None):

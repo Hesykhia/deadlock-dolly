@@ -1,5 +1,106 @@
 # Changes
 
+## 0.6.35 alpha - Every FFmpeg output step runs hidden in a clean environment
+
+**0.6.35-alpha**
+
+- **Every FFmpeg output step runs hidden in a clean environment.** *Before:* assembling a high-resolution still, encoding a Players layer, combining a layer's alpha, muxing clip audio, or encoding a depth preview could flash a console window that stayed open, and in the packaged app FFmpeg could load the editor's bundled libraries. *After:* every FFmpeg call runs hidden with a clean environment, the same way the Players MOV encoder already did.
+
+Full details: [0.6.35 release notes](RELEASE_NOTES_0.6.35-alpha.md).
+
+## 0.6.34 alpha - Native Depth of Field without the game's shader compiler
+
+**0.6.34-alpha**
+
+- **Native Depth of Field works on installs that showed the black checkerboard.** *Before:* applying Native DOF forced the game to recompile its DOF shader, which fails on many installs, so the engine drew its magenta/black error material over the view. *After:* Dolly skips that forced recompile and the engine renders Native DOF from the shader it already ships, so the effect works and the checkerboard is gone.
+
+Full details: [0.6.34 release notes](RELEASE_NOTES_0.6.34-alpha.md).
+
+## 0.6.33 alpha - October 8 hotfix (6766)
+
+**0.6.33-alpha**
+
+- **Works with the October 8 Deadlock hotfix (6766).** *Before:* the updated client changed `client.dll` and `server.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow and Players/Depth work on 6766, and the bundled cvar unlocker is rebuilt for the new server.
+- **A Players layer export no longer leaves a stuck command window.** *Before:* starting a Players layer export could pop up a command window that stayed open, and the encoder could fail if it picked up the wrong libraries. *After:* the bundled encoder runs hidden in its own clean environment and reports a clear error instead of leaving a window open.
+
+Full details: [0.6.33 release notes](RELEASE_NOTES_0.6.33-alpha.md).
+
+## 0.6.32 alpha - The health/ability panel restores after editing
+
+**0.6.32-alpha**
+
+- **The health/ability panel restores after editing.** *Before:* after Stop, Dolly could report the health panel as "pending" and leave the ability panel hidden until you re-selected a hero. *After:* Dolly reads the player-pawn predicate straight from the reviewed pawn vtable, so the panel restores on Stop.
+
+Full details: [0.6.32 release notes](RELEASE_NOTES_0.6.32-alpha.md).
+
+## 0.6.31 alpha - October 8 hotfix (6765) and follow-camera export without the replay HUD
+
+**0.6.31-alpha**
+
+- **Works with the October 8 Deadlock hotfix (6765).** *Before:* the updated client changed `client.dll` and `server.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow and Players/Depth work on 6765, and the bundled cvar unlocker is rebuilt for the new server.
+- **Export a follow camera without turning on the replay HUD.** *Before:* recording a Player POV (follow camera) required pressing F9 and selecting a hero, and starting the export stopped the Game Follow and brought the replay HUD back. *After:* pick a hero with Game Follow (the replay HUD stays hidden) and record or export straight away — the follow keeps running while you record.
+- **Busier fights no longer break a Players capture.** *Before:* a Players layer capture failed with "failed player layer exceeded 64 draws per image; incomplete output rejected" when a frame contained more than 64 player draws. *After:* the per-image budget is doubled to 128 draws, so crowded moments capture completely.
+
+Full details: [0.6.31 release notes](RELEASE_NOTES_0.6.31-alpha.md).
+
+## 0.6.30 alpha - High-resolution stills and a Players fix for the October 7 builds
+
+**0.6.30-alpha**
+
+- **High-resolution stills (plate + players matte + depth).** New: capture a high-resolution still of the paused view from the in-game panel or the desktop Export tab. It records the color plate, a players-only matte and a depth pass; the capture resolution ceiling is raised to 8K.
+- **Players capture works on the October 7 builds.** *Before:* the reviewed scene-system vtable was pinned to the wrong address on 6757/6759 and the 6762/6763 hotfixes, so a Players capture could not resolve the scene. *After:* the CSceneSystem vtable is corrected and Players capture resolves.
+- **Clearer message when a camera is captured before the shot start.** *Before:* capturing a view with the replay positioned before the shot's start failed with "Camera keyframes timestamps must be nonnegative". *After:* Dolly explains the replay is before the shot's start and how to fix it.
+- **The held health panel is surfaced.** *Before:* a health/ability panel that could not be restored after Stop produced no prompt. *After:* Dolly shows the "Restore the game health panel" guidance for every camera backend.
+
+Full details: [0.6.30 release notes](RELEASE_NOTES_0.6.30-alpha.md).
+
+## 0.6.29 alpha - More reliable automatic updates
+
+**0.6.29-alpha**
+
+- **Automatic updates are more reliable.** *Before:* on some installs the update failed with "[WinError 5] Access is denied" while replacing a file, so the update never finished (your previous files were kept). *After:* Dolly clears a read-only attribute left by ZIP extraction, retries the file move briefly, and if Windows still blocks it, explains what to do (move Dolly out of a protected folder such as Downloads, or allow it in Controlled Folder Access) instead of just failing.
+
+Full details: [0.6.29 release notes](RELEASE_NOTES_0.6.29-alpha.md).
+
+## 0.6.28 alpha - Support for the October 7 Deadlock hotfix (6763)
+
+**0.6.28-alpha**
+
+- **Works with the October 7 Deadlock hotfix (6763).** *Before:* the updated client changed `client.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6763, and the bundled cvar unlocker is rebuilt for the new server.
+
+Full details: [0.6.28 release notes](RELEASE_NOTES_0.6.28-alpha.md).
+
+## 0.6.27 alpha - Support for the October 7 Deadlock update (6762)
+
+**0.6.27-alpha**
+
+- **Works with the October 7 Deadlock update (6762).** *Before:* the updated client changed `client.dll`, and Dolly refused the build so the replay editor would not start. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6762, and the bundled cvar unlocker is rebuilt for the new server.
+- **Citadel Depth of Field keeps working after a Native DOF problem.** *Before:* once Native DOF failed on a game install, every depth-of-field control (including Citadel DOF) was blocked and errored. *After:* only the Native DOF pass is held back, and Citadel DOF plus the rest of the editor keep working.
+- **Dolly no longer freezes on a repeated error.** *Before:* a repeated failure (for example moving a DOF slider after a Native DOF error) could stack error dialogs and leave Dolly needing a hard close. *After:* Dolly shows one clear message and stays responsive.
+- **The Native DOF checkerboard guard is more reliable.** *Before:* the guard depended on the exact engine wording for a failed shader compiler, so some installs could still show the magenta/black checkerboard. *After:* the guard recognizes the failure regardless of wording and leaves Native DOF off with an explanation.
+
+Full details: [0.6.27 release notes](RELEASE_NOTES_0.6.27-alpha.md).
+
+## 0.6.26 alpha - Citadel DOF stays usable and error popups stop stacking
+
+**0.6.26-alpha**
+
+- **Citadel Depth of Field keeps working after a Native DOF problem.** *Before:* once Native DOF failed on a game install, every depth-of-field control (including Citadel DOF) was blocked and errored. *After:* only the Native DOF pass is held back, and Citadel DOF plus the rest of the editor keep working.
+- **Dolly no longer freezes on a repeated error.** *Before:* a repeated failure (for example moving a DOF slider after a Native DOF error) could stack error dialogs and leave Dolly needing a hard close. *After:* Dolly shows one clear message and stays responsive.
+- **The Native DOF checkerboard guard is more reliable.** *Before:* the guard depended on the exact engine wording for a failed shader compiler, so some installs could still show the magenta/black checkerboard. *After:* the guard recognizes the failure regardless of wording and leaves Native DOF off with an explanation.
+
+Full details: [0.6.26 release notes](RELEASE_NOTES_0.6.26-alpha.md).
+
+## 0.6.25 alpha - October 6 Deadlock updates and health-panel hardening
+
+**0.6.25-alpha**
+
+- **Works with the October 6 Deadlock updates (6757 and 6759).** *Before:* both October 6 game patches changed the client and server, and Dolly refused the updated client. *After:* native camera, replay startup, Game Follow, the health panel and Players/Depth work on 6757 and 6759, and the console unlocker is rebuilt for each server. Reconstructed clip audio stays disabled until its soundsystem review lands.
+- **Deleting the first camera now starts the shot there.** *Before:* removing the leading camera left the shot anchored to the old start, so a front-end mistake could not be corrected. *After:* the shot rebases onto the new first camera, effects shift with it, and Undo restores the original start.
+- **Export and F9 no longer stall on the health panel.** *Before:* a stale player-predicate value made the health-panel handoff retry for five seconds, so F9 was slow and exports were blocked with a pending-restoration error. *After:* the predicate is corrected, the handoff fails fast instead of retrying, and a cosmetic panel can no longer block export.
+
+Full details: [0.6.25 release notes](RELEASE_NOTES_0.6.25-alpha.md).
+
 ## 0.6.24 alpha - Playback no longer dead-ends on health-panel restoration
 
 **0.6.24-alpha**

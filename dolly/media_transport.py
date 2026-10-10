@@ -8,6 +8,7 @@ import struct
 from copy import deepcopy
 
 from . import media_wire as wire
+from .native_errors import NativeBridgeError
 
 
 class MediaTransport:
@@ -31,7 +32,6 @@ class MediaTransport:
             self._atomic32(ctypes.byref(slot), ctypes.c_int32(value))
 
     def _ensure_media(self):
-        from .native_bridge import NativeBridgeError
         self._check_open()
         if self._media_mapping is not None:
             return
@@ -51,7 +51,6 @@ class MediaTransport:
         self._media_mapping = mapping
 
     def media_status(self):
-        from .native_bridge import NativeBridgeError
         with self._lock:
             if self._media_mapping is None or self._closed:
                 return deepcopy(self._media_last)
@@ -73,7 +72,6 @@ class MediaTransport:
         return self.media_status()
 
     def _media_command(self, command, **options):
-        from .native_bridge import NativeBridgeError
         with self._operations:
             with self._lock:
                 self._ensure_media()
