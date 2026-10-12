@@ -22,7 +22,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from dolly import attach_camera, dialogs, editor_session, gui_layout, player_layer, screenshot_ui, ui_theme
 from .ui import shot_commands
-from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, BINDABLE_ORDER, EDITOR_KEY_CHOICES, EditorBinding, default_action_bindings, validate_action_bindings
+from dolly.editor_actions import ACTION_LABELS, ACTION_ORDER, BINDABLE_ORDER, EDITOR_KEY_CHOICES, OBJECT_PICKER_ENABLED, EditorBinding, default_action_bindings, validate_action_bindings
 from dolly.replays import discover_replays, find_replay_folder, parse_launch_options
 from dolly.bindings import CaptureBinding, DEFAULT_BINDING, KEY_CHOICES
 from dolly.branding import apply_window_icon
@@ -282,6 +282,7 @@ class DollyApp:
         self._take_audit_seen: set[str] = set()
         self._take_audit_reported = False
         self.closed = False
+        self._closing = False
         self.busy = False
         self._error_dialog_open = False
         self.dirty = False
@@ -388,6 +389,9 @@ class DollyApp:
         # after startup and republished by editor_session.configure.
         self.attach_fields = None
         self.preview_attach = False
+        # Object Picker mode: a session-only toggle entered by its bindable key.
+        self.object_picker_open = False
+        self.object_picker_selected = -1
         self.replay_entries = []
         self.binding_action = tk.StringVar()
         self.binding_key = tk.StringVar()
@@ -1608,6 +1612,8 @@ class DollyApp:
         selected = selected or next(iter(self.bindings_tree.selection()), ACTION_ORDER[0])
         self.bindings_tree.delete(*self.bindings_tree.get_children())
         for action in BINDABLE_ORDER:
+            if action == "object_picker" and not OBJECT_PICKER_ENABLED:
+                continue  # WIP integration: hidden and unreachable in releases
             binding = self.app_settings.action_bindings.get(action)
             self.bindings_tree.insert("", "end", iid=action, values=(ACTION_LABELS[action], binding.label if binding else "Unbound"))
         binding = self.app_settings.reshade_binding
@@ -2491,9 +2497,23 @@ class DollyApp:
         self.operations.run(self._operation_failure_kind)
 
     def _operation_failure_kind(self):
-        if getattr(self, "_base_capture", None) is not None:
+        layered = getattr(self, "_base_capture", None) is not None
+        if not layered:
+            return "error"
+        # Only run recording recovery when a capture actually engaged. A layered
+        # run can fail in its preflight (for example the Players disk-space
+        # check) before any recorder or replay work, and there is nothing to
+        # recover then; doing so only delays the error and can confuse state.
+        exporter = getattr(self, "video_export", None)
+        controller = getattr(self, "controller", None)
+        engaged = ((exporter is not None and exporter.status().get("state") in ACTIVE_STATES)
+                   or (controller is not None and controller.status().get("playing"))
+                   or (controller is not None
+                       and getattr(controller, "_recording_replay", None) is not None))
+        if engaged:
             self._recover_export_failure()
             return "export_error"
+        self._clear_layer_pipeline()
         return "error"
 
     def _recover_game_config(self):
@@ -2554,6 +2574,15 @@ class DollyApp:
             elif kind in ("error", "export_error"):
                 self.busy = False
                 self.busy_text.set("")
+                if getattr(self, "_closing", False):
+                    # The user asked to close Dolly and a teardown step (such as
+                    # Stop) failed, often because the game was already closed
+                    # from its own window. Still run the file-level close and
+                    # exit rather than leaving the window open behind an error.
+                    LOG.warning("Close-time failure; finishing the close anyway: %s", payload)
+                    self._log(f"{label}: {payload}")
+                    self._close_after_failure()
+                    return
                 if kind == "export_error":
                     self._clear_layer_pipeline()
                 cancelled = self.startup_cancel is not None and self.startup_cancel.is_set()
@@ -2770,17 +2799,10 @@ class DollyApp:
         on every slider move) would stack modal dialogs and leave the window
         disabled behind them, forcing a hard close.
         """
-        if getattr(self, "_error_dialog_open", False):
-            self._log(f"{title}: {exc}")
-            return
-        self._error_dialog_open = True
-        try:
-            if isinstance(exc, PreloadUnavailableError) and not self.closed:
-                self._offer_unverified_replay(title, exc)
-            else:
-                self._error(title, exc)
-        finally:
-            self._error_dialog_open = False
+        if isinstance(exc, PreloadUnavailableError) and not self.closed:
+            self._error(title, exc, offer_unverified_replay=True)
+        else:
+            self._error(title, exc)
 
     def _offer_unverified_replay(self, title, exc):
         text = str(exc) or type(exc).__name__
@@ -2791,11 +2813,32 @@ class DollyApp:
                                parent=self.root):
             self._load_replay()
 
-    def _error(self, title, exc):
+    def _error(self, title, exc, *, offer_unverified_replay=False):
+        """Show one error dialog at a time; further errors are logged only.
+
+        Every error path funnels through here, so two modal dialogs can never
+        stack. The native dialog disables the owner window while it is open; if a
+        second dialog ran at the same time, the two enable/disable cycles could
+        interleave and leave the main window permanently disabled (which reads as
+        an unclickable, "not responding" Dolly). The dialog is also topmost, so
+        it stays visible over a fullscreen game. When one is already open, or
+        Dolly is closing, the message is only logged and shown in the status.
+        """
         text = str(exc) or type(exc).__name__
         self.status_text.set(text[:240])
         self._log(f"{title}: {text}")
-        dialogs.show_error(self.root, title, text)
+        if self.closed:
+            return
+        if getattr(self, "_error_dialog_open", False):
+            return
+        self._error_dialog_open = True
+        try:
+            if offer_unverified_replay:
+                self._offer_unverified_replay(title, exc)
+            else:
+                dialogs.show_error(self.root, title, text)
+        finally:
+            self._error_dialog_open = False
 
     def _guard(self, title, function):
         if self.busy or self.playing:
@@ -4299,6 +4342,10 @@ class DollyApp:
         if self.busy:
             messagebox.showinfo("Operation in progress", "Wait for the current operation to finish before closing Dolly.", parent=self.root)
             return
+        # Record the user's intent to close now, so a failure in any teardown
+        # step (for example the game already exited) still closes the window
+        # instead of stacking an error dialog behind an unclosable app.
+        self._closing = True
         if self.playing:
             self._submit("Stopping before closing", self.controller.stop, lambda _result: self._finish_close())
         else:
@@ -4307,9 +4354,30 @@ class DollyApp:
     def _finish_close(self):
         self.playing = False
         if not self._allow_discard():
+            # The user chose to keep editing; cancel the pending close intent.
+            self._closing = False
             return
         editor_session.close(self)
         self._submit("Closing replay connection", self.controller.close, lambda _result: self._destroy())
+
+    def _close_after_failure(self):
+        """Finish a requested close after a teardown step failed.
+
+        The controller close restores gameinfo and hands off deployment cleanup;
+        it must still run, but even if it reports a problem the window closes.
+        Run it on the worker when possible and fall back to a direct close so the
+        window can never be left open.
+        """
+        self.playing = False
+        self.busy = False
+        if self._submit("Closing replay connection", self.controller.close,
+                        lambda _result: self._destroy()):
+            return
+        try:
+            self.controller.close()
+        except Exception:  # noqa: BLE001 - the window must close regardless
+            LOG.exception("Ignoring controller close failure while closing the window")
+        self._destroy()
 
     def _destroy(self):
         editor_session.close(self)

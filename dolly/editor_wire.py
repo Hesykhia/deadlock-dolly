@@ -45,6 +45,10 @@ EXTRA_ACTIONS += ("select_camera", "view_camera", "delete_camera", "undo_shot", 
 EXTRA_ACTIONS += ("set_camera_time", "set_camera_roll")
 EXTRA_ACTIONS += ("framing_grid",)
 EXTRA_ACTIONS += ("take_screenshot",)
+# Object Picker actions are appended after every existing action, so the stable
+# action-ID ABI is unchanged. Ids 99+ are reserved for this feature.
+EXTRA_ACTIONS += ("object_picker_open", "object_picker_cancel", "object_place",
+                  "object_select", "object_delete", "object_transform")
 
 CAMERA_LIST_OFFSET = 2 * 1024 * 1024 + 23360
 CAMERA_LIST_COUNT = 32
@@ -57,6 +61,45 @@ FRAMING_GRID_OFFSET = 2 * 1024 * 1024 + 24424
 FRAMING_GRID_ABI = 1
 FRAMING_GRID_MAGIC = b"DLYGRID1"
 FRAMING_GRID = struct.Struct("<8s4I")
+
+# Experimental prop-persistence probe, appended after the object status block in
+# the object page. Offsets must match dolly_editor.hpp exactly.
+OBJECT_CONFIG_BYTES = 32 + 8 + 64 * 40          # EditorObjectConfig
+OBJECT_STATUS_BYTES = 32                          # EditorObjectStatus
+PROP_PROBE_OFFSET = 2 * 1024 * 1024 + 24576 + OBJECT_CONFIG_BYTES + OBJECT_STATUS_BYTES
+PROP_PROBE_ABI = 1
+PROP_PROBE_MAGIC = b"DLYPRP01"
+PROP_PROBE_STATUS_MAGIC = b"DLYPRS01"
+PROP_PROBE_CONFIG = struct.Struct("<8s4I")
+PROP_PROBE_STATUS = struct.Struct("<8s4I" + "I" * 5 + "I" * 3 + "Q" + "Q" + "32s" + "I" * 6)
+# request values
+PROP_PROBE_CREATE = 1
+PROP_PROBE_RECOUNT = 2
+
+
+def pack_prop_probe(sequence, request):
+    if request not in (PROP_PROBE_CREATE, PROP_PROBE_RECOUNT):
+        raise ValueError("Prop probe request must be create or recount")
+    return PROP_PROBE_CONFIG.pack(PROP_PROBE_MAGIC, _uint(sequence, "sequence"),
+                                  PROP_PROBE_ABI, int(request), 0)
+
+
+def unpack_prop_probe_status(data):
+    if len(data) != PROP_PROBE_STATUS.size:
+        raise ValueError("Prop probe status returned the wrong size")
+    if not any(data):
+        return None
+    fields = PROP_PROBE_STATUS.unpack(data)
+    magic, sequence, abi, state, resolved = fields[:5]
+    if magic != PROP_PROBE_STATUS_MAGIC or abi != PROP_PROBE_ABI or sequence & 1:
+        raise ValueError("Prop probe status does not match this build")
+    return {"sequence": sequence, "state": state, "resolved": resolved,
+            "before_count": fields[5], "after_count": fields[6],
+            "entity_handle": fields[7], "calls": fields[8], "error": fields[9],
+            "alive_after_create": fields[10], "alive_after_seek": fields[11],
+            "entity_index": fields[12],
+            "entity_ptr": fields[13], "identity_ptr": fields[14],
+            "entity_class": fields[15].split(b"\0", 1)[0].decode("ascii", "replace")}
 
 
 def pack_framing_grid(sequence, enabled, binding=None):

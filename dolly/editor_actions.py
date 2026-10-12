@@ -21,8 +21,15 @@ ACTION_ORDER = (
 # Actions that are bindable but are not part of the 26-entry wire action table.
 # Their bindings travel in dedicated trailing config fields, so the stable
 # ACTION_ORDER/ID ABI and every extra action ID stay untouched.
-BINDABLE_EXTRA = ("framing_grid",)
+BINDABLE_EXTRA = ("framing_grid", "object_picker")
 BINDABLE_ORDER = ACTION_ORDER + BINDABLE_EXTRA
+# The Object Picker is a work-in-progress integration and must not be reachable
+# in a published build. While this is False the action stays in BINDABLE_ORDER
+# (so existing saved settings still load and the ABI is unchanged) but it is
+# never given a default binding, is hidden from Keybinds, and its binding is
+# never published to the native editor, so its key can never fire. Flip to True
+# to re-enable the feature.
+OBJECT_PICKER_ENABLED = False
 ACTION_IDS = {name: index for index, name in enumerate(ACTION_ORDER)}
 ACTION_LABELS = dict(zip(ACTION_ORDER, (
     "Capture camera", "Replace selected camera", "Pause / resume replay", "Play camera path",
@@ -32,6 +39,7 @@ ACTION_LABELS = dict(zip(ACTION_ORDER, (
     "Move slowly", "Look left", "Look right", "Look up", "Look down", "Roll left", "Roll right",
 )))
 ACTION_LABELS["framing_grid"] = "Toggle framing guide"
+ACTION_LABELS["object_picker"] = "Toggle Object Picker"
 MOVEMENT_ACTIONS = frozenset(ACTION_ORDER[12:])
 MODIFIER_KEYS = {"Ctrl": 0x11, "Alt": 0x12, "Shift": 0x10}
 _EXTRA_KEYS = {**MODIFIER_KEYS, "Comma": 0xBC, "Period": 0xBE,
@@ -100,6 +108,10 @@ def default_action_bindings(capture_binding: CaptureBinding = DEFAULT_BINDING) -
     result["capture"] = EditorBinding.from_dict(capture_binding.to_dict())
     result["replace"] = EditorBinding("R", ctrl=True, alt=True)
     result["framing_grid"] = EditorBinding("G", alt=True)
+    # The Object Picker is its own mode. Plain R is free (only Ctrl+Alt+R is
+    # used, by Replace); the user may rebind it in Keybinds. It is a WIP
+    # integration: while disabled it gets no default so its key cannot fire.
+    result["object_picker"] = EditorBinding("R") if OBJECT_PICKER_ENABLED else None
     return result
 
 
@@ -136,6 +148,11 @@ def validate_action_bindings(bindings: Mapping[str, EditorBinding | CaptureBindi
                 raise ValueError(f"{value.label} is assigned to both {ACTION_LABELS[previous]} and {ACTION_LABELS[name]}. Choose a different binding or clear one.")
             assigned[identity] = name
         result[name] = value
+    # A WIP-disabled Object Picker must never carry a binding, even if one was
+    # saved earlier: force it unbound so its key can never reach the native
+    # editor. The key remains reserved in BINDABLE_ORDER for ABI stability.
+    if not OBJECT_PICKER_ENABLED:
+        result["object_picker"] = None
     return result
 
 

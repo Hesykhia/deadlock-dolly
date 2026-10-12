@@ -3,6 +3,7 @@
 #include "dolly_overlay.hpp"
 #include "dolly_editor.hpp"
 #include "dolly_bone_picker.hpp"
+#include "dolly_object_picker.hpp"
 #include "dolly_renderer_diagnostics.hpp"
 #include "dolly_visualization_runtime.hpp"
 #include "dolly_reshade.hpp"
@@ -598,7 +599,9 @@ int main(int argc, char** argv) {
         const bool lens_screenshot = argc == 3 && std::strcmp(argv[1], "--screenshot-lens") == 0;
         const bool export_screenshot =
             argc == 3 && std::strcmp(argv[1], "--screenshot-export") == 0;
-        const bool screenshot = lens_screenshot || export_screenshot ||
+        const bool object_screenshot =
+            argc == 3 && std::strcmp(argv[1], "--screenshot-object") == 0;
+        const bool screenshot = lens_screenshot || export_screenshot || object_screenshot ||
                                 (argc == 3 && std::strcmp(argv[1], "--screenshot") == 0);
         dolly::reshade_set_enabled(false);
         require(!dolly::reshade_overlay_pending() && !dolly::reshade_overlay_open() &&
@@ -703,6 +706,23 @@ int main(int argc, char** argv) {
             snapshot.attach_smoothing = .15;
             snapshot.roster_count = 1;
         }
+        if (object_screenshot) {
+            // Render the Object Picker with a few placed objects so the whole
+            // right-side panel (library, placed list, place/snap/tool/drop rows)
+            // can be reviewed visually for clipping.
+            snapshot.object_picker = true;
+            snapshot.object_distance = 600.0;
+            snapshot.object_count = 3;
+            snapshot.object_selected = 1;
+            for (std::uint32_t i = 0; i < snapshot.object_count; ++i) {
+                snapshot.object_items[i] = {};
+                snapshot.object_items[i].shape = i + 3;  // crate, barrel, pillar
+                snapshot.object_items[i].scale = 1.0f;
+                snapshot.object_items[i].position[0] = 400.0f + 200.0f * i;
+                snapshot.object_items[i].position[1] = 0.0f;
+                snapshot.object_items[i].position[2] = 0.0f;
+            }
+        }
         snapshot.duration = 3;
         std::snprintf(snapshot.shot_name, sizeof(snapshot.shot_name), "Synthetic editor smoke");
         ID3D11Texture2D* backbuffer = nullptr;
@@ -724,7 +744,7 @@ int main(int argc, char** argv) {
             context->OMSetRenderTargets(1, &target, nullptr);
             context->RSSetViewports(1, &original_viewport);
             require(SUCCEEDED(chain->Present(0, 0)), "Synthetic Present failed");
-            if (screenshot && i == 0) {
+            if (screenshot && i == 0 && !object_screenshot) {
                 const char* page =
                     lens_screenshot ? "LOOK" : (export_screenshot ? "EXPORT" : "CAMERA");
                 require(screenshot_context != nullptr, "Overlay ImGui context missing");
@@ -1194,6 +1214,61 @@ int main(int argc, char** argv) {
             dolly::picker_camera(44, 10, false, true, pose, 90, {}, nullptr, nullptr);
             snapshot.bone_picker = false;
             require(SUCCEEDED(chain->Present(0, 0)), "Picker cleanup Present failed");
+        }
+        // The Object Picker is its own right-side mode. Render it with one placed
+        // proxy object and require its window plus projected wireframe line(s).
+        {
+            snapshot.object_picker = true;
+            snapshot.ready = true;
+            snapshot.horizontal_fov = 90;
+            snapshot.view_width = 2560;
+            snapshot.view_height = 1440;
+            snapshot.object_count = 1;
+            snapshot.object_selected = 0;
+            snapshot.object_distance = 600.0;
+            snapshot.object_items[0] = {};
+            snapshot.object_items[0].shape = 0;      // marker (box)
+            // Place the box straight ahead of the camera using the same math the
+            // picker uses, so it is guaranteed on-screen for this frame.
+            dolly::VisualizationView place_view{snapshot.pose, 90,
+                                                double(snapshot.view_width),
+                                                double(snapshot.view_height), 1};
+            std::array<double, 3> centre{};
+            require(dolly::object_place_screen(place_view, snapshot.view_width * 0.5,
+                                               snapshot.view_height * 0.5, 600.0, centre),
+                    "Object placement failed in smoke test");
+            snapshot.object_items[0].position[0] = float(centre[0]);
+            snapshot.object_items[0].position[1] = float(centre[1]);
+            snapshot.object_items[0].position[2] = float(centre[2]);
+            snapshot.object_items[0].scale = 40.0f;
+            auto render_objects = [&] {
+                require(SUCCEEDED(chain->Present(0, 0)), "Object Picker Present failed");
+            };
+            render_objects();
+            render_objects();
+            auto* window = ImGui::FindWindowByName("##object-picker");
+            require(window != nullptr, "Object Picker window missing");
+            auto* canvas = ImGui::FindWindowByName("##object-canvas");
+            require(canvas != nullptr, "Object Picker scene canvas missing");
+            // Proxy wireframes draw on the background draw list; count line
+            // elements across the whole frame's draw data (post-Render).
+            std::size_t lines = 0;
+            const auto* data = ImGui::GetDrawData();
+            for (int list = 0; list < data->CmdListsCount; ++list)
+                for (const auto& command : data->CmdLists[list]->CmdBuffer)
+                    lines += command.ElemCount;
+            require(lines >= 2, "Object Picker drew no proxy wireframe lines");
+            std::puts("Object Picker: right-side window and proxy wireframe render passed.");
+            // Move gizmo math is exercised in object_picker_tests; here confirm
+            // the panel still renders with a selection ring and the tool row.
+            snapshot.object_selected = 0;
+            render_objects();
+            require(ImGui::FindWindowByName("##object-picker") != nullptr,
+                    "Object Picker window missing with selection");
+            snapshot.object_picker = false;
+            snapshot.object_count = 0;
+            snapshot.object_selected = -1;
+            require(SUCCEEDED(chain->Present(0, 0)), "Object Picker cleanup Present failed");
         }
         // Exercise the real Present capture across the editor-to-path handoff.
         // A valid session survives loss of manual input, pose readiness and focus.

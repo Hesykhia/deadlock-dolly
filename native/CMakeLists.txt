@@ -11,7 +11,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(dolly_path STATIC src/dolly_path.cpp src/dolly_effects.cpp src/dolly_attach.cpp
-    src/dolly_visualization.cpp src/dolly_bone_picker.cpp src/dolly_hero_portrait.cpp)
+    src/dolly_visualization.cpp src/dolly_bone_picker.cpp src/dolly_hero_portrait.cpp
+    src/dolly_object_picker.cpp src/dolly_object_runtime.cpp)
 target_include_directories(dolly_path PUBLIC include)
 if(WIN32)
     target_link_libraries(dolly_path PUBLIC windowscodecs ole32)
@@ -55,6 +56,12 @@ if(BUILD_TESTING)
     add_executable(bone_picker_tests tests/bone_picker_tests.cpp)
     target_link_libraries(bone_picker_tests PRIVATE dolly_path)
     add_test(NAME native_bone_picker_tests COMMAND bone_picker_tests)
+    add_executable(object_picker_tests tests/object_picker_tests.cpp)
+    target_link_libraries(object_picker_tests PRIVATE dolly_path)
+    add_test(NAME native_object_picker_tests COMMAND object_picker_tests)
+    add_executable(object_runtime_tests tests/object_runtime_tests.cpp)
+    target_link_libraries(object_runtime_tests PRIVATE dolly_path)
+    add_test(NAME native_object_runtime_tests COMMAND object_runtime_tests)
     add_executable(hero_portrait_tests tests/hero_portrait_tests.cpp)
     target_link_libraries(hero_portrait_tests PRIVATE dolly_path)
     add_test(NAME native_hero_portrait_tests COMMAND hero_portrait_tests)
@@ -138,6 +145,7 @@ if(WIN32)
         src/dolly_overlay_win.cpp
         src/dolly_overlay_panel.cpp
         src/dolly_bone_picker_ui.cpp
+        src/dolly_object_picker_ui.cpp
         src/dolly_renderer_diagnostics_win.cpp
         src/dolly_video_win.cpp
         src/dolly_reshade_win.cpp
@@ -156,7 +164,7 @@ if(WIN32)
     target_link_libraries(dolly_overlay PUBLIC dolly_path dolly_depth_scene minhook d3d11 dxgi d3dcompiler dwmapi gdi32 mfuuid ole32)
 
     add_library(DollyNative SHARED src/bridge_win.cpp src/dolly_editor_win.cpp
-        src/dolly_confetti.cpp)
+        src/dolly_confetti.cpp src/dolly_prop_runtime.cpp)
     target_include_directories(DollyNative PRIVATE include)
     target_link_libraries(DollyNative PRIVATE dolly_path dolly_overlay minhook bcrypt shell32)
     target_compile_definitions(DollyNative PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -170,7 +178,8 @@ if(WIN32)
         RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_CURRENT_SOURCE_DIR}/bin/win64")
 
     if(BUILD_TESTING)
-        add_executable(bridge_smoke tests/bridge_smoke.cpp src/dolly_confetti.cpp)
+        add_executable(bridge_smoke tests/bridge_smoke.cpp src/dolly_confetti.cpp
+            src/dolly_prop_runtime.cpp)
         target_compile_definitions(bridge_smoke PRIVATE NOMINMAX)
         target_include_directories(bridge_smoke PRIVATE include)
         target_link_libraries(bridge_smoke PRIVATE dolly_path dolly_overlay minhook bcrypt shell32)

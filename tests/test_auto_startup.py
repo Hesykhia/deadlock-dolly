@@ -4,7 +4,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from dolly.controller import Controller, PreloadUnavailableError
 from tests.test_native_flight_controller import configured_controller
@@ -343,6 +343,50 @@ class AutoStartupTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Deadlock closed while waiting for the selected replay"):
             self.controller._startup_wait(lambda: None, "waiting for the selected replay", None)
 
+    def test_replay_recorded_on_this_build_reports_the_file_not_a_mismatch(self):
+        self.controller._session = self.session
+        self.session.process = SimpleNamespace(poll=lambda: 3221225477)
+        self.controller._replay_header = {"name": "cines.dem", "build_num": 10931,
+                                          "map_name": "dl_midtown"}
+        self.controller._game_build = 10931
+        with self.assertRaises(RuntimeError) as caught:
+            self.controller._startup_wait(lambda: None, "waiting for the selected replay", None)
+        message = str(caught.exception)
+        self.assertIn("0xC0000005", message)
+        self.assertIn("recorded on this build", message)
+        self.assertIn("cines.dem", message)
+        self.assertIn("game build 10931", message)
+        self.assertNotIn("cannot reconstruct", message)
+
+    def test_replay_from_a_different_build_keeps_the_mismatch_guidance(self):
+        self.controller._session = self.session
+        self.session.process = SimpleNamespace(poll=lambda: 3221225477)
+        self.controller._replay_header = {"name": "old.dem", "build_num": 10725,
+                                          "map_name": "dl_midtown"}
+        self.controller._game_build = 10931
+        with self.assertRaises(RuntimeError) as caught:
+            self.controller._startup_wait(lambda: None, "waiting for the selected replay", None)
+        message = str(caught.exception)
+        self.assertIn("cannot reconstruct", message)
+        self.assertNotIn("The selected replay was recorded on this build", message)
+
+    def test_installed_build_is_captured_from_the_console_banner(self):
+        self.controller._console = MagicMock()
+        self.controller._console.recent_output.return_value = (
+            'Game: "Deadlock"\r\nMap: "dl_hideout"\r\nBuild: 10931 (revision 11112755)\r\n')
+        self.controller._game_build = None
+        self.controller._startup_evidence = {}
+        self.controller._capture_game_build()
+        self.assertEqual(self.controller._game_build, 10931)
+        self.assertEqual(self.controller._startup_evidence["game_build"], 10931)
+
+    def test_installed_build_is_captured_once(self):
+        self.controller._console = MagicMock()
+        self.controller._console.recent_output.side_effect = AssertionError("must not re-read")
+        self.controller._game_build = 10931
+        self.controller._capture_game_build()
+        self.assertEqual(self.controller._game_build, 10931)
+
     def test_native_rendered_tick_zero_does_not_allow_early_pause(self):
         self.console.goto_outputs.extend([0, 0, 1, 2])
         request = self.console.request
@@ -395,7 +439,57 @@ class AutoStartupTests(unittest.TestCase):
         self.camera_monitor.sample_startup.side_effect = sample
         self.start()
         self.assertEqual(self.camera_monitor.sample_startup.call_count, 4)
+        # A successful handoff keeps the reviewed monitor open for the next shot
+        # preparation; it is closed on disconnect, not after every wait.
+        self.camera_monitor.close.assert_not_called()
+        self.controller.disconnect()
         self.camera_monitor.close.assert_called_once()
+
+    def test_replay_camera_monitor_is_reused_across_shot_preparation(self):
+        def make(*_args, **_kwargs):
+            built = MagicMock()
+            built.identity = {'method': 'test_camera_handoff'}
+            built.memory = object()  # Look like an open monitor.
+            built.sample_startup.return_value = {'coherent': True, 'ready': True}
+            return built
+        with patch('dolly.controller.ReplayCameraMonitor', side_effect=make) as factory:
+            first = self.controller._replay_camera()
+            second = self.controller._replay_camera()
+            self.assertIs(first, second)
+            self.assertEqual(factory.call_count, 1)
+            # A new session must never reuse a monitor bound to the old process.
+            self.controller._session = object()
+            third = self.controller._replay_camera()
+            self.assertIsNot(third, first)
+            self.assertEqual(factory.call_count, 2)
+            first.close.assert_called()
+
+    def test_preshow_accelerates_then_restores_normal_speed_before_pausing(self):
+        # The recorded match intro is played faster through the ordinary packet
+        # path, but the speed is restored to 1x before the caller pauses so the
+        # editor opens at the normal rate. A seek is never used.
+        with patch('dolly.controller.REPLAY_PRESHOW_TIMESCALE', 4.0):
+            self.start()
+        scales = [event for event in self.console.events if event.startswith('demo_timescale ')]
+        self.assertEqual(scales[0], 'demo_timescale 4')
+        self.assertEqual(scales[-1], 'demo_timescale 1')
+        # Speed is raised for the intro, then restored to 1x before the pause so
+        # the editor opens at the normal rate.
+        self.assertLess(self.console.events.index(scales[0]), self.console.events.index(scales[-1]))
+        self.assertLess(self.console.events.index(scales[-1]), self.console.events.index('demo_pause'))
+        self.assertNotIn('demo_gototick', self.console.events)
+
+    def test_preshow_acceleration_is_optional_when_timescale_is_rejected(self):
+        original = self.console.request
+
+        def request(command, *args, **kwargs):
+            if command.startswith('demo_timescale '):
+                raise RuntimeError('timescale rejected')
+            return original(command, *args, **kwargs)
+        self.console.request = request
+        with patch('dolly.controller.REPLAY_PRESHOW_TIMESCALE', 4.0):
+            self.start()  # Must still succeed without the accelerator.
+        self.assertEqual(self.controller.status()['startup_stage'], 'editing_ready')
 
     def test_camera_ready_does_not_pause_before_stock_hud_takeover_ends(self):
         counts = iter((1, 0, 1, 0, 0))
@@ -515,6 +609,31 @@ class AutoStartupTests(unittest.TestCase):
             self.start()
         self.assertNotIn("native.flight", self.console.events)
         self.assertFalse(self.controller.status()["paused_flight"])
+
+    def test_unconfirmed_console_hide_still_proceeds_on_the_dev_flood(self):
+        # A -dev data dump can hide the `help hideconsole` confirmation. Unknown
+        # availability is not a rejection: the explicit command is still issued
+        # and startup reaches the editor (the reported "did not confirm
+        # hideconsole" abort must not happen).
+        self.console.supports = lambda name: None
+        result = self.start()
+        self.assertEqual(result["startup_stage"], "editing_ready")
+        self.assertIn("hideconsole", self.console.events)
+        self.assertLess(self.console.events.index("hideconsole"),
+                        self.console.events.index("native.flight"))
+
+    def test_console_command_available_treats_unknown_as_usable(self):
+        self.controller._console = self.console
+        self.console.supports = lambda name: None
+        self.assertIsNone(self.controller._console_command_available("hideconsole"))
+        self.console.supports = lambda name: False
+        self.assertIs(self.controller._console_command_available("hideconsole"), False)
+        self.console.supports = lambda name: True
+        self.assertIs(self.controller._console_command_available("hideconsole"), True)
+        # A stub without the timeout parameter is still queried safely.
+        self.console.supports = lambda name: name == "hideconsole"
+        self.assertIs(self.controller._console_command_available("hideconsole"), True)
+        self.assertIs(self.controller._console_command_available("absent"), False)
 
     def test_preloaded_replay_refused_before_initialization(self):
         self.controller._session = self.session

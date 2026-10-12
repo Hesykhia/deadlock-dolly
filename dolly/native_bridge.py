@@ -45,7 +45,10 @@ def _intensity_bits(value: float) -> int:
     raw = int(round(float(value) * PARTICLE_INTENSITY_SCALE))
     return max(2, min(PARTICLE_INTENSITY_MASK, raw))
 CONTROL_BYTES = 2 * 1024 * 1024
-MAPPING_BYTES = CONTROL_BYTES + 24576
+# The legacy tail is 24576 bytes (camera list + framing grid). The Object Picker
+# block lives in one appended 4 KiB page after it; keep this in step with
+# dolly_protocol.hpp kMappingBytes and dolly/object_wire.OBJECT_MAPPING_BYTES.
+MAPPING_BYTES = CONTROL_BYTES + 24576 + 4096
 PAYLOAD_OFFSET = 1024
 MAX_PAYLOAD_BYTES = CONTROL_BYTES - PAYLOAD_OFFSET
 CONTROL = struct.Struct("<8s6IQ2I2d512s")
@@ -810,6 +813,35 @@ class NativeBridge(MediaTransport):
             self._store(offset + 8, even)
             self._editor_framing_grid_sequence = even
 
+    def configure_object_picker(self, objects, *, active=False, preview=False, selected=-1,
+                                distance=None, binding=None):
+        """Optional Object Picker block: the placed list and its bindable action.
+
+        The block lives in one appended 4 KiB page (object_wire.OBJECT_BASE); the
+        mapping is sized to include it. ``objects`` is the project's placed list.
+        """
+        from . import object_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_editor_object_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            distance = wire.DISTANCE_DEFAULT if distance is None else distance
+            reserved = 0
+            if binding is not None:
+                reserved = binding.vk | binding.modifiers << 16
+            data = bytearray(wire.pack_config(odd, objects, active=active, preview=preview,
+                                              selected=selected, distance=distance))
+            # Patch the bindable action into the reserved header field (the wire
+            # packer leaves it zero so the layout stays a pure function of state).
+            reserved_offset = wire.OBJECT_CONFIG_HEADER.size - 4
+            struct.pack_into("<I", data, reserved_offset, reserved)
+            offset = wire.OBJECT_CONFIG_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_object_sequence = even
+
     def configure_editor_attach(self, offsets, attach=None, preview=False, snap_request=0, picker=False):
         """Optional attach block: schema offsets plus the selected key's state."""
         from . import editor_wire as wire
@@ -843,6 +875,21 @@ class NativeBridge(MediaTransport):
                     return wire.unpack_picker(data)
             raise NativeBridgeError("The Bone Picker is updating; retry in a moment.")
 
+    def editor_object_status(self):
+        """Optional native Object Picker status; old DLLs leave it unwritten."""
+        from . import object_wire as wire
+        with self._lock:
+            self._check_open()
+            for _ in range(4):
+                first = self._load_sequence(wire.OBJECT_STATUS_OFFSET + 8)
+                if first & 1:
+                    continue
+                data = bytes(self._mapping[wire.OBJECT_STATUS_OFFSET:
+                                           wire.OBJECT_STATUS_OFFSET + wire.OBJECT_STATUS.size])
+                if first == self._load_sequence(wire.OBJECT_STATUS_OFFSET + 8):
+                    return wire.unpack_status(data)
+            raise NativeBridgeError("The Object Picker is updating; retry in a moment.")
+
     def editor_roster(self):
         """Optional native player roster for the attach target picker."""
         from . import editor_wire as wire
@@ -856,6 +903,44 @@ class NativeBridge(MediaTransport):
                 if first != self._load_sequence(wire.ROSTER_OFFSET + 8):
                     continue
                 return wire.unpack_roster(data)
+
+    def set_prop_probe(self, request):
+        """Experimental: queue one native prop-persistence probe request.
+
+        ``request`` is 'create' or 'recount'. This is a probe, not a feature; it
+        is only used by the bounded persistence test harness.
+        """
+        from . import editor_wire as wire
+        code = {"create": wire.PROP_PROBE_CREATE, "recount": wire.PROP_PROBE_RECOUNT}.get(request)
+        if code is None:
+            raise ValueError("Prop probe request must be 'create' or 'recount'")
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_editor_prop_probe_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack_prop_probe(odd, code)
+            offset = wire.PROP_PROBE_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_prop_probe_sequence = even
+
+    def editor_prop_probe_status(self):
+        """Read the native prop-probe result (counts, handle, error)."""
+        from . import editor_wire as wire
+        with self._lock:
+            self._check_open()
+            offset = wire.PROP_PROBE_OFFSET + wire.PROP_PROBE_CONFIG.size
+            for _ in range(4):
+                first = self._load_sequence(offset + 8)
+                if first & 1:
+                    continue
+                data = bytes(self._mapping[offset:offset + wire.PROP_PROBE_STATUS.size])
+                if first == self._load_sequence(offset + 8):
+                    return wire.unpack_prop_probe_status(data)
+            raise NativeBridgeError("The prop probe is updating; retry in a moment.")
+
             raise NativeBridgeError("The native attach roster is busy; retry in a moment.")
 
     def editor_bones(self):

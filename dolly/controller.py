@@ -13,6 +13,7 @@ from dataclasses import asdict
 import json
 import logging
 import math
+import os
 from pathlib import Path
 import re
 import threading
@@ -32,7 +33,8 @@ from .export_timing import ExportTimingMixin
 from .layer_modes import LayerModesMixin
 from .game_ui_handoff import GameUiHandoffMixin, OWN_HEALTH_HUD
 from .paused_flight import PausedFlightMixin, CAMERA_READBACK_INTERVAL
-from .console import ConsoleClient, ConsoleError, ConsoleTimeout, error_text, parse_demo_info, parse_demo_tick
+from .console import (ConsoleClient, ConsoleError, ConsoleTimeout, error_text,
+                      parse_demo_info, parse_demo_tick, parse_game_build)
 from .replays import same_replay_name
 from .demo_packets import packet_index, replay_header
 from .playback import ReplayClock
@@ -89,6 +91,88 @@ def _dof_shader_compile_failed(text):
                for marker in DOF_SHADER_COMPILE_ERRORS)
 
 
+def _diagnostics_destination(destination):
+    """Resolve a writable .zip path without clobbering an existing archive.
+
+    The Export dialog pre-fills ``dolly-diagnostics.zip`` in the user's Downloads
+    folder. On Windows an existing name is not overwritten by ``ZipFile(path, "w")``
+    when the file is still held open (a browser "keep" prompt, antivirus scan, or
+    the user opening the previous archive); that raised a raw
+    ``PermissionError [Errno 13]``. Pick a free numbered name instead, and if the
+    requested name itself is locked fall back in the same directory.
+    """
+    destination = Path(destination)
+    if destination.suffix.lower() != ".zip":
+        destination = destination / ("Dolly_diagnostics_" + time.strftime("%Y%m%d_%H%M%S") + ".zip")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    stem, suffix = destination.stem, destination.suffix
+    candidate, sequence = destination, 2
+    while candidate.exists() or candidate.is_symlink():
+        candidate = destination.with_name(f"{stem}_{sequence}{suffix}")
+        sequence += 1
+    if _writable(candidate):
+        return candidate
+    for sequence in range(2, 1000):
+        alternative = destination.with_name(f"{stem}_{sequence}{suffix}")
+        if alternative.exists() or alternative.is_symlink():
+            continue
+        if _writable(alternative):
+            return alternative
+    return candidate
+
+
+def _writable(path):
+    """True when a new archive can be created at ``path`` (probe then remove)."""
+    try:
+        with open(path, "xb"):
+            pass
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return True
+
+
+def _write_diagnostics_archive(destination, report, history, session_files, session, dumps):
+    """Write the diagnostics ZIP, preferring a free name over a locked one."""
+    destination = _diagnostics_destination(destination)
+    with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("diagnostics.json", json.dumps(report, indent=2, ensure_ascii=False))
+        if history is not None:
+            archive.writestr("logs/recent_console.txt", history)
+        for path in (ROOT / "logs").glob("*.log"):
+            if path.is_file():
+                archive.writestr("logs/" + path.name, _tail_file(path))
+        if session:
+            for name in session_files:
+                file = session.session_dir / name
+                if file.is_file():
+                    archive.writestr("session/" + name, _tail_file(file))
+        # A successful retry must not hide the previous crashed launch.
+        journals = sorted((ROOT / "logs").glob("*/session.json"), key=lambda p: p.parent.name, reverse=True)[:8]
+        for journal in journals:
+            folder = journal.parent
+            if session and folder.resolve() == session.session_dir.resolve():
+                continue
+            for name in session_files:
+                file = folder / name
+                if file.is_file():
+                    archive.writestr("previous_sessions/" + folder.name + "/" + name, _tail_file(file, 512_000))
+        for path in dumps:
+            try:
+                archive.write(path, "crashes/" + path.name)
+            except OSError:
+                continue
+    return destination
+
+
 CAMERA_AXES = ("x", "y", "z")
 CAMERA_SETTLE_INTERVAL = .05
 CAMERA_SETTLE_SAMPLES = 3
@@ -109,6 +193,12 @@ NATIVE_PAUSE_TIMEOUT = 8.0
 # the preload gate, so waiting the full timeout only delays the manual path.
 # After this window the controller stops early and offers that manual load.
 PRELOAD_INTRO_STALL_SECONDS = 45.0
+# A replay's recorded match intro (client game state MatchIntro -> GameInProgress)
+# plays before the stock gameplay camera takes over, at normal 1x. That segment
+# is part of the demo timeline, so ordinary packet-ordered playback at a higher
+# demo_timescale shortens it without a seek, a faked game state or any guard
+# bypass. Dolly restores 1x before pausing for the editor. 1.0 disables it.
+REPLAY_PRESHOW_TIMESCALE = 4.0
 # Live-verified switches for the in-game health-bar toggle. Disabling
 # citadel_unit_status_enabled or citadel_hud_objective_health_enabled while a
 # replay renders hangs the game with a DX11 device error, so those master
@@ -156,6 +246,12 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         self._native_last_status = {}
         self._native_handoff_details = {}
         self._console = None
+        # Reused across the startup and per-shot replay-camera handoff checks.
+        # The reviewed monitor opens a read-only process handle and re-verifies
+        # the installed client on construction; reusing it for the same live
+        # session removes that repeated work without changing any gate.
+        self._replay_camera_monitor = None
+        self._replay_camera_session = None
         self._protocol = "netcon"
         self._port = 29090
         self._demo = None
@@ -198,6 +294,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         self._replay_recovery_active = False
         self._replay_recovery = {}
         self._replay_header = {}
+        self._game_build = None
         self._recording_replay = None
         self._recording_pending = False
         self._stop_event = threading.Event()
@@ -268,8 +365,11 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         The console socket is closed by the operating system when Deadlock
         crashes, so a raw WinError 10054 hides the real event. A replay that
         cannot be reconstructed by the installed build fatals the game during
-        demo load; report the crash and the likely cause instead. The recorded
-        map/build from the replay header is included when it was read.
+        demo load; report the crash and the likely cause instead. When the
+        replay was recorded on the installed build (verifiable from the game's
+        console banner) the file itself is the problem, so the wording does not
+        suggest a build mismatch. The recorded map/build from the replay header
+        is included when it was read.
         """
         exit_code = self._session.process.poll() if self._session else None
         if exit_code is None:
@@ -281,13 +381,21 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         if context == "waiting for the game console" and not self._replay_requested:
             return (f"{reason} while {context}. The game exited before the selected replay "
                     "was loaded. Inspect the startup error or game dump before retrying.")
-        message = (f"{reason} while {context}. A replay that this game build cannot "
-                   "reconstruct (for example an incompatible or incomplete .dem) can fatal Deadlock as soon as "
-                   "it starts playing. Try the latest replay recorded on this build, then launch again through Dolly.")
         header = self._replay_header
+        recorded_build = header.get("build_num")
+        if (recorded_build is not None and self._game_build is not None
+                and recorded_build == self._game_build):
+            message = (f"{reason} while {context}. The selected replay was recorded on this build "
+                       f"({self._game_build}), so the .dem itself is likely incomplete or from a match whose "
+                       "content this build does not include (for example a private or experimental recording). "
+                       "Try another replay, or re-record it on this install, then launch again through Dolly.")
+        else:
+            message = (f"{reason} while {context}. A replay that this game build cannot "
+                       "reconstruct (for example an incompatible or incomplete .dem) can fatal Deadlock as soon as "
+                       "it starts playing. Try the latest replay recorded on this build, then launch again through Dolly.")
         details = ", ".join(str(part) for part in (
             header.get("name"),
-            f"recorded on game build {header['build_num']}" if header.get("build_num") is not None else None,
+            f"recorded on game build {recorded_build}" if recorded_build is not None else None,
             f"map {header['map_name']}" if header.get("map_name") else None) if part)
         if details:
             message += f" Selected replay: {details}."
@@ -482,6 +590,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             self._startup_evidence = {}
             self._replay_requested = False
             self._replay_header = {}
+            self._game_build = None
             with self._state_lock:
                 self._state.update(time=0.0, tick=None)
             self._message("Deadlock launched with -dev -insecure. Wait until the hideout is fully loaded, then Connect and Initialize unlocker. The replay has not been loaded.", startup_stage="waiting_hideout")
@@ -504,6 +613,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                 console.connect(host="127.0.0.1", port=self._port, timeout=3)
                 self._console = console
                 self._request("echo DOLLY_CONNECTION_READY")
+                self._capture_game_build()
             except Exception:
                 console.close()
                 self._console = None
@@ -543,8 +653,26 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             if result is not None and result is not False:
                 return result
             if time.perf_counter() >= deadline:
-                raise RuntimeError("Timed out " + label + ". The replay was not marked ready. Use the manual startup controls or export diagnostics.")
+                raise RuntimeError(
+                    f"Timed out after {timeout:g}s " + label
+                    + ". The replay was not marked ready. Use the manual startup controls, or export "
+                      "diagnostics to inspect the last recorded startup stage.")
             waiter.wait(.25)
+
+    def _console_command_available(self, name, timeout=2.0):
+        """Tri-state availability of a console name: True, False, or None.
+
+        None means the console could not confirm the name (a -dev data dump
+        delays the echo, or the log overflowed). That is not evidence the name
+        is missing, so startup-critical callers must treat None as usable and
+        let the command's own completion/ack decide, instead of aborting.
+        """
+        try:
+            return self._console.supports(name, timeout)
+        except TypeError:
+            # A legacy/stub console without the timeout parameter; treat an
+            # explicit rejection as False and any other result as confirmed.
+            return self._console.supports(name)
 
     def _automatic_hideout_check(self, initial_frame):
         """Require a rendered pre-replay scene and loaded command registration.
@@ -553,6 +681,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         loading. Require settled engine status as well as rendered frames;
         neither an open socket nor an early view callback proves readiness.
         """
+        self._capture_game_build()
         output = self._request("demo_info", allow_error=True, allow_truncated=True)
         try:
             demo = parse_demo_info(output)
@@ -584,9 +713,12 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             evidence = settled
         else:
             evidence["settled_status"] = settled
-        if not self._console.supports("cvar_unhide"):
+        available = self._console_command_available("cvar_unhide")
+        if available is False:
             return None
-        evidence["unlocker_command_registered"] = True
+        # None means the flood hid the confirmation; the unlocker step still
+        # verifies completion patterns before the replay is allowed to load.
+        evidence["unlocker_command_registered"] = available is True
         return evidence
 
     @staticmethod
@@ -729,14 +861,63 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         self._message("Map and shader preload complete. Opening your selected replay…",
                       startup_stage="preload_ready")
 
+    def _replay_camera(self):
+        """Reused replay-camera monitor for the current owned session.
+
+        The monitor is read-only and bound to one session process; reusing it
+        avoids reopening a process handle and re-verifying the installed client
+        on every shot preparation. A new session (or a closed monitor) builds a
+        fresh one, so a stale handle can never be used.
+        """
+        session = self._session
+        monitor = self._replay_camera_monitor
+        if (monitor is not None and self._replay_camera_session is session
+                and getattr(monitor, "memory", None) is not None):
+            return monitor
+        if monitor is not None:
+            try:
+                monitor.close()
+            except Exception:  # noqa: BLE001 - a stale monitor must never block a fresh one
+                LOG.warning("Could not close the previous replay-camera monitor", exc_info=True)
+        monitor = ReplayCameraMonitor(session)
+        self._replay_camera_monitor = monitor
+        self._replay_camera_session = session
+        return monitor
+
+    def _release_replay_camera(self):
+        monitor, self._replay_camera_monitor = self._replay_camera_monitor, None
+        self._replay_camera_session = None
+        if monitor is not None:
+            try:
+                monitor.close()
+            except Exception:  # noqa: BLE001 - teardown must not raise
+                LOG.warning("Could not close the replay-camera monitor", exc_info=True)
+
     def _wait_replay_camera(self, bridge, cancel_event):
-        """Wait for the stock camera and HUD after the first full replay packet."""
-        monitor = ReplayCameraMonitor(self._session)
+        """Wait for the stock camera and HUD after the first full replay packet.
+
+        While the recorded match intro is still playing, Dolly raises the demo
+        timescale so the ordinary packet-ordered playback reaches gameplay
+        sooner. This is not a seek or a faked state; the same frames play in the
+        same order. The speed is always restored to 1x before returning, so the
+        caller pauses for the editor at the normal rate.
+        """
+        monitor = self._replay_camera()
         previous_ready = None
+        accelerated = False
         try:
             self._startup_evidence['replay_camera_identity'] = monitor.identity
             self._message("Waiting for the replay intro and HUD to finish…",
                           startup_stage="waiting_replay_camera")
+            if REPLAY_PRESHOW_TIMESCALE > 1.0:
+                request = getattr(self, "_request", None)
+                if callable(request):
+                    try:
+                        request("demo_timescale " + numeric(REPLAY_PRESHOW_TIMESCALE))
+                        accelerated = True
+                        self._startup_evidence["preshow_timescale"] = REPLAY_PRESHOW_TIMESCALE
+                    except Exception:  # noqa: BLE001 - the accelerator is optional
+                        LOG.info("Replay pre-show acceleration was unavailable", exc_info=True)
 
             def ready():
                 nonlocal previous_ready
@@ -757,8 +938,17 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
 
             self._startup_wait(ready, "waiting for the replay intro and HUD to finish",
                                cancel_event, timeout=90)
+        except BaseException:
+            # A failed handoff must not leave a half-initialized monitor for the
+            # next attempt; a successful wait keeps it for the next shot prep.
+            self._release_replay_camera()
+            raise
         finally:
-            monitor.close()
+            if accelerated:
+                try:
+                    self._request("demo_timescale 1")
+                except Exception:  # noqa: BLE001 - a stopped replay has nothing to reset
+                    LOG.info("Could not restore the replay timescale after the pre-show", exc_info=True)
 
     def start_editing(self, game_path, demo_path, protocol="netcon", native=True,
                       launch_options="", cancel_event=None, graphics_profile=""):
@@ -950,6 +1140,25 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             LOG.info("Replay header: %s", header)
         return header
 
+    def _capture_game_build(self):
+        """Record the installed build the engine announced on its console.
+
+        The engine prints ``Build: <n> (revision <n>)`` when the client joins its
+        local server, and a replay header stores that same number. Captured
+        once, read-only, from the console history; never changes game state.
+        """
+        if self._game_build is not None or not self._console:
+            return
+        try:
+            history = self._console.recent_output(limit_bytes=1 << 20)
+        except Exception as exc:  # noqa: BLE001 - best-effort support context
+            LOG.debug("Could not read console history for the game build: %s", exc)
+            return
+        build = parse_game_build(history)
+        if build is not None:
+            self._game_build = build
+            self._startup_evidence["game_build"] = build
+
     def load_replay(self):
         with self._op_lock:
             self._require_unlocker()
@@ -958,6 +1167,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             path = launcher._validate_demo(self._demo)
             if path is None:
                 raise RuntimeError("No replay was selected for this launch.")
+            self._capture_game_build()
             self._remember_replay_header(path)
             # Source commands use forward slashes; _validate_demo rejects quotes,
             # separators and line breaks before this trusted quoted argument.
@@ -1027,7 +1237,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                 (self._game_ui_restore and not self._health_panel_held(require_full_hud=False)) or
                 self._replay_hud_restore or self._demo_speed_changed):
             raise RuntimeError("Use Stop / restore to restore pending settings before replay recovery.")
-        if not self._console.supports("disconnect"):
+        if self._console_command_available("disconnect") is False:
             raise RuntimeError("This game does not expose replay disconnect; recovery was not attempted.")
         previous_probe = deepcopy(self._probe_result)
         session = self._session
@@ -1499,7 +1709,8 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                     except ValueError:
                         capabilities[name] = False
                 else:
-                    capabilities[name] = self._console.supports(name)
+                    available = self._console_command_available(name)
+                    capabilities[name] = available is not False
             self._probe_result = {"version": __version__, "capabilities": capabilities, "demo": info,
                                   "live_tick_available": info.get("tick") is not None,
                                   "camera_effect_verified": False,
@@ -2616,16 +2827,33 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                 # for the actual command, including a delayed close operation.
                 editor_configure(owner="console")
             command = "showconsole" if enabled else "hideconsole"
-            if self._console.supports(command):
-                self._request(command)
-            elif self._console_open == enabled:
-                if not enabled and callable(editor_configure):
-                    editor_configure(owner=return_owner)
-                return self.status()
-            elif self._console_open is not None and self._console.supports("toggleconsole"):
-                self._request("toggleconsole")
+            available = self._console_command_available(command)
+            if available is False:
+                # The game explicitly rejected this name. Fall back only when a
+                # blind toggle can still reach the requested state; otherwise
+                # refuse rather than leave console visibility unknown.
+                if self._console_open == enabled:
+                    if not enabled and callable(editor_configure):
+                        editor_configure(owner=return_owner)
+                    return self.status()
+                if self._console_open is not None and self._console_command_available("toggleconsole"):
+                    self._request("toggleconsole")
+                else:
+                    raise RuntimeError("This game build does not support " + command
+                                       + "; the console's current visibility is unknown. Console access was not changed.")
             else:
-                raise RuntimeError("This game build did not confirm " + command + "; the console's current visibility is unknown. Console access was not changed.")
+                # Confirmed, or the flood/stall hid the confirmation: issue the
+                # explicit command. Unknown availability is not a rejection. A
+                # -dev preload stall can delay the echo well past a normal
+                # window, and this visibility command is cosmetic (the editor
+                # already suspends input), so a delayed acknowledgement must not
+                # abort startup; visibility is re-checked before the editor.
+                try:
+                    self._request(command, timeout=8, allow_error=True)
+                except ConsoleTimeout:
+                    LOG.warning("Console command %r was not acknowledged within the "
+                                "window; console visibility will be re-checked before "
+                                "the editor opens.", command)
             self._console_open = enabled
             if not enabled and callable(editor_configure):
                 editor_configure(owner=return_owner)
@@ -3215,7 +3443,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                 self._request("demo_pause")
                 pause_confirmed = True
                 stable = 0
-            if target < observed <= target + 2:
+            if target < observed <= target + 4:
                 overshoot_samples = overshoot_samples + 1 if observed == overshoot_tick else 1
                 overshoot_tick = observed
             else:
@@ -3255,7 +3483,8 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                                            "actual_tick": undershoot_tick,
                                            "reason": "recorded_packet"})
             if overshoot_samples >= SEEK_SETTLE_SAMPLES and not corrections:
-                # Native forward seeks can stop two ticks late. Reissuing the
+                # Native forward seeks can stop up to four ticks late (6774:
+                # request15301 settled at15305). Reissuing the
                 # SAME target from there takes the backward-seek route. Do not
                 # react to a transient ahead sample or chase an unrelated seek.
                 self._check_position_cancelled()
@@ -4124,15 +4353,35 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             self._message(restoration_error, playing=False)
 
     def disconnect(self):
+        """Tear the session down; never let a closed game block the disconnect.
+
+        Deadlock can be closed from its own window at any time. In-console
+        restores are impossible once the process is gone, and the previous
+        implementation raised "Launch the local replay from Dolly first" from the
+        Stop/restore helpers, which aborted the whole disconnect. That left Dolly
+        unclosable after the game had already exited. The file-level restoration
+        and deployment cleanup are owned by ``close()``; here every in-console
+        step is best-effort so the editor can always return to a clean state.
+        """
         self._recording_replay = None
         self._recording_pending = False
+        self._release_replay_camera()
         bridge = self._native_bridge()
         close_media = getattr(bridge, "_close_media", None)
         if callable(close_media):
-            close_media()
+            try:
+                close_media()
+            except Exception:  # noqa: BLE001 - media cleanup is best-effort on disconnect
+                LOG.warning("Could not close native media during disconnect", exc_info=True)
         if self._healthbar_restore and self._console and self._console.is_connected and self._alive():
-            self._restore_healthbar_values()
-        self.stop()
+            try:
+                self._restore_healthbar_values()
+            except Exception:  # noqa: BLE001 - the game may have closed mid-restore
+                LOG.warning("Could not restore healthbar values during disconnect", exc_info=True)
+        try:
+            self.stop()
+        except Exception as exc:  # noqa: BLE001 - a closed game must not block disconnect
+            LOG.warning("Stop/restore during disconnect remains pending: %s", exc)
         self.clear_export_resolution()
         dof_error = self._restore_dof_shader_settings()
         if self._console:
@@ -4194,9 +4443,6 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
         session_files = ("session.json", "launch.log", "game_stdout.log",
                          "native_diagnostics.json", "graphics-session.json", "graphics-runtime.json") + DIAGNOSTIC_NAMES
         destination = Path(destination)
-        if destination.suffix.lower() != ".zip":
-            destination = destination / ("Dolly_diagnostics_" + time.strftime("%Y%m%d_%H%M%S") + ".zip")
-        destination.parent.mkdir(parents=True, exist_ok=True)
         report = {"version": __version__, "state": self.status(), "protocol": self._protocol,
                   "motion_clock": motion_clock_info(),
                   "launch_attempt": self._launch_attempt,
@@ -4228,6 +4474,7 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
                   "paused_camera": deepcopy(self._paused_details),
                   "local_demo_name": self._demo.name if self._demo else None,
                   "replay_header": dict(self._replay_header),
+                  "game_build": self._game_build,
                   "replay_tick_rate": self.replay_tick_rate(),
                   "runtime_verified_in_Deadlock": False}
         bridge = self._native_bridge()
@@ -4252,33 +4499,8 @@ class Controller(LayerModesMixin, ExportTimingMixin, PausedFlightMixin, GameUiHa
             except OSError:
                 continue
         report["crash_dumps"] = [{"name": path.name, "bytes": path.stat().st_size} for path in dumps]
-        with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("diagnostics.json", json.dumps(report, indent=2, ensure_ascii=False))
-            if history is not None:
-                archive.writestr("logs/recent_console.txt", history)
-            for path in (ROOT / "logs").glob("*.log"):
-                if path.is_file():
-                    archive.writestr("logs/" + path.name, _tail_file(path))
-            if self._session:
-                for name in session_files:
-                    file = self._session.session_dir / name
-                    if file.is_file():
-                        archive.writestr("session/" + name, _tail_file(file))
-            # A successful retry must not hide the previous crashed launch.
-            journals = sorted((ROOT / "logs").glob("*/session.json"), key=lambda p: p.parent.name, reverse=True)[:8]
-            for journal in journals:
-                folder = journal.parent
-                if self._session and folder.resolve() == self._session.session_dir.resolve():
-                    continue
-                for name in session_files:
-                    file = folder / name
-                    if file.is_file():
-                        archive.writestr("previous_sessions/" + folder.name + "/" + name, _tail_file(file, 512_000))
-            for path in dumps:
-                try:
-                    archive.write(path, "crashes/" + path.name)
-                except OSError:
-                    continue
+        destination = _write_diagnostics_archive(destination, report, history, session_files,
+                                                 self._session, dumps)
         self._message("Diagnostics exported to " + str(destination))
         return destination
 

@@ -1,10 +1,57 @@
 # Changes
 
-## 0.6.35 alpha - Every FFmpeg output step runs hidden in a clean environment
+## 0.6.43-alpha
+
+- **Correct crash guidance for unplayable replays.** *Before:* a replay that fataled Deadlock while it loaded always got "Try the latest replay recorded on this build", even when it was recorded on the installed build. *After:* Dolly compares the replay's recorded build with the installed build (read from the game console) and only blames a build mismatch when there is one; otherwise it points at the recording itself. The installed build is also recorded in diagnostics.
+
+## 0.6.42-alpha
+
+- **Dolly can be closed after the game is closed.** *Before:* closing Deadlock from its own window and then closing Dolly showed "Launch the local replay from Dolly first" and left Dolly stuck open. *After:* Dolly closes cleanly, while still restoring its temporary game changes and removing its temporary plugin files.
+
+## 0.6.41-alpha
+
+- **You can see Dolly updating.** *Before:* installing an update closed the editor and replaced files with no window, then the relaunch briefly painted a window, which looked like random flashing. *After:* one steady "Updating Dolly" window stays on screen through install, verification and relaunch, and shows the failure inline instead of a separate pop-up.
+- **A failed Players/Depth export no longer freezes Dolly.** *Before:* requesting a Players and a Depth layer together with too little disk space could leave the main window unresponsive and the error behind the game. *After:* one dialog, a clickable window, and a clean state; a preflight failure no longer runs recording recovery.
+- **Clearer Players disk-space message.** Now names the shortfall and that the Players layer stores every frame uncompressed.
+
+## 0.6.40-alpha
+
+- **The replay intro before you edit is much shorter.** *Before:* after loading a replay, Dolly waited for the recording's own match-intro camera at normal speed, about ten seconds every time you prepared a shot. *After:* that intro plays at speed through the ordinary replay path and normal speed is restored before the editor opens. Nothing is seeked or skipped.
+- **Less repeated work when opening and preparing a session.** *Before:* the large game module was re-read and re-verified for every check, and the replay-camera check was rebuilt each time. *After:* verification is cached and the replay-camera check is reused for the session.
+- **Clearer startup timeouts.** *Before:* a timed-out startup step said only that it timed out. *After:* the message names how long it waited and points at diagnostics.
+- **Lighter idle while paused.** *Before:* the paused-replay memory watchdog sampled the game several times a second. *After:* it samples every few seconds.
+
+## 0.6.39-alpha
+
+- **Large exports wait as long as the encoder does.** *Before:* the desktop wait for finalization gave up after 30 seconds, so a big or drop-heavy take could report "The video recorder is still finishing" while the MP4 was still being written. *After:* the wait matches the native encoder's own 120-second finalization budget.
+- **Export diagnostics no longer fails on an existing archive.** *Before:* reusing the prefilled `dolly-diagnostics.zip` name while the previous archive was still open raised a raw `[Errno 13] Permission denied`. *After:* Dolly picks a free numbered filename and never overwrites an archive you still have open.
+
+## 0.6.38-alpha
+
+- **Startup survives the developer console flood.** *Before:* on a `-dev` build the engine's hidden-cvar dump could delay the `hideconsole` check past its window, and Dolly aborted with "This game build did not confirm hideconsole" before the replay opened. *After:* an unconfirmed console check is treated as unknown, not rejected, so startup continues.
+- **Console availability checks report unknown instead of false.** *Before:* a probe that could not be completed looked the same as an explicit "unknown command". *After:* only an explicit rejection counts as missing; an unconfirmed check no longer blocks hideout readiness, replay recovery, camera support or the console toggle.
+
+## 0.6.37-alpha
+
+- Support Deadlock build 6774 with reviewed client profiles and an updated exact-build unlocker.
+- Recover confirmed replay seeks that stop up to four ticks late, retaining one correction, cancellation, the existing deadline and exact-target verification.
+
+## 0.6.36 alpha - Fresh package version for the October 9 update
+
+**0.6.36-alpha**
+
+- **Distinct update version.** *Before:* the 6769 compatibility package reused the already-published 0.6.35 version. *After:* the package and updater identify this build as 0.6.36-alpha. It includes the same reviewed 6769 compatibility, hero mappings, Hyperline handling and FFmpeg fixes.
+
+Full details: [0.6.36 release notes](RELEASE_NOTES_0.6.36-alpha.md).
+
+## 0.6.35 alpha - October 9 update compatibility
 
 **0.6.35-alpha**
 
-- **Every FFmpeg output step runs hidden in a clean environment.** *Before:* assembling a high-resolution still, encoding a Players layer, combining a layer's alpha, muxing clip audio, or encoding a depth preview could flash a console window that stayed open, and in the packaged app FFmpeg could load the editor's bundled libraries. *After:* every FFmpeg call runs hidden with a clean environment, the same way the Players MOV encoder already did.
+- **October 9 update support (6769).** *Before:* Dolly refused the updated game modules. *After:* reviewed compatibility profiles and a rebuilt unlocker allow replay startup and camera editing on 6769.
+- **Current hero names and portraits.** *Before:* Baba, Solomon and Rat King were missing from Dolly's hero mappings. *After:* their names and portrait paths match the installed game assets.
+- **Hyperline mounts survive editor startup.** *Before:* Dolly's temporary editing configuration could omit Hyperline content mounts. *After:* those mounts are carried into the editing session, with verified configuration replacement and recovery.
+- **Hidden FFmpeg output steps.** *Before:* still assembly, Players/layer encoding, audio muxing and depth previews could open console windows or inherit the editor's DLL search path. *After:* these FFmpeg steps run hidden in a clean environment.
 
 Full details: [0.6.35 release notes](RELEASE_NOTES_0.6.35-alpha.md).
 

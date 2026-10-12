@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from dolly.console import (ConsoleClient, ConsoleError, ConsoleTimeout,
                            VConsoleDecoder, encode_command, error_text,
-                           parse_demo_info, parse_demo_tick)
+                           parse_demo_info, parse_demo_tick, parse_game_build)
 
 
 def print_packet(text):
@@ -293,12 +293,36 @@ class ConsoleTests(unittest.TestCase):
             client.close()
             peer.close()
 
-    def test_supports_returns_false_on_a_flooded_console(self):
+    def test_supports_returns_unknown_on_a_flooded_console(self):
+        # A flood that swallows the help text is "unknown", never a rejection:
+        # the caller must not treat it as a missing command.
         peer = Peer("netcon", responses={"help cvar_unhide": "y" * 4096})
         client = ConsoleClient("netcon", max_response_bytes=1024)
         try:
             client.connect(port=peer.port)
-            self.assertFalse(client.supports("cvar_unhide", timeout=3))
+            self.assertIsNone(client.supports("cvar_unhide", timeout=3))
+        finally:
+            client.close()
+            peer.close()
+
+    def test_supports_confirms_when_the_flood_tail_keeps_the_help(self):
+        # The bounded tail can still carry a real help line printed after the
+        # flood, so a positive confirmation survives the developer dump.
+        peer = Peer("netcon", responses={"help cvar_unhide": ("j" * 3000) + "\ncvar_unhide\n"})
+        client = ConsoleClient("netcon", max_response_bytes=1024)
+        try:
+            client.connect(port=peer.port)
+            self.assertTrue(client.supports("cvar_unhide", timeout=5))
+        finally:
+            client.close()
+            peer.close()
+
+    def test_supports_is_unknown_when_no_response_arrives(self):
+        peer = Peer("netcon", silent=True)
+        client = ConsoleClient("netcon")
+        try:
+            client.connect(port=peer.port)
+            self.assertIsNone(client.supports("hideconsole", timeout=1))
         finally:
             client.close()
             peer.close()
@@ -518,6 +542,23 @@ class ParsingTests(unittest.TestCase):
         data = parse_demo_tick(output + output.replace('playing 50', 'playing 51'))
         self.assertEqual(data["tick"], 51)
         self.assertIsNone(data["paused"])
+
+    def test_installed_game_build_reads_the_console_banner(self):
+        banner = ('Game: "Deadlock"\r\nMap: "dl_hideout"\r\n'
+                  'Players: 1 (0 bots) / 31 humans\r\n'
+                  'Build: 10931 (revision 11112755)\r\n')
+        self.assertEqual(parse_game_build(banner), 10931)
+        # A later banner (client reconnected) supersedes the earlier one.
+        self.assertEqual(parse_game_build(banner + 'Build: 11000 (revision 1)\n'), 11000)
+        # ANSI colour codes around the banner do not hide it.
+        self.assertEqual(parse_game_build('\x1b[32mBuild: 10931 (revision 11112755)\x1b[0m\n'), 10931)
+
+    def test_game_build_is_unknown_without_a_complete_banner(self):
+        for output in ("Build: 10931\n", "Build: (revision 5)\n",
+                       "revision 11112755\n", "no build banner here\n", ""):
+            with self.subTest(output=output):
+                self.assertIsNone(parse_game_build(output))
+        self.assertIsNone(parse_game_build(None))
 
     def test_source_backed_demo_formats(self):
         data = parse_demo_info("[Engine] Playing back demo: 'replays/match.dem' at tick 555\n")

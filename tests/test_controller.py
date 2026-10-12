@@ -260,6 +260,25 @@ class ControllerTests(unittest.TestCase):
             self.controller._require_demo()
         self.assertEqual(self.console.requests, [])
 
+    def test_disconnect_tolerates_a_game_that_already_closed(self):
+        # The user can close Deadlock from its own window, then close Dolly.
+        # Every in-console restore is impossible then, but disconnect must not
+        # raise: previously it aborted with "Launch the local replay from Dolly
+        # first", which left Dolly unclosable.
+        self.controller._replay_hud_restore = {"citadel_hud_visible": 1}
+        self.controller._replay_hud_session = self.controller._session
+        self.controller._game_ui_restore = {"citadel_hide_replay_hud": 0}
+        self.process.poll = lambda: 0  # The game has exited.
+        self.controller.disconnect()  # Must not raise.
+        self.assertIsNone(self.controller._console)
+
+    def test_close_completes_when_the_game_already_exited(self):
+        self.process.poll = lambda: 0
+        self.controller._session.handoff_cleanup = MagicMock()
+        self.controller.close()  # Must not raise.
+        self.controller._session.restore_gameinfo.assert_called_once()
+        self.controller._session.handoff_cleanup.assert_called_once()
+
     def test_native_dof_enables_dynamic_shader_compile_and_restores_on_disconnect(self):
         self.console.values["mat_disable_dynamic_shader_compile"] = 1.0
         project = make_project()
@@ -1661,6 +1680,29 @@ class ControllerTests(unittest.TestCase):
                                  b"failed incomplete sequence")
                 self.assertFalse(any("original.gameinfo.gi" in name for name in archive.namelist()))
                 self.assertFalse(any("previous_sessions/" + current.name in name for name in archive.namelist()))
+
+    def test_diagnostics_export_skips_an_existing_or_locked_archive(self):
+        # A prefilled dolly-diagnostics.zip in Downloads must not be overwritten:
+        # Windows raises PermissionError when it is still held open, which used
+        # to surface as a raw [Errno 13]. The export must pick a free name.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "dolly-diagnostics.zip"
+            existing.write_bytes(b"previous archive the user still has open")
+            output = self.controller.export_diagnostics(existing)
+            self.assertNotEqual(output, existing)
+            self.assertEqual(output.name, "dolly-diagnostics_2.zip")
+            self.assertTrue(output.is_file())
+            self.assertEqual(existing.read_bytes(), b"previous archive the user still has open")
+
+    def test_diagnostics_export_suffixless_path_gets_a_timestamped_zip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = self.controller.export_diagnostics(root)
+            self.assertEqual(output.suffix.lower(), ".zip")
+            self.assertTrue(output.is_file())
+            with zipfile.ZipFile(output) as archive:
+                self.assertIn("diagnostics.json", archive.namelist())
 
 
 class CameraParsingTests(unittest.TestCase):
