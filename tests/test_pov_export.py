@@ -51,6 +51,18 @@ class PovControllerTests(unittest.TestCase):
             c.prepare_pov_recording(self.project)
         c.stop.assert_not_called()
 
+    def test_active_game_follow_exports_pov_without_f9_or_teardown(self):
+        c = self.controller
+        c._game_ui_visible = False
+        c._follow_active = True
+        c.prepare_pov_recording(self.project)
+        # The roster-selected follow already owns the camera with the HUD
+        # hidden; Stop would tear the rig down and reveal the replay UI.
+        c.stop.assert_not_called()
+        c._hide_game_ui.assert_called_once()
+        self.assertTrue(c._pov_active)
+        self.assertEqual(c._recording_replay[2], 100)
+
     def test_failed_hud_hide_restores_and_does_not_reserve_recording(self):
         c = self.controller
         c._hide_game_ui.side_effect = RuntimeError("HUD readback failed")
@@ -107,6 +119,21 @@ class PovControllerTests(unittest.TestCase):
                          ["_halt", "_finish_playback", "_restore_game_ui_settings"])
         self.assertFalse(c._pov_active)
         self.assertTrue(c._game_ui_visible)
+
+    def test_finish_keeps_active_follow_and_hidden_hud(self):
+        c = self.controller
+        c._pov_active = True
+        c._follow_active = True
+        c._alive = Mock(return_value=True)
+        c._halt = Mock()
+        c._finish_playback = Mock()
+        c._restore_game_ui_settings = Mock()
+        c.finish_pov_recording()
+        c._halt.assert_called_once_with(native_action="release", preserve_follow=True)
+        c._restore_game_ui_settings.assert_not_called()
+        self.assertFalse(c._pov_active)
+        self.assertFalse(c._game_ui_visible)
+        self.assertTrue(c._follow_active)
 
 
 if __name__ == "__main__":

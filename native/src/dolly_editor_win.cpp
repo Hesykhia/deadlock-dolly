@@ -9,11 +9,14 @@
 #include <memory>
 #include "MinHook.h"
 #include "dolly_editor.hpp"
+#include "dolly_lite.hpp"
+#include "dolly_replay_events.hpp"
 #include "dolly_bone_picker.hpp"
 #include "dolly_flight.hpp"
 #include "dolly_overlay.hpp"
 #include "dolly_reshade.hpp"
 #include "dolly_visualization_runtime.hpp"
+#include "dolly_prop_runtime.hpp"
 namespace dolly {
 namespace {
 std::atomic<HWND> gWindow{nullptr};
@@ -28,11 +31,22 @@ std::shared_ptr<const EditorDofConfig> gDofConfig;
 std::shared_ptr<const EditorCitadelDofConfig> gCitadelDofConfig;
 std::shared_ptr<const EditorFollowConfig> gFollowConfig;
 std::shared_ptr<const EditorFramingGridConfig> gFramingGridConfig;
+std::shared_ptr<const EditorLevelViewConfig> gLevelViewConfig;
+// One-shot live reset armed by the level-view key; consumed on the next
+// rendered manual frame, so no project action, event or Undo step is created.
+std::atomic<bool> gLevelViewRequest{false};
+std::shared_ptr<const EditorObjectConfig> gObjectConfig;
+std::uint32_t gPropProbeSequence = 0;  // last consumed prop-probe request sequence
 std::shared_ptr<const EditorCameraList> gCameraList;
+std::shared_ptr<const EditorLiteReplayInfo> gLiteReplay;
+std::shared_ptr<const EditorReplayEvents> gReplayEvents;
+std::shared_ptr<const EditorCinematicStatus> gCinematicStatus;
+std::atomic<std::uint64_t> gCinematicRequest{0}, gCinematicCanceled{0};
 std::shared_ptr<const EditorAttachConfig> gAttachConfig;
 std::shared_ptr<const EditorRoster> gRoster;
 std::shared_ptr<const EditorBones> gBones;
 std::atomic<double> gSpeed{400};
+std::atomic<double> gLiteFramingFactor{1.0};
 std::atomic<long> gMouseX{0}, gMouseY{0}, gFramingWheel{0};
 // Live wheel-burst tracking; camera -2 means no burst has been applied yet.
 struct FramingWheelState {
@@ -90,6 +104,7 @@ bool owns_input() noexcept {
 }
 void reset_keys(bool lost_input = false) noexcept {
     gFramingWheel = 0;
+    gLiteFramingFactor = 1.0;
     for (unsigned i = 0; i < 256; ++i) {
         const bool held = (GetAsyncKeyState(int(i)) & 0x8000) != 0;
         if (lost_input) {
@@ -185,6 +200,10 @@ bool reserved_input(unsigned vk) noexcept {
     auto c = std::atomic_load(&gConfig);
     if (!c)
         return false;
+    if ((owner == EditorOwner::Flight || owner == EditorOwner::Panel) && !gTextInput.load() &&
+        !(modifiers() & 3u) && !key_down(VK_LWIN) && !key_down(VK_RWIN) &&
+        (vk == VK_OEM_PLUS || vk == VK_ADD || vk == VK_OEM_MINUS || vk == VK_SUBTRACT))
+        return true;
     if (owner != EditorOwner::Console && c->reshade_binding.vk == vk &&
         c->reshade_binding.modifiers == modifiers())
         return true;
@@ -193,6 +212,17 @@ bool reserved_input(unsigned vk) noexcept {
         const auto grid_vk = grid ? std::uint16_t(grid->reserved & 0xffffu) : 0;
         const auto grid_mods = grid ? std::uint16_t(grid->reserved >> 16) : 0;
         if (grid_vk && grid_vk == vk && grid_mods == modifiers())
+            return true;
+    }
+    // Level view is a plain single key, so it is swallowed only in the two owner
+    // modes that actually act on it. Swallowing it everywhere (as the framing
+    // guide's modifier chord does) would silently eat the game's own key while
+    // the panel is disabled, in the game UI, unfocused or behind ReShade.
+    if (owner == EditorOwner::Panel || owner == EditorOwner::Flight) {
+        auto level = std::atomic_load(&gLevelViewConfig);
+        const auto level_vk = level ? std::uint16_t(level->reserved & 0xffffu) : 0;
+        const auto level_mods = level ? std::uint16_t(level->reserved >> 16) : 0;
+        if (level_vk && level_vk == vk && level_mods == modifiers())
             return true;
     }
     for (unsigned i : {9u, 10u})
@@ -281,6 +311,17 @@ void dispatch(EditorAction action) noexcept {
     }
     editor_enqueue(action);
 }
+// Arm the one-shot level-view reset. The key is only meaningful while the
+// editor owns the live paused manual camera; anything else is a silent no-op,
+// matching the enabled state of the other live framing controls.
+void editor_request_level_view() noexcept {
+    const auto state = editor_snapshot();
+    if (!state.enabled || !state.ready || !state.paused || !state.manual_active ||
+        state.playing || state.busy || state.attach_preview ||
+        editor_recording_locks_cameras(editor_recording_status().state))
+        return;
+    gLevelViewRequest.store(true, std::memory_order_release);
+}
 void dispatch_key_press(unsigned vk) noexcept {
     // Raw-input and window-message callers check foreground ownership before
     // recording a key. Shortcuts run only on that key's fresh down edge, never
@@ -310,6 +351,13 @@ void dispatch_key_press(unsigned vk) noexcept {
     auto c = std::atomic_load(&gConfig);
     if (!c)
         return;
+    if ((owner == EditorOwner::Flight || owner == EditorOwner::Panel) && !gTextInput.load() &&
+        !(modifiers() & 3u) && !key_down(VK_LWIN) && !key_down(VK_RWIN) &&
+        (vk == VK_OEM_PLUS || vk == VK_ADD || vk == VK_OEM_MINUS || vk == VK_SUBTRACT)) {
+        editor_enqueue(EditorAction::SetSpeed,
+                       stepped_camera_speed(gSpeed.load(), vk == VK_OEM_PLUS || vk == VK_ADD));
+        return;
+    }
     if (owner != EditorOwner::Console && c->reshade_binding.vk == vk &&
         binding_down(c->reshade_binding)) {
         toggle_reshade();
@@ -324,6 +372,34 @@ void dispatch_key_press(unsigned vk) noexcept {
         if (grid_binding.vk && binding_down(grid_binding) &&
             (owner == EditorOwner::Panel || owner == EditorOwner::Flight)) {
             editor_enqueue(EditorAction::FramingGrid);
+            return;
+        }
+    }
+    // The Object Picker is its own mode, toggled by its own binding (default B),
+    // which also lives in the optional block. It opens from Panel/Flight and
+    // closes when already open. While open it owns the panel and accepts the
+    // same key to close, like a mode switch.
+    if (auto objects = std::atomic_load(&gObjectConfig)) {
+        EditorBinding object_binding{};
+        object_binding.vk = static_cast<std::uint16_t>(objects->reserved & 0xffffu);
+        object_binding.modifiers = static_cast<std::uint16_t>(objects->reserved >> 16);
+        if (object_binding.vk && binding_down(object_binding) &&
+            (owner == EditorOwner::Panel || owner == EditorOwner::Flight)) {
+            const bool open = (objects->flags & 1u) != 0;
+            editor_enqueue(open ? EditorAction::ObjectPickerCancel : EditorAction::ObjectPickerOpen);
+            return;
+        }
+    }
+    // Level view is a live-only reset of the paused camera; it never enqueues a
+    // project action, so the key simply arms the next manual frame. A plain
+    // letter must not fire while a Dolly text field is collecting typing.
+    if (auto level = std::atomic_load(&gLevelViewConfig)) {
+        EditorBinding level_binding{};
+        level_binding.vk = static_cast<std::uint16_t>(level->reserved & 0xffffu);
+        level_binding.modifiers = static_cast<std::uint16_t>(level->reserved >> 16);
+        if (level_binding.vk && binding_down(level_binding) && !gTextInput.load() &&
+            (owner == EditorOwner::Panel || owner == EditorOwner::Flight)) {
+            editor_request_level_view();
             return;
         }
     }
@@ -344,7 +420,10 @@ void dispatch_key_press(unsigned vk) noexcept {
         // selected, while every other control passes to the game.
         if (owner == EditorOwner::Disabled && i != 9 && i != 10)
             continue;
-        if (c->bindings[i].vk == vk && binding_down(c->bindings[i])) {
+        // Capture and replay pause must remain usable with flight's Shift/Ctrl movement modifiers.
+        const bool while_moving = owner == EditorOwner::Flight && (i == 0 || i == 2) &&
+                                  !c->bindings[i].modifiers;
+        if (c->bindings[i].vk == vk && binding_down(c->bindings[i], while_moving)) {
             gMouseX = 0;
             gMouseY = 0;
             dispatch(static_cast<EditorAction>(i));
@@ -378,7 +457,7 @@ void key_event(unsigned vk, bool down) noexcept {
 void framing_wheel(long units) noexcept {
     auto c = std::atomic_load(&gConfig);
     if (!owns_input() || gOwner.load() != EditorOwner::Flight || (gViewFlags.load() & 6) != 6 ||
-        !c || c->playback_flags)
+        !c || (c->playback_flags & kEditorPlaybackStateMask))
         return;
     // Bound backlog even when the game stops producing views. Partial wheel
     // detents are retained, including high-resolution mouse/trackpad input.
@@ -520,6 +599,7 @@ EditorSnapshot editor_snapshot() noexcept {
         result.playhead = c->playhead;
         result.playing = (c->playback_flags & 1) != 0;
         result.busy = (c->playback_flags & 2) != 0;
+        result.pause_after_capture = (c->playback_flags & kEditorPauseAfterCapture) != 0;
         std::memcpy(result.shot_name, c->shot_name, sizeof(result.shot_name));
         std::memcpy(result.message, c->message, sizeof(result.message));
     }
@@ -604,6 +684,15 @@ EditorSnapshot editor_snapshot() noexcept {
     auto roster = std::atomic_load(&gRoster);
     if (roster && gConnected.load())
         result.roster_count = roster->count;
+    auto objects = std::atomic_load(&gObjectConfig);
+    if (objects && gConnected.load()) {
+        result.object_picker = (objects->flags & 1) != 0;
+        result.object_count = objects->count;
+        result.object_selected = objects->selected;
+        result.object_distance = objects->distance;
+        std::memcpy(result.object_items, objects->items,
+                    sizeof(EditorObjectItem) * kEditorObjectCount);
+    }
     // Atomic field seqlock gives an internally coherent capture pose and tick.
     // Bounded retries never wait for the render callback.
     for (int attempt = 0; attempt < 4; ++attempt) {
@@ -640,12 +729,56 @@ EditorBinding editor_binding_snapshot(EditorAction action) noexcept {
             result.vk = static_cast<std::uint16_t>(grid->reserved & 0xffffu);
             result.modifiers = static_cast<std::uint16_t>(grid->reserved >> 16);
         }
+    } else if (action == EditorAction::ObjectPickerOpen) {
+        if (auto objects = std::atomic_load(&gObjectConfig)) {
+            result.vk = static_cast<std::uint16_t>(objects->reserved & 0xffffu);
+            result.modifiers = static_cast<std::uint16_t>(objects->reserved >> 16);
+        }
+    } else if (action == EditorAction::LevelView) {
+        if (auto level = std::atomic_load(&gLevelViewConfig)) {
+            result.vk = static_cast<std::uint16_t>(level->reserved & 0xffffu);
+            result.modifiers = static_cast<std::uint16_t>(level->reserved >> 16);
+        }
     }
     return result;
+}
+bool editor_level_view_config(EditorLevelViewConfig& out) noexcept {
+    auto level = std::atomic_load(&gLevelViewConfig);
+    if (!level || !gConnected.load())
+        return false;
+    out = *level;
+    return true;
+}
+// Arm the one-shot reset. The key is only meaningful while the editor owns the
+// live paused manual camera; anything else is a silent no-op, matching the
+// enabled state of the other live framing controls.
+bool editor_level_view_request() noexcept {
+    return gLevelViewRequest.exchange(false, std::memory_order_acq_rel);
+}
+bool editor_apply_level_view(CameraPose& pose) noexcept {
+    if (!editor_level_view_request())
+        return false;
+    auto level = std::atomic_load(&gLevelViewConfig);
+    if (!level || !gConnected.load())
+        return false;
+    // Level the horizon and return to the published normal framing. Only the
+    // live manual pose changes: no saved camera, project state or Undo entry.
+    pose[5] = 0.0;
+    if (std::isfinite(level->standard_aspect) && level->standard_aspect >= .5 &&
+        level->standard_aspect <= 4.0)
+        pose[6] = level->standard_aspect;
+    return true;
 }
 bool editor_framing_grid_enabled() noexcept {
     auto grid = std::atomic_load(&gFramingGridConfig);
     return grid && gConnected.load() && (grid->flags & 1u) != 0;
+}
+bool editor_object_config(EditorObjectConfig& out) noexcept {
+    auto objects = std::atomic_load(&gObjectConfig);
+    if (!objects || !gConnected.load())
+        return false;
+    out = *objects;
+    return true;
 }
 bool editor_attach_config(EditorAttachConfig& out) noexcept {
     auto attach = std::atomic_load(&gAttachConfig);
@@ -661,12 +794,41 @@ bool editor_follow_config(EditorFollowConfig& out) noexcept {
     out = *follow;
     return true;
 }
+bool editor_request_framing_factor(double factor) noexcept {
+    const auto state = editor_snapshot();
+    if (!std::isfinite(factor) || factor <= 0 || !state.ready || !state.paused ||
+        state.busy || state.playing || state.attach_preview || !state.manual_active ||
+        editor_recording_locks_cameras(editor_recording_status().state))
+        return false;
+    gLiteFramingFactor.store(factor);
+    return true;
+}
 bool editor_camera_list(EditorCameraList& out) noexcept {
     auto list = std::atomic_load(&gCameraList);
     if (!list || !gConnected.load())
         return false;
     out = *list;
     return true;
+}
+bool editor_lite_replay_info(EditorLiteReplayInfo& out) noexcept {
+    auto info=std::atomic_load(&gLiteReplay);
+    if(!info||!gConnected.load())return false;
+    out=*info;return true;
+}
+bool editor_replay_events(EditorReplayEvents& out) noexcept {
+    auto events = std::atomic_load(&gReplayEvents);
+    if (!events || !gConnected.load()) return false;
+    out = *events; return true;
+}
+bool editor_cinematic_status(EditorCinematicStatus& out) noexcept {
+    const auto canceled = gCinematicCanceled.load();
+    if (canceled && gConnected.load()) {
+        out = {}; out.token = std::uint32_t(canceled); out.revision = std::uint32_t(canceled >> 32); out.state = 3;
+        return true;
+    }
+    auto status = std::atomic_load(&gCinematicStatus);
+    if (!status || !gConnected.load()) return false;
+    out = *status; return true;
 }
 bool editor_roster_snapshot(EditorRoster& out) noexcept {
     auto roster = std::atomic_load(&gRoster);
@@ -682,19 +844,107 @@ bool editor_bones_snapshot(EditorBones& out) noexcept {
     out = *bones;
     return true;
 }
+video::Status editor_recording_status() noexcept {
+    return video::status();
+}
 bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_override) noexcept {
     // Menu requests may originate from a render-thread button. They only queue
     // adapter work here; the worker changes input/cursor ownership afterwards.
     if (action == EditorAction::ReShade)
         return configured() && !gReShadeDeferred.load() &&
                reshade_request_overlay(!reshade_overlay_open());
-    if (!std::isfinite(value) || std::uint32_t(action) > std::uint32_t(EditorAction::FramingGrid))
+    // Appended UI actions retain the original action IDs.
+    if (!std::isfinite(value) ||
+        std::uint32_t(action) > std::uint32_t(EditorAction::LevelView))
         return false;
+    const bool preview_action=action==EditorAction::PreviewCameraCurveValue || action==EditorAction::PreviewCameraPositionTangents;
+    const bool clear_preview=action==EditorAction::ClearCameraCurvePreview;
     auto state = editor_snapshot();
-    if (!state.enabled)
+    if (!state.enabled && !clear_preview)
         return false;
+    const bool camera_mutation = action == EditorAction::Capture || action == EditorAction::Replace ||
+        action == EditorAction::ResetCameraPath || action == EditorAction::ClearCameraPath ||
+        action == EditorAction::DeleteCamera || action == EditorAction::UndoShot ||
+        action == EditorAction::RedoShot || action == EditorAction::SetCameraTime ||
+        action == EditorAction::SetCameraRoll || action == EditorAction::SetCameraPosition ||
+        action == EditorAction::SetCameraCurveValue || action == EditorAction::SetCameraPositionTangents ||
+        action == EditorAction::SetFraming ||
+        (action >= EditorAction::SetAttachTarget && action <= EditorAction::AttachReset) ||
+        action == EditorAction::AttachSnap || action == EditorAction::SetAttachBone ||
+        action == EditorAction::SetSourceBlend;
+    if ((camera_mutation || preview_action) && editor_recording_locks_cameras(editor_recording_status().state))
+        return false;
+    if(clear_preview && (!pose_override || (*pose_override)[1]!=0 || (*pose_override)[2]!=0 ||
+       !visualization_native_preview_request_matches(value,*pose_override))) return false;
+    if (action == EditorAction::SetPauseAfterCapture &&
+        (!state.ready || state.busy || state.owner != EditorOwner::Panel || pose_override ||
+         (value != 0 && value != 1)))
+        return false;
+    if (action == EditorAction::PrepareCinematic) {
+        EditorCameraList list{};
+        if (!state.ready || !state.paused || state.busy || state.playing || state.attach_preview ||
+            state.owner != EditorOwner::Panel || !pose_override || value != std::floor(value) ||
+            value <= 0 || value > UINT32_MAX || !editor_camera_list(list) ||
+            list.total < 2 || list.total != state.camera_count || (*pose_override)[0] != list.revision)
+            return false;
+        for (double component : *pose_override) if (!std::isfinite(component)) return false;
+    }
+    if (action == EditorAction::FocusReplayPlayer) {
+        EditorReplayEvents events{};
+        if (!state.ready || !state.paused || state.busy || state.playing || state.attach_preview ||
+            state.owner != EditorOwner::Panel || pose_override ||
+            value != std::floor(value) || value <= 0 || value >= 0x7fff ||
+            !editor_replay_events(events) || events.status != 2)
+            return false;
+        bool found = false;
+        for (unsigned i = 0; i < events.player_count; ++i) found |= events.players[i].id == unsigned(value);
+        if (!found) return false;
+    }
+    if (action == EditorAction::ClearCameraPath) {
+        EditorCameraList list{};
+        if (!state.ready || !state.paused || state.busy || state.playing || state.attach_preview ||
+            state.owner != EditorOwner::Panel || !pose_override || value != 0 ||
+            !editor_camera_list(list) || list.total != state.camera_count || (*pose_override)[0] != list.revision)
+            return false;
+        for (double component : *pose_override) if (!std::isfinite(component)) return false;
+    }
     const bool camera_action =
         action >= EditorAction::SelectCamera && action <= EditorAction::SetCameraRoll;
+    const bool curve_action = action == EditorAction::SetCameraCurveValue ||
+                              action == EditorAction::SelectCurveCamera ||
+                              action == EditorAction::SetCameraPositionTangents || preview_action;
+    if (curve_action) {
+        EditorCameraList list{};
+        const auto path = visualization_snapshot();
+        CameraPose curve_request=pose_override ? *pose_override : CameraPose{};
+        const bool tangent_action=action==EditorAction::SetCameraPositionTangents || action==EditorAction::PreviewCameraPositionTangents;
+        if(preview_action) {
+            if(!pose_override || value<0 || value!=std::floor(value) || value>=NativePath::max_camera_keys*12 ||
+               (!tangent_action && (!std::isfinite(curve_request[1]) || curve_request[1]<0 || curve_request[1]>6 || curve_request[1]!=std::floor(curve_request[1])))) return false;
+            const auto channel=tangent_action ? (std::uint32_t(value)%12)/4 : unsigned(curve_request[1]);
+            if(!visualization_native_preview_request_matches(tangent_action ? std::floor(value/12) : value,*pose_override,channel)) return false;
+            curve_request[6]=0;
+        }
+        if (!pose_override || !state.ready || !state.focused || !state.paused || state.busy ||
+            state.playing || state.attach_preview || state.owner != EditorOwner::Panel ||
+            !editor_camera_list(list) || list.total != state.camera_count || !path ||
+            path->camera_count() != list.total || path->project_revision() != list.revision ||
+            ((tangent_action || preview_action) && (state.bone_picker || state.object_picker ||
+                path->selected_camera() != state.selected_camera)) ||
+            (tangent_action ?
+                !valid_visualization_tangent_action(*path, value, curve_request) :
+                !valid_visualization_curve_action(*path, value, curve_request,
+                                                 action == EditorAction::SelectCurveCamera)))
+            return false;
+    }
+    if (action == EditorAction::SetCameraPosition) {
+        EditorCameraList list{};
+        if (!pose_override || !state.ready || !state.focused || !state.paused || state.busy || state.playing ||
+            state.attach_preview || state.owner != EditorOwner::Panel ||
+            !editor_camera_list(list) || list.total != state.camera_count ||
+            !valid_editor_position_action(list, value, *pose_override))
+            return false;
+    }
     if (camera_action) {
         EditorCameraList list{};
         if (!pose_override || !state.ready || !state.paused || state.busy || state.playing ||
@@ -710,7 +960,7 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
     }
     // While inspecting, only recovery/ownership and picker actions may escape
     // to Python. In particular no capture, seek or recording of this view.
-    if (state.bone_picker && action != EditorAction::CancelBonePicker &&
+    if (state.bone_picker && !clear_preview && action != EditorAction::CancelBonePicker &&
         action != EditorAction::FinishBonePicker && action != EditorAction::GameUI &&
         action != EditorAction::Console && action != EditorAction::Panel &&
         action != EditorAction::Stop)
@@ -722,6 +972,44 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
         return false;
     if (action == EditorAction::CancelBonePicker && (!state.bone_picker || value != 0))
         return false;
+    // Object Picker: its own exclusive mode. Open needs a live paused view;
+    // cancel/place/select/delete are only valid while it is open, and place
+    // carries the world point in the event pose.
+    if (action == EditorAction::ObjectPickerOpen &&
+        (state.object_picker || !state.ready || !state.paused || state.busy ||
+         state.playing || state.bone_picker || state.owner != EditorOwner::Panel ||
+         (!state.manual_active && !state.follow_active) || value != 0))
+        return false;
+    if (action == EditorAction::ObjectPickerCancel && (!state.object_picker || value != 0))
+        return false;
+    if ((action == EditorAction::ObjectPlace || action == EditorAction::ObjectSelect ||
+         action == EditorAction::ObjectDelete) && !state.object_picker)
+        return false;
+    if (action == EditorAction::ObjectPlace &&
+        (!pose_override || !std::isfinite((*pose_override)[0]) ||
+         !std::isfinite((*pose_override)[1]) || !std::isfinite((*pose_override)[2]) ||
+         value < 0 || value >= 9 || value != std::floor(value)))
+        return false;
+    if (action == EditorAction::ObjectSelect &&
+        (value < 0 || value >= 64 || value != std::floor(value)))
+        return false;
+    if (action == EditorAction::ObjectDelete &&
+        (value < 0 || value >= 64 || value != std::floor(value)))
+        return false;
+    // Object transform: value is the selected index; the pose carries the full
+    // new transform (position[3], angles[3], scale in pose[6]). The editor
+    // transaction validates ranges again before committing.
+    if (action == EditorAction::ObjectTransform &&
+        (!state.object_picker || !pose_override || value < 0 || value >= 64 ||
+         value != std::floor(value)))
+        return false;
+    if (action == EditorAction::ObjectTransform) {
+        for (unsigned i = 0; i < 7; ++i)
+            if (!std::isfinite((*pose_override)[i]))
+                return false;
+        if ((*pose_override)[6] < 0.05 || (*pose_override)[6] > 20.0)
+            return false;
+    }
     if (action == EditorAction::FinishBonePicker &&
         (!state.bone_picker || !pose_override || !std::isfinite((*pose_override)[0]) ||
          (*pose_override)[0] < 0 || (*pose_override)[0] > 4294967295.0 ||
@@ -835,6 +1123,8 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
                pose_override) {
         return false;
     }
+    if (action == EditorAction::SeekReplayTick && (!state.ready || !state.paused || state.busy || state.playing || state.attach_preview || !valid_lite_seek_tick(value)))return false;
+    if (action == EditorAction::SaveShot && (value != 0 || state.busy || state.playing))return false;
     if (action == EditorAction::SetFraming) {
         // The pose override carries the wheel scale factor (Python owns the
         // target key and its base value), not an absolute aspect ratio.
@@ -848,7 +1138,9 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
                 return false;
     } else if (pose_override && action != EditorAction::SetAttachOffsets &&
                action != EditorAction::SetAttachBone && action != EditorAction::FinishBonePicker &&
-               action != EditorAction::StartGameFollow && !camera_action)
+               action != EditorAction::StartGameFollow && action != EditorAction::ObjectPlace &&
+               action != EditorAction::ObjectTransform && action != EditorAction::ClearCameraPath &&
+               action != EditorAction::PrepareCinematic && action != EditorAction::SetCameraPosition && !camera_action && !curve_action && !clear_preview)
         return false;
     if (action == EditorAction::SetSpeed) {
         if (value < 1 || value > 10000)
@@ -889,6 +1181,12 @@ bool editor_enqueue(EditorAction action, double value, const CameraPose* pose_ov
         event.pose[i] = pose_override ? (*pose_override)[i] : state.pose[i];
     event.tick = state.tick;
     event.paused = state.paused;
+    if (action == EditorAction::PrepareCinematic) {
+        gCinematicRequest = (std::uint64_t(std::uint32_t((*pose_override)[0])) << 32) | std::uint32_t(value);
+        gCinematicCanceled = 0;
+    } else if (action == EditorAction::Stop) {
+        gCinematicCanceled = gCinematicRequest.load();
+    }
     gEventLock.clear(std::memory_order_release);
     return true;
 }
@@ -1009,7 +1307,10 @@ double framing_wheel_step(double live, double stored, int camera, double factor)
     return next;
 }
 void apply_framing_wheel(CameraPose& pose, const EditorConfig& config, long wheel) noexcept {
-    if (!wheel || config.playback_flags || (gViewFlags.load() & 6) != 6)
+    const double pending = gLiteFramingFactor.exchange(1.0);
+    if ((!wheel && pending == 1.0) || (config.playback_flags & kEditorPlaybackStateMask) ||
+        (gViewFlags.load() & 6) != 6 ||
+        editor_recording_locks_cameras(editor_recording_status().state))
         return;
     // Anchor to the selected camera's stored framing for immediate on-screen
     // feedback. The published event carries only the scale factor: Python owns
@@ -1023,8 +1324,8 @@ void apply_framing_wheel(CameraPose& pose, const EditorConfig& config, long whee
             stored = path->cameras()[selected].pose[6];
     }
     const double base = pose[6];
-    const double factor = std::pow(.9, double(wheel) / WHEEL_DELTA);
-    const double next = framing_wheel_step(base, stored, selected, factor);
+    const double factor = pending * std::pow(.9, double(wheel) / WHEEL_DELTA);
+    const double next = pending != 1.0 ? std::clamp(base * factor, .5, 4.0) : framing_wheel_step(base, stored, selected, factor);
     CameraPose edit = pose;
     edit[6] = factor;
     if (next != base && factor != 1.0 &&
@@ -1039,12 +1340,22 @@ bool flight_movement_active(unsigned view_flags, EditorOwner owner, bool input_o
     // movement during seeks or a lost view.
     return input_owned && owner == EditorOwner::Flight && (view_flags & 5) == 5;
 }
+void apply_panel_framing(CameraPose& pose, double dt, bool input_owned) noexcept {
+    // The typed lens edit comes from the panel; movement remains flight-owned.
+    if (gOwner.load() == EditorOwner::Panel && input_owned &&
+        (gViewFlags.load() & 7) == 7 && std::isfinite(dt) && dt >= 0 && dt <= .1) {
+        if (auto config = std::atomic_load(&gConfig))
+            apply_framing_wheel(pose, *config, 0);
+    }
+}
 void editor_integrate_flight(CameraPose& pose, double dt) noexcept {
+    apply_panel_framing(pose, dt, owns_input());
     if (!flight_movement_active(gViewFlags.load(), gOwner.load(), owns_input()) ||
         !std::isfinite(dt) || dt < 0 || dt > .1) {
         gMouseX = 0;
         gMouseY = 0;
         gFramingWheel = 0;
+        gLiteFramingFactor = 1.0;
         return;
     }
     auto c = std::atomic_load(&gConfig);
@@ -1250,7 +1561,43 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
                 }
             }
         }
+        auto lite_source=memory+kEditorLiteReplayOffset;
+        auto lite_sequence=reinterpret_cast<volatile LONG*>(lite_source+8);
+        const auto lite_first=InterlockedCompareExchange(lite_sequence,0,0);
+        const auto lite_previous=std::atomic_load(&gLiteReplay);
+        if(!(lite_first&1)&&(!lite_previous||lite_previous->sequence!=std::uint32_t(lite_first))){
+            EditorLiteReplayInfo info{};std::memcpy(&info,lite_source,sizeof(info));MemoryBarrier();
+            if(lite_first==InterlockedCompareExchange(lite_sequence,0,0)&&valid_lite_replay_info(info)){
+                try{std::atomic_store(&gLiteReplay,std::make_shared<const EditorLiteReplayInfo>(info));}catch(...){}
+            }
+        }
+        auto event_source = memory + kReplayEventsOffset;
+        auto event_sequence = reinterpret_cast<volatile LONG*>(event_source + 8);
+        const auto event_first = InterlockedCompareExchange(event_sequence, 0, 0);
+        const auto event_previous = std::atomic_load(&gReplayEvents);
+        if (!(event_first & 1) && (!event_previous || event_previous->sequence != std::uint32_t(event_first))) {
+            EditorReplayEvents events{};
+            std::memcpy(&events, event_source, sizeof(events)); MemoryBarrier();
+            if (event_first == InterlockedCompareExchange(event_sequence, 0, 0) && valid_replay_events(events)) {
+                try { std::atomic_store(&gReplayEvents, std::make_shared<const EditorReplayEvents>(events)); }
+                catch (...) {}
+            }
+        }
         auto follow_source = memory + kEditorFollowOffset;
+        auto cinematic_source = memory + kEditorCinematicOffset;
+        auto cinematic_sequence = reinterpret_cast<volatile LONG*>(cinematic_source + 8);
+        const auto cinematic_first = InterlockedCompareExchange(cinematic_sequence, 0, 0);
+        const auto cinematic_previous = std::atomic_load(&gCinematicStatus);
+        if (!(cinematic_first & 1) && (!cinematic_previous || cinematic_previous->sequence != std::uint32_t(cinematic_first))) {
+            EditorCinematicStatus status{};
+            std::memcpy(&status, cinematic_source, sizeof(status)); MemoryBarrier();
+            if (cinematic_first == InterlockedCompareExchange(cinematic_sequence, 0, 0) &&
+                std::memcmp(status.magic, "DLYCIN01", 8) == 0 && status.abi == 1 &&
+                status.token && status.state >= 1 && status.state <= 3) {
+                try { std::atomic_store(&gCinematicStatus, std::make_shared<const EditorCinematicStatus>(status)); }
+                catch (...) {}
+            }
+        }
         auto follow_sequence = reinterpret_cast<volatile LONG*>(follow_source + 8);
         const auto follow_first = InterlockedCompareExchange(follow_sequence, 0, 0);
         const auto follow_previous = std::atomic_load(&gFollowConfig);
@@ -1292,6 +1639,123 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
                 } catch (...) {
                 }
             }
+        }
+        auto level_source = memory + kEditorLevelViewOffset;
+        auto level_sequence = reinterpret_cast<volatile LONG*>(level_source + 8);
+        const auto level_first = InterlockedCompareExchange(level_sequence, 0, 0);
+        const auto level_previous = std::atomic_load(&gLevelViewConfig);
+        if (!(level_first & 1) &&
+            (!level_previous || level_previous->sequence != std::uint32_t(level_first))) {
+            EditorLevelViewConfig level{};
+            std::memcpy(&level, level_source, sizeof(level));
+            MemoryBarrier();
+            const auto level_vk = std::uint32_t(level.reserved & 0xffffu);
+            const auto level_mods = std::uint32_t(level.reserved >> 16);
+            if (level_first == InterlockedCompareExchange(level_sequence, 0, 0) &&
+                std::memcmp(level.magic, "DLYLEVL1", 8) == 0 && level.abi == 1 &&
+                !(level.flags & ~1u) && level_vk <= 0xff && level_mods <= 7 &&
+                (!std::isfinite(level.standard_aspect) ||
+                 (level.standard_aspect >= .5 && level.standard_aspect <= 4.0))) {
+                try {
+                    std::atomic_store(&gLevelViewConfig,
+                                      std::make_shared<const EditorLevelViewConfig>(level));
+                } catch (...) {
+                }
+            }
+        }
+        auto object_source = memory + kEditorObjectOffset;
+        auto object_sequence = reinterpret_cast<volatile LONG*>(object_source + 8);
+        const auto object_first = InterlockedCompareExchange(object_sequence, 0, 0);
+        const auto object_previous = std::atomic_load(&gObjectConfig);
+        if (!(object_first & 1) &&
+            (!object_previous || object_previous->sequence != std::uint32_t(object_first))) {
+            EditorObjectConfig objects{};
+            std::memcpy(&objects, object_source, sizeof(objects));
+            MemoryBarrier();
+            objects.sequence = std::uint32_t(object_first);
+            if (object_first == InterlockedCompareExchange(object_sequence, 0, 0) &&
+                valid_editor_object_config(objects)) {
+                try {
+                    std::atomic_store(&gObjectConfig,
+                                      std::make_shared<const EditorObjectConfig>(objects));
+                } catch (...) {
+                }
+                // Publish the accepted status so the editor can confirm the
+                // runtime holds the list. Written with the object seqlock.
+                EditorObjectStatus status{};
+                std::memcpy(status.magic, "DLYOBS01", 8);
+                status.sequence = std::uint32_t(object_first);
+                status.abi = 1;
+                // bit 0 available (a valid list was accepted), bit 1 active
+                // (mode open), bit 2 preview.
+                status.flags = 1u;
+                if (objects.flags & 1u)
+                    status.flags |= 2u;
+                if (objects.flags & 2u)
+                    status.flags |= 4u;
+                status.active_count = objects.count;
+                status.selected = std::uint32_t(objects.selected);
+                status.error = 0;
+                auto* status_out = memory + kEditorObjectStatusOffset;
+                auto* status_sequence = reinterpret_cast<volatile LONG*>(status_out + 8);
+                const LONG before = InterlockedCompareExchange(status_sequence, 0, 0);
+                const LONG even = (before & 1) ? before + 1 : before;
+                InterlockedExchange(status_sequence, even + 1);
+                std::memcpy(status_out, &status, 8);
+                std::memcpy(status_out + 12, reinterpret_cast<unsigned char*>(&status) + 12,
+                            sizeof(status) - 12);
+                MemoryBarrier();
+                InterlockedExchange(status_sequence, even + 2);
+            }
+        }
+        // Experimental prop-persistence probe request. The editor advances the
+        // sequence; the render thread (prop_runtime::tick) consumes it. Status
+        // is republished every pass so the editor can read the counts.
+        {
+            auto* probe_source = memory + kEditorPropProbeOffset;
+            auto* probe_sequence = reinterpret_cast<volatile LONG*>(probe_source + 8);
+            const auto probe_first = InterlockedCompareExchange(probe_sequence, 0, 0);
+            if (!(probe_first & 1) && probe_first &&
+                probe_first != gPropProbeSequence) {
+                EditorPropProbeConfig probe{};
+                std::memcpy(&probe, probe_source, sizeof(probe));
+                MemoryBarrier();
+                if (probe_first == InterlockedCompareExchange(probe_sequence, 0, 0) &&
+                    std::memcmp(probe.magic, "DLYPRP01", 8) == 0 &&
+                    probe.abi == kEditorPropProbeAbi && probe.reserved == 0 &&
+                    (probe.request == 1 || probe.request == 2)) {
+                    gPropProbeSequence = probe_first;
+                    prop_runtime::request(probe.request == 2);
+                }
+            }
+            const auto counts = prop_runtime::diagnostics();
+            EditorPropProbeStatus status{};
+            std::memcpy(status.magic, "DLYPRS01", 8);
+            status.sequence = gPropProbeSequence;
+            status.abi = kEditorPropProbeAbi;
+            status.state = counts.state;
+            status.resolved = counts.resolved;
+            status.before_count = counts.before_count;
+            status.after_count = counts.after_count;
+            status.entity_handle = counts.entity_handle;
+            status.calls = counts.calls;
+            status.error = counts.error;
+            status.alive_after_create = counts.alive_after_create;
+            status.alive_after_seek = counts.alive_after_seek;
+            status.entity_ptr = counts.entity_ptr;
+            status.identity_ptr = counts.identity_ptr;
+            status.entity_index = counts.entity_index;
+            std::memcpy(status.entity_class, counts.entity_class, sizeof(status.entity_class));
+            auto* status_out = memory + kEditorPropProbeOffset + sizeof(EditorPropProbeConfig);
+            auto* status_sequence = reinterpret_cast<volatile LONG*>(status_out + 8);
+            const LONG before = InterlockedCompareExchange(status_sequence, 0, 0);
+            const LONG even = (before & 1) ? before + 1 : before;
+            InterlockedExchange(status_sequence, even + 1);
+            std::memcpy(status_out, &status, 8);
+            std::memcpy(status_out + 12, reinterpret_cast<unsigned char*>(&status) + 12,
+                        sizeof(status) - 12);
+            MemoryBarrier();
+            InterlockedExchange(status_sequence, even + 2);
         }
         auto attach_source = memory + kEditorAttachOffset;
         auto attach_sequence = reinterpret_cast<volatile LONG*>(attach_source + 8);
@@ -1399,7 +1863,8 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
                 c.flags <= 1 && std::isfinite(c.speed) && c.speed >= 1 && c.speed <= 10000 &&
                 std::isfinite(c.sensitivity) && c.sensitivity >= .001 && c.sensitivity <= 10 &&
                 std::isfinite(c.duration) && c.duration >= 0 && std::isfinite(c.playhead) &&
-                c.playhead >= 0 && c.camera_count <= 4096 && c.playback_flags <= 3 &&
+                c.playhead >= 0 && c.camera_count <= 4096 &&
+                (c.playback_flags & ~(kEditorPlaybackStateMask | kEditorPauseAfterCapture)) == 0 &&
                 (c.video_fps == 0 || c.video_fps == 30 || c.video_fps == 60 || c.video_fps == 120 ||
                  c.video_fps == 300 || c.video_fps == 600) &&
                 (c.video_bitrate_mbps == 0 || c.video_bitrate_mbps == 10 ||
@@ -1459,7 +1924,14 @@ void editor_worker_tick(unsigned char* memory, bool connected) noexcept {
         std::atomic_store(&gCitadelDofConfig, std::shared_ptr<const EditorCitadelDofConfig>{});
         std::atomic_store(&gFollowConfig, std::shared_ptr<const EditorFollowConfig>{});
         std::atomic_store(&gFramingGridConfig, std::shared_ptr<const EditorFramingGridConfig>{});
+        std::atomic_store(&gLevelViewConfig, std::shared_ptr<const EditorLevelViewConfig>{});
+        gLevelViewRequest.store(false, std::memory_order_release);
+        std::atomic_store(&gObjectConfig, std::shared_ptr<const EditorObjectConfig>{});
         std::atomic_store(&gCameraList, std::shared_ptr<const EditorCameraList>{});
+    std::atomic_store(&gLiteReplay, std::shared_ptr<const EditorLiteReplayInfo>{});
+    std::atomic_store(&gReplayEvents, std::shared_ptr<const EditorReplayEvents>{});
+    std::atomic_store(&gCinematicStatus, std::shared_ptr<const EditorCinematicStatus>{});
+    gCinematicRequest = gCinematicCanceled = 0;
         std::atomic_store(&gAttachConfig, std::shared_ptr<const EditorAttachConfig>{});
         std::atomic_store(&gRoster, std::shared_ptr<const EditorRoster>{});
         std::atomic_store(&gBones, std::shared_ptr<const EditorBones>{});

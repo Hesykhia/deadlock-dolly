@@ -196,8 +196,8 @@ class FakeClock:
 
 
 class CountedEvent:
-    """Advance a deterministic clock without sleeping; stop after N waits."""
-    def __init__(self, clock, limit):
+    """Virtual Event; an optional wait limit cancels finite playback loops."""
+    def __init__(self, clock, limit=None):
         self.clock = clock
         self.limit = limit
         self.waits = 0
@@ -213,9 +213,12 @@ class CountedEvent:
         self.stopped = False
 
     def wait(self, timeout):
+        if self.stopped:
+            return True
         self.clock.now += timeout
         self.waits += 1
-        self.stopped = self.waits >= self.limit
+        if self.limit is not None and self.waits >= self.limit:
+            self.stopped = True
         return self.stopped
 
 
@@ -223,6 +226,13 @@ class ControllerTests(unittest.TestCase):
     def setUp(self):
         self.messages = []
         self.controller = Controller(self.messages.append)
+        # Exercise real seek/calibration polling against the simulated console,
+        # advancing its clock instead of waiting for a game that is not running.
+        self.clock = FakeClock()
+        self.controller._stop_event = CountedEvent(self.clock)
+        clock_patch = patch("dolly.controller.time.perf_counter", self.clock.monotonic)
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
         self.console = FakeConsole()
         self.controller._console = self.console
         self.process = SimpleNamespace(poll=lambda: None)
@@ -259,6 +269,25 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "disconnected"):
             self.controller._require_demo()
         self.assertEqual(self.console.requests, [])
+
+    def test_disconnect_tolerates_a_game_that_already_closed(self):
+        # The user can close Deadlock from its own window, then close Dolly.
+        # Every in-console restore is impossible then, but disconnect must not
+        # raise: previously it aborted with "Launch the local replay from Dolly
+        # first", which left Dolly unclosable.
+        self.controller._replay_hud_restore = {"citadel_hud_visible": 1}
+        self.controller._replay_hud_session = self.controller._session
+        self.controller._game_ui_restore = {"citadel_hide_replay_hud": 0}
+        self.process.poll = lambda: 0  # The game has exited.
+        self.controller.disconnect()  # Must not raise.
+        self.assertIsNone(self.controller._console)
+
+    def test_close_completes_when_the_game_already_exited(self):
+        self.process.poll = lambda: 0
+        self.controller._session.handoff_cleanup = MagicMock()
+        self.controller.close()  # Must not raise.
+        self.controller._session.restore_gameinfo.assert_called_once()
+        self.controller._session.handoff_cleanup.assert_called_once()
 
     def test_native_dof_enables_dynamic_shader_compile_and_restores_on_disconnect(self):
         self.console.values["mat_disable_dynamic_shader_compile"] = 1.0
@@ -308,6 +337,30 @@ class ControllerTests(unittest.TestCase):
         self.controller._require_native_dof_support(make_project())
         self.assertFalse(self.controller.status()["native_dof_unavailable"])
 
+    def test_native_dof_guard_detects_the_captured_underscore_engine_text(self):
+        # The reported engine text uses "vfx_dx" (underscore); the guard must not
+        # depend on that exact punctuation.
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx_dx dll, "
+            "dynamic shader compile unavailable!")
+        project = make_project()
+        project.setup_values["r_dof_override"] = 1.0
+        self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        self.assertTrue(self.controller._startup_evidence["dof_shader"]["checkerboard_risk"])
+
+    def test_native_dof_guard_never_blocks_citadel_dof_after_a_native_failure(self):
+        self.console.values["mat_forcereloadshaders dof"] = (
+            "InitDynamicShaderCompileDLL(119): ERROR! Can't load vfx_dx dll, "
+            "dynamic shader compile unavailable!")
+        native = make_project()
+        native.setup_values["r_dof_override"] = 1.0
+        with self.assertRaisesRegex(RuntimeError, "checkerboard"):
+            self.controller._require_native_dof_support(native)
+        self.assertTrue(self.controller.status()["native_dof_unavailable"])
+        # A Citadel DOF project (no native override) must still apply.
+        self.controller._require_native_dof_support(make_project())
+
     def test_native_dof_refreshes_shaders_without_changing_an_allowed_setting(self):
         self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
         project = make_project()
@@ -323,8 +376,42 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.console.values["mat_disable_dynamic_shader_compile"], 1.0)
         self.assertEqual(self.controller._dof_shader_restore, {})
 
+    def test_native_dof_skips_the_forced_reload_when_compiler_files_are_missing(self):
+        # Retail ships the compiled ``dof`` shader but no compiler/source, so
+        # ``mat_forcereloadshaders dof`` can only fail and swap in the error
+        # material. Skip it and let the engine use the shipped compiled shader.
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        with tempfile.TemporaryDirectory() as folder:
+            bin_dir = Path(folder) / "game" / "bin" / "win64"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "deadlock.exe").write_bytes(b"")
+            self.controller._launch_attempt = {"game_path": folder, "status": "started"}
+            project = make_project()
+            project.setup_values["r_dof_override"] = 1.0
+            self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        evidence = self.controller._startup_evidence["dof_shader"]
+        self.assertEqual(evidence["missing_compiler_files"], ["vfx_dx11.dll", "slang.dll"])
+        self.assertNotIn("checkerboard_risk", evidence)
+        self.assertNotIn("mat_forcereloadshaders dof", self.console.requests)
+        self.assertFalse(self.controller.status()["native_dof_unavailable"])
+
+    def test_native_dof_reloads_when_the_compiler_files_are_present(self):
+        self.console.values["mat_disable_dynamic_shader_compile"] = 0.0
+        with tempfile.TemporaryDirectory() as folder:
+            bin_dir = Path(folder) / "game" / "bin" / "win64"
+            bin_dir.mkdir(parents=True)
+            for name in ("deadlock.exe", "vfx_dx11.dll", "slang.dll"):
+                (bin_dir / name).write_bytes(b"")
+            self.controller._launch_attempt = {"game_path": folder, "status": "started"}
+            project = make_project()
+            project.setup_values["r_dof_override"] = 1.0
+            self.assertFalse(self.controller.ensure_native_dof_shader_support(project))
+        self.assertIn("mat_forcereloadshaders dof", self.console.requests)
+        self.assertFalse(self.controller._startup_evidence["dof_shader"].get("checkerboard_risk"))
+
     def test_dead_process_console_failure_reports_the_crash_not_the_socket(self):
         process = self.process
+        self.controller._replay_requested = True
 
         def die_then_raise(command, timeout=3, completion_patterns=None):
             process.poll = lambda: -1073741819
@@ -1605,6 +1692,29 @@ class ControllerTests(unittest.TestCase):
                 self.assertFalse(any("original.gameinfo.gi" in name for name in archive.namelist()))
                 self.assertFalse(any("previous_sessions/" + current.name in name for name in archive.namelist()))
 
+    def test_diagnostics_export_skips_an_existing_or_locked_archive(self):
+        # A prefilled dolly-diagnostics.zip in Downloads must not be overwritten:
+        # Windows raises PermissionError when it is still held open, which used
+        # to surface as a raw [Errno 13]. The export must pick a free name.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "dolly-diagnostics.zip"
+            existing.write_bytes(b"previous archive the user still has open")
+            output = self.controller.export_diagnostics(existing)
+            self.assertNotEqual(output, existing)
+            self.assertEqual(output.name, "dolly-diagnostics_2.zip")
+            self.assertTrue(output.is_file())
+            self.assertEqual(existing.read_bytes(), b"previous archive the user still has open")
+
+    def test_diagnostics_export_suffixless_path_gets_a_timestamped_zip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = self.controller.export_diagnostics(root)
+            self.assertEqual(output.suffix.lower(), ".zip")
+            self.assertTrue(output.is_file())
+            with zipfile.ZipFile(output) as archive:
+                self.assertIn("diagnostics.json", archive.namelist())
+
 
 class CameraParsingTests(unittest.TestCase):
     def test_current_cvar_value_ignores_default(self):
@@ -1639,6 +1749,51 @@ class CameraParsingTests(unittest.TestCase):
             frame["cvars"] = {name: value}
             with self.subTest(name=name), self.assertRaises(ValueError):
                 frame_commands(frame, "r_aspectratio")
+
+
+class InterfaceSilenceTests(unittest.TestCase):
+    """The replay pause/resume cue is declined before Dolly sends the command."""
+
+    @staticmethod
+    def controller(bridge):
+        controller = Controller()
+        controller._session = SimpleNamespace(native=bridge) if bridge is not None else None
+        return controller
+
+    def test_pause_and_resume_arm_the_window_and_other_commands_do_not(self):
+        calls = []
+        controller = self.controller(SimpleNamespace(silence_ui=lambda: calls.append("armed")))
+        controller._silence_interface_cue("demo_pause")
+        controller._silence_interface_cue("demo_timescale 1; demo_resume")
+        # The deferred pause pauses the replay too, so it needs the same window.
+        controller._silence_interface_cue("demo_pauseatservertick 1200")
+        self.assertEqual(calls, ["armed", "armed", "armed"])
+        for command in ("demo_info", "demo_goto", "citadel_hud_visible 0",
+                        "demo_togglepause", "citadel_replay_toggle_pause"):
+            controller._silence_interface_cue(command)
+        self.assertEqual(calls, ["armed", "armed", "armed"])
+
+    def test_the_window_is_armed_before_the_pause_is_sent(self):
+        seen = []
+        controller = self.controller(SimpleNamespace(silence_ui=lambda: seen.append("armed") or True))
+        controller._require_connection = lambda *args, **kwargs: None
+        controller._console = SimpleNamespace(
+            is_connected=True, request=lambda command, **options: seen.append(command) or "ok")
+        controller._request("demo_resume")
+        self.assertEqual(seen, ["armed", "demo_resume"])
+
+    def test_an_unavailable_sound_bridge_is_reported_once(self):
+        controller = self.controller(SimpleNamespace(silence_ui=lambda: False))
+        with self.assertLogs("dolly", level="INFO") as logs:
+            controller._silence_interface_cue("demo_pause")
+            controller._silence_interface_cue("demo_resume")
+        self.assertEqual(sum("unavailable" in line for line in logs.output), 1)
+
+    def test_a_build_or_session_without_the_hooks_still_pauses(self):
+        # Older native builds have no silence_ui, and a disconnected session has
+        # no bridge at all. Neither may raise or delay the pause.
+        self.controller(SimpleNamespace())._silence_interface_cue("demo_pause")
+        self.controller(None)._silence_interface_cue("demo_resume")
 
 
 if __name__ == "__main__":

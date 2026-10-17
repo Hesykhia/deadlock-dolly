@@ -3,7 +3,7 @@ import copy
 import unittest
 from unittest.mock import Mock
 
-from dolly.path import Keyframe, Project
+from dolly.path import CvarTrack, Keyframe, Project, TrackKey
 from dolly.ui import shot_commands as commands
 
 
@@ -34,6 +34,13 @@ class ShotCommandTests(unittest.TestCase):
             commands.finish_capture(project, 'append', key(0), None)
         self.assertEqual(project, before)
 
+    def test_appending_before_the_shot_start_is_refused_with_a_clear_message(self):
+        project = Project(name='Shot', start_tick=1000, tick_rate=64.0, keyframes=[key(0)])
+        before = copy.deepcopy(project)
+        with self.assertRaisesRegex(ValueError, "before this shot's start"):
+            commands.finish_capture(project, 'append', key(-1.5), None)
+        self.assertEqual(project, before)
+
     def test_curve_and_aspect_resets_keep_original_keys_and_other_fields(self):
         project = Project(name='Shot', keyframes=[key(0)])
         project.keyframes[0].curve_yaw = 77
@@ -48,6 +55,40 @@ class ShotCommandTests(unittest.TestCase):
         reset = commands.reset_aspect(project, 0)
         self.assertEqual(reset[0].aspect_ratio, project.standard_aspect)
         self.assertEqual(project.keyframes[0].aspect_ratio, 2.0)
+
+    def test_deleting_the_leading_camera_rebases_the_shot_start_to_the_new_first(self):
+        project = Project(name='Shot', start_tick=1000, tick_rate=64.0,
+                          keyframes=[key(0), key(2), key(5)],
+                          tracks=[CvarTrack('r_depth_of_field',
+                                            [TrackKey(0, 0), TrackKey(5, 1)])])
+        candidate = commands.delete_camera(project, 0)
+        self.assertEqual([k.time for k in candidate.keyframes], [0, 3])
+        self.assertEqual(candidate.start_tick, 1000 + round(2 * 64.0))
+        self.assertEqual([k.time for k in candidate.tracks[0].keys], [0, 3])
+        # The caller's project is untouched, so Undo/late callers stay exact.
+        self.assertEqual([k.time for k in project.keyframes], [0, 2, 5])
+        self.assertEqual(project.start_tick, 1000)
+
+    def test_deleting_a_later_camera_keeps_the_start_anchor(self):
+        project = Project(name='Shot', start_tick=1000, tick_rate=64.0,
+                          keyframes=[key(0), key(2), key(5)])
+        candidate = commands.delete_camera(project, 1)
+        self.assertEqual([k.time for k in candidate.keyframes], [0, 5])
+        self.assertEqual(candidate.start_tick, 1000)
+
+    def test_rebasing_collapses_track_keys_before_the_new_start_to_zero(self):
+        project = Project(name='Shot', start_tick=0, tick_rate=64.0,
+                          keyframes=[key(0), key(5)],
+                          tracks=[CvarTrack('r_dof_override_ranges',
+                                            [TrackKey(1, (1, 2, 3, 4)), TrackKey(6, (5, 6, 7, 8))])])
+        candidate = commands.delete_camera(project, 0)
+        self.assertEqual([k.time for k in candidate.tracks[0].keys], [0.0, 1.0])
+        self.assertEqual(candidate.tracks[0].keys[0].value, (1, 2, 3, 4))
+
+    def test_delete_camera_rejects_an_out_of_range_index(self):
+        project = Project(name='Shot', keyframes=[key(0)])
+        with self.assertRaises(ValueError):
+            commands.delete_camera(project, 3)
 
     def test_history_checks_ready_then_syncs_before_move_and_restore(self):
         order = []; state = object()

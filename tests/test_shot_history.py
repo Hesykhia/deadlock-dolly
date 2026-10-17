@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from dolly.gui import DollyApp
+from dolly.gui import DollyApp, _number
 from dolly.path import AttachKey, CvarTrack, Keyframe, Project, TrackKey
 from dolly.shot_history import ShotHistory
 
@@ -196,7 +196,7 @@ class HistoryEditorTests(unittest.TestCase):
     def test_failed_delete_does_not_report_success_or_create_history(self):
         app = self.app()
         original = copy.deepcopy(app.project)
-        app._commit_camera = Mock(side_effect=ValueError('invalid camera'))
+        app._commit_project = Mock(side_effect=ValueError('invalid camera'))
         app._error = Mock()
         app._guard = DollyApp._guard.__get__(app)
         app._delete_key()
@@ -204,6 +204,22 @@ class HistoryEditorTests(unittest.TestCase):
         self.assertFalse(app.shot_history.can_undo)
         app._error.assert_called_once()
         app.status_text.set.assert_not_called()
+
+    def test_deleting_the_leading_camera_rebases_and_refreshes_the_anchor(self):
+        app = self.app()
+        app.start_tick = Mock()
+        app._refresh_tracks = Mock()
+        app._selection_index.return_value = 0
+        original = copy.deepcopy(app.project)
+        app.shot_history.reset(original)
+        app._delete_key()
+        self.assertEqual([k.time for k in app.project.keyframes], [0])
+        self.assertEqual(app.project.start_tick, round(2 * original.tick_rate))
+        self.assertEqual(app.project.tracks[0].keys[0].time, 0)
+        app.start_tick.set.assert_called_once_with(_number(app.project.start_tick))
+        app._refresh_tracks.assert_called_once()
+        app.undo_shot()
+        self.assertEqual(app.project, original)
 
     def test_history_cannot_mutate_active_playback_recording_or_preview(self):
         for attr in ('busy', 'playing', 'preview_attach', '_bone_picker_context', '_active_layer_take'):

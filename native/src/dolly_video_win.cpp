@@ -30,7 +30,9 @@
 namespace dolly::video {
 namespace {
 constexpr unsigned kSlots = 3;
-constexpr std::uint64_t kMemoryLimit = 256ULL * 1024 * 1024;
+// Sized for an 8K backbuffer (high-resolution stills); 4K takes are unchanged.
+constexpr std::uint64_t kMemoryLimit = 2048ULL * 1024 * 1024;
+constexpr UINT kMaxDimension = 8192;
 template <class T> struct Com {
     T* p = nullptr;
     ~Com() { reset(); }
@@ -797,7 +799,8 @@ void encode_ffmpeg(std::shared_ptr<Session> s) noexcept {
             apply_deferred_stop(*s);
             if (GetTickCount64() > deadline)
                 fail(*s, HRESULT_FROM_WIN32(ERROR_TIMEOUT),
-                     L"No DirectX 11 game frame was available for recording.");
+                     L"Recording did not receive a game frame within 10 seconds. Restore the "
+                     L"Deadlock window and retry. If it persists, export diagnostics.");
         }
         if (!s->stopping.load()) {
             std::wstring error;
@@ -1037,7 +1040,8 @@ void encode(std::shared_ptr<Session> s) noexcept {
             apply_deferred_stop(*s);
             if (GetTickCount64() > deadline)
                 fail(*s, HRESULT_FROM_WIN32(ERROR_TIMEOUT),
-                     L"No DirectX 11 game frame was available for recording.");
+                     L"Recording did not receive a game frame within 10 seconds. Restore the "
+                     L"Deadlock window and retry. If it persists, export diagnostics.");
         }
         if (!s->stopping.load()) {
             HRESULT hr = api.load() ? S_OK : HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
@@ -1186,11 +1190,11 @@ bool initialize_resources(Session& s, IDXGISwapChain* swapchain, ID3D11Device* d
     // Three GPU textures, three CPU frames, one optional resolve texture and
     // two NV12 samples: a fixed bound independent of recording length.
     if ((!rgba && !bgra) || !desc.Width || !desc.Height || (desc.Width & 1) || (desc.Height & 1) ||
-        desc.Width > 3840 || desc.Height > 2160 ||
+        desc.Width > kMaxDimension || desc.Height > kMaxDimension ||
         (s.depth_enabled ? bytes * 16 > kMemoryLimit * 2 : bytes * 8 > kMemoryLimit) ||
         desc.ArraySize != 1 || desc.MipLevels != 1) {
         fail(s, E_INVALIDARG,
-             L"Recording requires an even-sized SDR BGRA/RGBA backbuffer, up to 3840 x 2160.");
+             L"Recording requires an even-sized SDR BGRA/RGBA backbuffer, up to 8192 x 8192.");
         return false;
     }
     auto staging_desc = desc;
@@ -1276,6 +1280,11 @@ bool start(const Options& options) noexcept {
             encoder_thread->join();
         deferred_stop.store(0);
         deferred_stop_qpc.store(0);
+        // Path state belongs to one take. A completed path from an earlier take
+        // must not make a later free-camera take drop its repeated frames.
+        gPathPlaying.store(false, std::memory_order_release);
+        gPathCompleted.store(false, std::memory_order_release);
+        gPathPhase.store(0, std::memory_order_relaxed);
         auto next = std::make_shared<Session>();
         next->path = path;
         next->fps = options.fps;
@@ -1641,12 +1650,24 @@ void capture(IDXGISwapChain* swapchain, ID3D11Device* device, ID3D11DeviceContex
         }
         return;
     }
-    if (s.depth_enabled || s.shot_only) {
+    // A take that plays an authored path holds the camera at that path's end
+    // while the recorder is still open. Those clamped frames are the same
+    // authored instant, so they must be dropped for every path take, not only
+    // for the paired depth and POV/bone takes: otherwise each exported video
+    // ends with however many seconds of still frame the hold lasted.
+    const bool path_take = gPathPlaying.load(std::memory_order_relaxed) ||
+                           gPathCompleted.load(std::memory_order_relaxed);
+    if (s.depth_enabled || s.shot_only || path_take) {
         // The authored path clamps at its end. Dropping repeated clamped
         // frames keeps the color, depth and layer takes the same length.
         const auto previous = s.shot_last_replay.load(std::memory_order_relaxed);
-        if (!capture_video_phase(previous, replay_time, s.fixed_step, native_clock,
-                                 gPathCompleted.load(std::memory_order_relaxed))) {
+        const bool completed = gPathCompleted.load(std::memory_order_relaxed);
+        // Nothing after the completed endpoint belongs to the shot. Admitting the
+        // clamped frame produced exactly one extra held frame whose encoded
+        // duration was the real hold -- a freeze of up to seconds at the end of
+        // an otherwise correct export.
+        if (completed ||
+            !capture_video_phase(previous, replay_time, s.fixed_step, native_clock, completed)) {
             if (timing)
                 timing->outcome = CaptureTrace::repeated_phase;
             return;

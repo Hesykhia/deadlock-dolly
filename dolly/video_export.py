@@ -18,6 +18,7 @@ import threading
 import time
 
 from . import encoder_select, player_layer
+from .runtime import external_program_environment
 from .display import client_size
 
 
@@ -154,6 +155,7 @@ class VideoOptions:
     bundle_audio: bool = False
     # Optional hard native admission cap for bounded checks; 0 is unlimited.
     max_frames: int = 0
+    players_scratch: "Path | None" = None
 
     def validated(self) -> VideoOptions:
         if type(self.max_frames) is not int or not 0 <= self.max_frames <= 65535:
@@ -219,10 +221,14 @@ class VideoOptions:
             raise ValueError("Select an ffmpeg.exe for the chosen encoder.")
         # The native writer also creates the file exclusively. This early
         # check gives a useful error; it is not the overwrite safety boundary.
+        scratch = self.players_scratch
+        if 'players' in self.layers:
+            from .player_scratch import checked_directory
+            scratch = checked_directory(scratch or path.parent)
         result = VideoOptions(path, self.fps, self.bitrate, self.codec, self.quality, self.preset,
                               ffmpeg, self.fixed_step, speed, self.depth, self.depth_exr,
                               self.layers, self.white_clear, self.shot_only,
-                              self.full_resolution or self.depth, self.bundle_audio, self.max_frames)
+                              self.full_resolution or self.depth, self.bundle_audio, self.max_frames, scratch)
         if self.depth:
             encoder, _codec_id = resolve_backend(result)
             if encoder != 1:
@@ -435,7 +441,7 @@ class VideoExport:
                 raise RuntimeError("Could not check Players temporary space. Show the game window "
                                    "and choose a camera path before exporting.")
             frames = math.ceil(project.duration * options.fps / options.speed - 1e-6) + 2
-            player_layer.check_capture_space(deployment, *dimensions, frames)
+            player_layer.check_capture_space(options.players_scratch or deployment, *dimensions, frames)
         prepare = getattr(self.controller, "prepare_native_recording", None)
         self._pov = bool(pov)
         if pov:
@@ -504,7 +510,8 @@ class VideoExport:
                                ffmpeg_path=str(options.ffmpeg_path) if encoder == 1 and options.ffmpeg_path else "",
                                fixed_step=options.fixed_step, depth=options.depth,
                                depth_exr=options.depth_exr,
-                               shot_only=bool(options.depth or options.layers or options.shot_only),
+                               shot_only=bool(options.depth or options.layers or options.shot_only
+                                              or (project is not None and not frozen)),
                                white_clear=options.white_clear, **limited)
         except Exception as exc:
             if folder is not None:
@@ -521,8 +528,14 @@ class VideoExport:
             self._start_pending = False
         return self.status()
 
-    def stop(self, *, cancel: bool = False, timeout: float = 30.0) -> dict:
-        """Request shutdown and wait on the operation worker, never on Tk."""
+    def stop(self, *, cancel: bool = False, timeout: float = 120.0) -> dict:
+        """Request shutdown and wait on the operation worker, never on Tk.
+
+        The native encoder itself waits up to 120 s for FFmpeg to finalize a
+        large take before it reports a terminal state, so the desktop wait must
+        not give up sooner: a shorter window reported "still finishing" on big
+        or drop-heavy takes while finalization was still progressing normally.
+        """
         try:
             with self._lock:
                 bridge = self._bridge
@@ -679,8 +692,11 @@ class VideoExport:
         args.append(str(target))
         try:
             frames = max(1, source.stat().st_size // max(1, width * height))
-            result = subprocess.run(args, capture_output=True, text=True,
-                                    timeout=max(120.0, frames * 0.5))
+            with external_program_environment() as environment:
+                result = subprocess.run(args, capture_output=True, text=True,
+                                        timeout=max(120.0, frames * 0.5),
+                                        env=environment,
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("Depth preview could not be encoded: %s", exc)
             return status

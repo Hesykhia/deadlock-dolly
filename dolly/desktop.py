@@ -30,8 +30,12 @@ def _message(text: str, *, error: bool = False) -> None:
         print(text, file=sys.stderr)
 
 
-def bundle_self_test(report_path: Path) -> int:
-    """Exercise the actual frozen GUI/runtime without starting or editing a game."""
+def bundle_self_test(report_path: Path, *, hidden: bool = False) -> int:
+    """Exercise the actual frozen GUI/runtime without starting or editing a game.
+
+    ``hidden`` keeps the smoke-test window off the screen (withdrawn) so the
+    updater's post-install check never flashes a window over the update progress.
+    """
     report = {"version": __version__, "frozen": is_frozen(), "platform": sys.platform,
               "pointer_bits": struct.calcsize("P") * 8, "checks": {}, "game_launched": False}
     root = None
@@ -54,6 +58,8 @@ def bundle_self_test(report_path: Path) -> int:
         # camera editor, creates its widgets, exercises its icon and closes it.
         branding.set_taskbar_identity()
         root = tk.Tk()
+        if hidden:
+            root.withdraw()
         app_ui = gui.DollyApp(root)
         from .update_ui import UpdateUI
         app_ui.update_manager = UpdateUI(app_ui, skip_startup=True)
@@ -67,6 +73,12 @@ def bundle_self_test(report_path: Path) -> int:
         def visible(name):
             widget = getattr(app_ui, name)
             root.update_idletasks()
+            if hidden:
+                # Geometry is still laid out while withdrawn; the mapped flag is
+                # not meaningful off-screen, so only the size checks apply.
+                if widget.winfo_width() <= 1 or widget.winfo_height() <= 1:
+                    raise RuntimeError(f"Layout collapses {name} at the minimum window size")
+                return
             x = widget.winfo_rootx() - root.winfo_rootx()
             y = widget.winfo_rooty() - root.winfo_rooty()
             if (not widget.winfo_ismapped() or x < 0 or y < 0
@@ -89,7 +101,7 @@ def bundle_self_test(report_path: Path) -> int:
         app_ui.full_editor.set(False)
         app_ui._apply_editor_mode()
         root.update()
-        # The in-game capture switch must be reachable before Full editor.
+        # Capture remains reachable beside the always-available desktop pages.
         app_ui.library_page.reveal(app_ui.library_capture_toggle)
         visible("library_capture_toggle")
         report["checks"]["library_capture_switch"] = True
@@ -101,9 +113,10 @@ def bundle_self_test(report_path: Path) -> int:
         report["checks"]["citadel_dof_card"] = bool(app_ui.citadel_dof_checkbox.winfo_ismapped())
         app_ui.full_editor.set(False)
         app_ui._apply_editor_mode()
-        assert app_ui.notebook.select() == str(app_ui.setup_tab)
-        assert app_ui.notebook.tab(app_ui.camera_tab, "state") == "hidden"
-        report["checks"]["simple_and_full_editor"] = True
+        assert app_ui.notebook.select() == str(app_ui.camera_tab)
+        assert app_ui.notebook.tab(app_ui.camera_tab, "state") == "normal"
+        assert app_ui.notebook.tab(app_ui.cvar_tab, "state") == "normal"
+        report["checks"]["all_editor_pages_available"] = True
         report["checks"]["export_layout"] = "minimum_window_controls_visible"
         if sys.platform == "win32":
             root.iconbitmap(str(branding.ASSETS / "dolly.ico"))  # No silent PNG fallback in this gate.
@@ -135,6 +148,8 @@ def _run(argv: list[str]) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--recover", action="store_true", help="Restore pending game configuration; close Deadlock first")
     group.add_argument("--self-test", metavar="REPORT_JSON", type=Path, help="Check this bundle without launching a game")
+    group.add_argument("--self-test-hidden", metavar="REPORT_JSON", type=Path,
+                       help=argparse.SUPPRESS)
     group.add_argument("--cleanup-session", nargs=2, metavar=("SESSION", "HANDLE"), help=argparse.SUPPRESS)
     group.add_argument("--updated", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
@@ -144,6 +159,8 @@ def _run(argv: list[str]) -> int:
         return wait_and_cleanup(Path(directory), int(handle))
     if options.self_test:
         return bundle_self_test(options.self_test)
+    if options.self_test_hidden:
+        return bundle_self_test(options.self_test_hidden, hidden=True)
     if options.recover:
         from .launcher import recover_pending
         restored = recover_pending()
@@ -159,6 +176,9 @@ def _run(argv: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) == 2 and arguments[0] == '--player-encode-worker':
+        from .player_encode import worker_main
+        return worker_main(Path(arguments[1]))
     log = application_root() / "logs" / "Dolly_startup.log"
     try:
         log.parent.mkdir(parents=True, exist_ok=True)

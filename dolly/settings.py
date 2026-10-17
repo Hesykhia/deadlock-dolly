@@ -22,7 +22,7 @@ from .editor_actions import (
 )
 from .replays import parse_launch_options
 
-SETTINGS_VERSION = 6
+SETTINGS_VERSION = 8
 DEFAULT_RESHADE_BINDING = EditorBinding("F11")
 MAX_SETTINGS_BYTES = 64 * 1024
 
@@ -41,8 +41,12 @@ class AppSettings:
     reshade_runtime_path: str = ""
     full_editor: bool = False
     ffmpeg_path: str = ""
+    export_folder: str = ""
+    # Legacy saved-field name: enables automatic release metadata checks only.
+    # Downloading and installing still require an explicit Update now action.
     auto_updates: bool = True
     framing_grid_enabled: bool = False
+    pause_after_capture: bool = False
     migration_warnings: tuple[str, ...] = field(default=(), compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -52,11 +56,13 @@ class AppSettings:
             raise ValueError("full_editor must be a boolean.")
         if type(self.framing_grid_enabled) is not bool:
             raise ValueError("framing_grid_enabled must be a boolean.")
+        if type(self.pause_after_capture) is not bool:
+            raise ValueError("pause_after_capture must be a boolean.")
         if not isinstance(self.capture_binding, CaptureBinding):
             raise ValueError("capture_binding must be a CaptureBinding.")
         # Validate here as well as at the JSON boundary before saving anything.
         CaptureBinding.from_dict(self.capture_binding.to_dict())
-        for name in ("game_path", "replay_folder", "demo_path", "reshade_runtime_path", "ffmpeg_path"):
+        for name in ("game_path", "replay_folder", "demo_path", "reshade_runtime_path", "ffmpeg_path", "export_folder"):
             value = getattr(self, name)
             if not isinstance(value, str) or len(value) > 32768 or any(ord(char) < 32 for char in value):
                 raise ValueError(f"{name} must be a path without control characters.")
@@ -120,7 +126,7 @@ def validate_reshade_binding(binding, bindings):
 def _migrate_reshade_binding(bindings, warnings):
     binding = DEFAULT_RESHADE_BINDING
     if binding in bindings.values():
-        warnings.append("Your existing F11 binding was kept. ReShade menu is unbound; choose a key in Keybinds.")
+        warnings.append("Your existing F11 binding was kept. ReShade menu is unbound; choose a key in Controls.")
         return None
     return binding
 
@@ -154,7 +160,7 @@ def _decode_settings(data: bytes) -> AppSettings:
         raise ValueError("Dolly settings are not valid UTF-8 JSON.") from exc
     if not isinstance(raw, dict) or "version" not in raw:
         raise ValueError("Dolly settings must contain a version and preferences.")
-    if type(raw["version"]) is not int or raw["version"] not in (1, 2, 3, 4, 5, SETTINGS_VERSION):
+    if type(raw["version"]) is not int or raw["version"] not in (1, 2, 3, 4, 5, 6, 7, SETTINGS_VERSION):
         raise ValueError(f"Unsupported Dolly settings version: {raw['version']!r}.")
     if raw["version"] == 1:
         if set(raw) != {"version", "capture_binding"}:
@@ -167,7 +173,7 @@ def _decode_settings(data: bytes) -> AppSettings:
         for name, binding in bindings.items():
             if name != "capture" and binding == bindings["capture"]:
                 bindings[name] = None
-                warnings.append(f"Your existing capture key {capture.label} was kept. {ACTION_LABELS[name]} is unbound because its new default conflicts; choose a replacement in Keybinds.")
+                warnings.append(f"Your existing capture key {capture.label} was kept. {ACTION_LABELS[name]} is unbound because its new default conflicts; choose a replacement in Controls.")
         reshade_binding = _migrate_reshade_binding(bindings, warnings)
         return AppSettings(capture_binding=capture, action_bindings=bindings,
                            reshade_binding=reshade_binding, migration_warnings=tuple(warnings))
@@ -178,9 +184,14 @@ def _decode_settings(data: bytes) -> AppSettings:
     if raw["version"] >= 4:
         fields.add("full_editor")
     if raw["version"] >= 5:
+        # Keep either saved value; False remains an automatic-check opt-out.
         fields |= {"ffmpeg_path", "auto_updates"}
     if raw["version"] >= 6:
         fields.add("framing_grid_enabled")
+    if raw["version"] >= 7:
+        fields.add("export_folder")
+    if raw["version"] >= 8:
+        fields.add("pause_after_capture")
     if set(raw) != fields | {"version"}:
         raise ValueError(f"Version {raw['version']} Dolly settings have missing or unknown preference fields.")
     values = {name: raw[name] for name in fields}
@@ -252,8 +263,10 @@ def save_settings(
         "version": SETTINGS_VERSION,
         "full_editor": settings.full_editor,
         "ffmpeg_path": settings.ffmpeg_path,
+        "export_folder": settings.export_folder,
         "auto_updates": settings.auto_updates,
         "framing_grid_enabled": settings.framing_grid_enabled,
+        "pause_after_capture": settings.pause_after_capture,
         "capture_binding": settings.capture_binding.to_dict(),
         "game_path": settings.game_path,
         "replay_folder": settings.replay_folder,

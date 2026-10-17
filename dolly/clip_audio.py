@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from types import SimpleNamespace
 
-from .runtime import resource_root
+from .runtime import external_program_environment, resource_root
 
 
 def _sample_window(offset: float, duration: float, available: int,
@@ -72,7 +72,10 @@ def _mux(video: Path, audios: list[Path], ffmpeg: Path) -> None:
         # -shortest: audio/container rounding can otherwise discard the final
         # video packet even when the audio is only a fraction of a frame short.
         command += ["-c:v", "copy", "-c:a", "aac", "-b:a", "256k", str(target)]
-        result = subprocess.run(command, capture_output=True, text=True)
+        with external_program_environment() as environment:
+            result = subprocess.run(command, capture_output=True, text=True,
+                                    env=environment,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if result.returncode:
             raise RuntimeError("FFmpeg could not add clip audio: " + result.stderr[-1000:])
         if not target.is_file() or target.stat().st_size == 0:

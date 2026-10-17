@@ -17,6 +17,8 @@ shots, replays, logs or credentials.
 Build locally using the commands below. The build creates both the native helper
 and the desktop executables; package components must come from the same completed
 build. Inspect `build/checks/` if a check fails. Keep verification enabled.
+For routine development edits, use the [focused checks](internal/TESTING.md)
+before requesting a release build; the full release gates remain required.
 A successful build does not publish anything or prove in-game behavior; complete
 the relevant [in-game checks](internal/STAGE1_TESTING.md) before publishing.
 
@@ -62,8 +64,8 @@ actual packaged-editor startup fails. Inspect `build/checks/` after a failure.
 
 Successful outputs are under `dist/`:
 
-- `Deadlock_Dolly_<version>_Windows_x64.zip`
-- `Deadlock_Dolly_<version>_Source.zip`
+- `Deadlock_Dolly_0.6.52-alpha_Windows_x64.zip`
+- `Deadlock_Dolly_0.6.52-alpha_Source.zip`
 - `SHA256SUMS.txt`
 
 The portable ZIP contains a `DeadlockDolly` folder with `Dolly.exe`, `_internal`,
@@ -143,7 +145,9 @@ this reviewed profile.
 - Original component notices accompany the binary. Python's installed license
   and PyInstaller's COPYING file are copied from the actual build environment.
 
-The result is an unsigned portable app with the [startup updater](internal/UPDATING.md).
+The result is an unsigned portable app with [desktop update notices](internal/UPDATING.md):
+the editor opens immediately, release checks run in the background, and every
+download and installation requires an explicit **Update now** action.
 No installer or certificate-based code signing is configured. A successful
 bundle startup or native callback test does not establish Deadlock camera
 compatibility. Complete [STAGE1_TESTING.md](internal/STAGE1_TESTING.md) on the supported

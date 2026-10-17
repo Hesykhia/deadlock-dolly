@@ -11,7 +11,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(dolly_path STATIC src/dolly_path.cpp src/dolly_effects.cpp src/dolly_attach.cpp
-    src/dolly_visualization.cpp src/dolly_bone_picker.cpp src/dolly_hero_portrait.cpp)
+    src/dolly_visualization.cpp src/dolly_bone_picker.cpp src/dolly_hero_portrait.cpp
+    src/dolly_object_picker.cpp src/dolly_object_runtime.cpp)
 target_include_directories(dolly_path PUBLIC include)
 if(WIN32)
     target_link_libraries(dolly_path PUBLIC windowscodecs ole32)
@@ -21,6 +22,9 @@ target_include_directories(dolly_depth PUBLIC include)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(replay_events_tests tests/replay_events_tests.cpp)
+    target_include_directories(replay_events_tests PRIVATE include)
+    add_test(NAME native_replay_events_tests COMMAND replay_events_tests)
     add_executable(reviewed_contract_tests tests/reviewed_contract_tests.cpp)
     target_include_directories(reviewed_contract_tests PRIVATE include src)
     add_test(NAME native_reviewed_contract_tests COMMAND reviewed_contract_tests)
@@ -55,6 +59,12 @@ if(BUILD_TESTING)
     add_executable(bone_picker_tests tests/bone_picker_tests.cpp)
     target_link_libraries(bone_picker_tests PRIVATE dolly_path)
     add_test(NAME native_bone_picker_tests COMMAND bone_picker_tests)
+    add_executable(object_picker_tests tests/object_picker_tests.cpp)
+    target_link_libraries(object_picker_tests PRIVATE dolly_path)
+    add_test(NAME native_object_picker_tests COMMAND object_picker_tests)
+    add_executable(object_runtime_tests tests/object_runtime_tests.cpp)
+    target_link_libraries(object_runtime_tests PRIVATE dolly_path)
+    add_test(NAME native_object_runtime_tests COMMAND object_runtime_tests)
     add_executable(hero_portrait_tests tests/hero_portrait_tests.cpp)
     target_link_libraries(hero_portrait_tests PRIVATE dolly_path)
     add_test(NAME native_hero_portrait_tests COMMAND hero_portrait_tests)
@@ -82,6 +92,13 @@ if(BUILD_TESTING)
 endif()
 
 if(WIN32)
+    if(BUILD_TESTING)
+        add_executable(player_scratch_tests tests/player_scratch_tests.cpp)
+        target_include_directories(player_scratch_tests PRIVATE include)
+        target_compile_definitions(player_scratch_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        add_test(NAME native_player_scratch_tests COMMAND player_scratch_tests)
+        set_tests_properties(native_player_scratch_tests PROPERTIES TIMEOUT 15)
+    endif()
     add_executable(DollyGameAudio src/dolly_game_audio.cpp)
     target_link_libraries(DollyGameAudio PRIVATE ole32 mmdevapi)
     set_target_properties(DollyGameAudio PROPERTIES
@@ -136,8 +153,9 @@ if(WIN32)
     # online dependency fetches or third-party installer are needed to build.
     add_library(dolly_overlay STATIC
         src/dolly_overlay_win.cpp
-        src/dolly_overlay_panel.cpp
+        src/dolly_overlay_panel.cpp src/dolly_lite_panel.cpp src/dolly_curve_panel.cpp src/dolly_ui_layout.cpp src/dolly_ui_storage.cpp
         src/dolly_bone_picker_ui.cpp
+        src/dolly_object_picker_ui.cpp
         src/dolly_renderer_diagnostics_win.cpp
         src/dolly_video_win.cpp
         src/dolly_reshade_win.cpp
@@ -153,10 +171,10 @@ if(WIN32)
     target_include_directories(dolly_overlay PRIVATE include vendor/imgui vendor/imgui/backends)
     target_compile_definitions(dolly_overlay PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         IMGUI_IMPL_WIN32_DISABLE_GAMEPAD)
-    target_link_libraries(dolly_overlay PUBLIC dolly_path dolly_depth_scene minhook d3d11 dxgi d3dcompiler dwmapi gdi32 mfuuid ole32)
+    target_link_libraries(dolly_overlay PUBLIC dolly_path dolly_depth_scene minhook d3d11 dxgi d3dcompiler dwmapi gdi32 mfuuid ole32 shell32)
 
     add_library(DollyNative SHARED src/bridge_win.cpp src/dolly_editor_win.cpp
-        src/dolly_confetti.cpp)
+        src/dolly_confetti.cpp src/dolly_prop_runtime.cpp)
     target_include_directories(DollyNative PRIVATE include)
     target_link_libraries(DollyNative PRIVATE dolly_path dolly_overlay minhook bcrypt shell32)
     target_compile_definitions(DollyNative PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -170,7 +188,13 @@ if(WIN32)
         RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_CURRENT_SOURCE_DIR}/bin/win64")
 
     if(BUILD_TESTING)
-        add_executable(bridge_smoke tests/bridge_smoke.cpp src/dolly_confetti.cpp)
+        add_library(module_residency_fixture SHARED tests/module_residency_fixture.cpp)
+        target_include_directories(module_residency_fixture PRIVATE include)
+        add_executable(module_residency_tests tests/module_residency_tests.cpp)
+        add_test(NAME native_module_residency_tests COMMAND module_residency_tests "$<TARGET_FILE:module_residency_fixture>")
+        set_tests_properties(native_module_residency_tests PROPERTIES TIMEOUT 10)
+        add_executable(bridge_smoke tests/bridge_smoke.cpp src/dolly_confetti.cpp
+            src/dolly_prop_runtime.cpp)
         target_compile_definitions(bridge_smoke PRIVATE NOMINMAX)
         target_include_directories(bridge_smoke PRIVATE include)
         target_link_libraries(bridge_smoke PRIVATE dolly_path dolly_overlay minhook bcrypt shell32)
@@ -182,7 +206,21 @@ if(WIN32)
         add_executable(depth_video_smoke tests/depth_video_smoke.cpp)
         target_link_libraries(depth_video_smoke PRIVATE dolly_overlay)
         add_test(NAME native_dx11_overlay_smoke COMMAND overlay_smoke)
+        add_test(NAME native_dx11_lite_campaths COMMAND overlay_smoke --screenshot-lite "${CMAKE_CURRENT_BINARY_DIR}/lite-campaths-test.ppm")
+        set_tests_properties(native_dx11_lite_campaths PROPERTIES TIMEOUT 45)
         set_tests_properties(native_dx11_overlay_smoke PROPERTIES TIMEOUT 45)
+        # Production-renderer layout checks use a non-activating off-screen
+        # window, and keep generated pixels inside the build directory.
+        foreach(layout IN ITEMS compact empty paged)
+            add_test(NAME native_dx11_layout_${layout}
+                COMMAND overlay_smoke --screenshot "${CMAKE_CURRENT_BINARY_DIR}/layout-${layout}.ppm")
+            set_tests_properties(native_dx11_layout_${layout} PROPERTIES TIMEOUT 45
+                ENVIRONMENT "DOLLY_UI_TEST_HIDDEN=1;DOLLY_UI_TEST_LAYOUT=1;DOLLY_UI_TEST_WIDTH=640;DOLLY_UI_TEST_HEIGHT=480;DOLLY_UI_TEST_CAMERAS=64")
+        endforeach()
+        set_tests_properties(native_dx11_layout_empty PROPERTIES
+            ENVIRONMENT "DOLLY_UI_TEST_HIDDEN=1;DOLLY_UI_TEST_LAYOUT=1;DOLLY_UI_TEST_WIDTH=640;DOLLY_UI_TEST_HEIGHT=480;DOLLY_UI_TEST_CAMERAS=0")
+        set_tests_properties(native_dx11_layout_paged PROPERTIES
+            ENVIRONMENT "DOLLY_UI_TEST_HIDDEN=1;DOLLY_UI_TEST_LAYOUT=1;DOLLY_UI_TEST_WIDTH=1280;DOLLY_UI_TEST_HEIGHT=720;DOLLY_UI_TEST_CAMERAS=64")
         # CI runners lack the GPU/Media Foundation hardware to encode MP4s.
         # Skip this test in CI, but keep it registered for local development.
         # Quote the expansion: an undefined $ENV{CI} must stay a valid argument.

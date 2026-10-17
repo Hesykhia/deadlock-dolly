@@ -21,6 +21,7 @@ import time
 import uuid
 
 from .native_effects import compile_shot, EFFECTS
+from .native_errors import NativeBridgeError
 from .path import (CONFETTI_SPAWN_HEIGHT_DEFAULT, CONFETTI_SPAWN_HEIGHT_MAX,
                    CONFETTI_SPAWN_HEIGHT_MIN)
 from .particles import (PARTICLE_DEFAULT, PARTICLE_IDS, PARTICLE_INTENSITY_DEFAULT,
@@ -44,7 +45,11 @@ def _intensity_bits(value: float) -> int:
     raw = int(round(float(value) * PARTICLE_INTENSITY_SCALE))
     return max(2, min(PARTICLE_INTENSITY_MASK, raw))
 CONTROL_BYTES = 2 * 1024 * 1024
-MAPPING_BYTES = CONTROL_BYTES + 24576
+# The legacy tail is 24576 bytes (camera list + framing grid). The Object Picker
+# block lives in one appended 4 KiB page after it; keep this in step with
+# dolly_protocol.hpp kMappingBytes. Replay events append a separate 32 KiB block
+# after dolly/object_wire.OBJECT_MAPPING_BYTES; no existing offsets move.
+MAPPING_BYTES = CONTROL_BYTES + 24576 + 4096 + 32768
 PAYLOAD_OFFSET = 1024
 MAX_PAYLOAD_BYTES = CONTROL_BYTES - PAYLOAD_OFFSET
 CONTROL = struct.Struct("<8s6IQ2I2d512s")
@@ -64,10 +69,6 @@ CONFETTI_DIAGNOSTIC_FIELDS = ("state", "handles", "starts", "start_failures", "f
                               "running_frames", "resets", "stop_disabled", "stop_reconfigured",
                               "stop_seek", "stop_backward", "stop_invalid", "stop_shutdown",
                               "stop_create_failed", "state_changes", "max_backward_delta")
-
-
-class NativeBridgeError(RuntimeError):
-    """Native camera is unavailable or did not acknowledge a command."""
 
 
 def _load_atomic_library():
@@ -166,6 +167,10 @@ class NativeBridge(MediaTransport):
         self._viewer_sequence = 0
         self._viewer_enabled = False
         self._viewer_error = ""
+        self._preview_mapping = None
+        self._preview_sequence = 0
+        self._preview_enabled = False
+        self._preview_error = ""
         self.token = token
         self.editor_pid = editor_pid
         self.game_pid = 0
@@ -662,7 +667,7 @@ class NativeBridge(MediaTransport):
             self._sleep(min(0.02, remaining))
 
     def start_flight(self, demo_name, pose=None, timeout=8, *, cancelled=None, owner="flight",
-                     playback=False):
+                     playback=False, phase=0.0):
         """Enter native manual flight, optionally seeded from a displayed view.
 
         ``playback`` selects the replay state to wait for: ``False`` requires
@@ -670,6 +675,9 @@ class NativeBridge(MediaTransport):
         playing, and ``None`` follows the replay's current state.
         """
         timeout = _number(timeout, "Native acknowledgment timeout")
+        phase = _number(phase, "Manual camera phase")
+        if phase < 0:
+            raise ValueError("Manual camera phase must be nonnegative")
         if owner not in ("flight", "panel"):
             raise ValueError("Native flight owner must be flight or panel")
         if playback is not None and not isinstance(playback, bool):
@@ -696,7 +704,7 @@ class NativeBridge(MediaTransport):
                 raise NativeBridgeError("Native flight requires its launched game process")
             self._prepared = False
             self._manual = False
-            self._demo, self._start, self._speed = demo, 0.0, 1.0
+            self._demo, self._start, self._speed = demo, phase, 1.0
             self._frozen = playback is not True
             self._pov = False
             self._flags = self._compose_flags()
@@ -798,6 +806,77 @@ class NativeBridge(MediaTransport):
             self._store(offset + 8, even)
             self._editor_cameras_sequence = even
 
+    def configure_shader_loading(self, loading):
+        """Publish a noninteractive startup notice independently of editor ownership."""
+        from .lite_mode import REPLAY_INFO, REPLAY_INFO_OFFSET, pack_replay_info
+        from .path import Project
+        with self._lock:
+            self._check_open()
+            self._shader_loading = bool(loading)
+            previous = getattr(self, "_lite_replay_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = bytes(self._mapping[REPLAY_INFO_OFFSET:REPLAY_INFO_OFFSET + REPLAY_INFO.size])
+            if data[:8] != b'DLYLITE1':
+                data = pack_replay_info(odd, Project(), 1)
+            values = list(REPLAY_INFO.unpack(data))
+            values[1] = odd
+            values[6] = (values[6] & ~4) | (4 if loading else 0)
+            data = REPLAY_INFO.pack(*values)
+            self._store(REPLAY_INFO_OFFSET + 8, odd)
+            self._mapping[REPLAY_INFO_OFFSET:REPLAY_INFO_OFFSET + 8] = data[:8]
+            self._mapping[REPLAY_INFO_OFFSET + 12:REPLAY_INFO_OFFSET + len(data)] = data[12:]
+            self._store(REPLAY_INFO_OFFSET + 8, even)
+            self._lite_replay_sequence = even
+
+    def configure_lite_replay(self, project, revision, first=0, total_ticks=None):
+        from .lite_mode import pack_replay_info, REPLAY_INFO_OFFSET
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_lite_replay_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = pack_replay_info(odd, project, revision, first, total_ticks)
+            if getattr(self, "_shader_loading", False):
+                from .lite_mode import REPLAY_INFO
+                values = list(REPLAY_INFO.unpack(data))
+                values[6] |= 4
+                data = REPLAY_INFO.pack(*values)
+            offset = REPLAY_INFO_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset+8] = data[:8]
+            self._mapping[offset+12:offset+len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._lite_replay_sequence = even
+
+    def configure_editor_cinematic(self, token, revision, state):
+        from . import editor_wire as wire
+        if not 0 < token <= 0xffffffff or not 0 <= revision <= 0xffffffff or state not in (1, 2, 3):
+            raise ValueError("Invalid cinematic preparation result")
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, '_cinematic_sequence', 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.CINEMATIC_STATUS.pack(b'DLYCIN01', odd, 1, token, revision, state)
+            offset = wire.CINEMATIC_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._cinematic_sequence = even
+
+    def configure_replay_events(self, index):
+        from . import replay_event_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, '_replay_events_sequence', 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack(odd, index)
+            offset = wire.OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset+8] = data[:8]
+            self._mapping[offset+12:offset+len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._replay_events_sequence = even
+
     def configure_framing_grid(self, *, enabled=False, binding=None):
         """Optional framing-guide block; enabled state and its bindable action."""
         from . import editor_wire as wire
@@ -812,6 +891,55 @@ class NativeBridge(MediaTransport):
             self._mapping[offset + 12:offset + len(data)] = data[12:]
             self._store(offset + 8, even)
             self._editor_framing_grid_sequence = even
+
+    def configure_level_view(self, *, binding=None, standard_aspect=None):
+        """Optional level-view block: the key binding and the normal framing.
+
+        Native keeps the live-only reset; this block only carries the shortcut
+        and the project's normal aspect so nothing round-trips through Python
+        while the camera is being levelled.
+        """
+        from . import editor_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_editor_level_view_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack_level_view(odd, binding, standard_aspect)
+            offset = wire.LEVEL_VIEW_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_level_view_sequence = even
+
+    def configure_object_picker(self, objects, *, active=False, preview=False, selected=-1,
+                                distance=None, binding=None):
+        """Optional Object Picker block: the placed list and its bindable action.
+
+        The block lives in one appended 4 KiB page (object_wire.OBJECT_BASE); the
+        mapping is sized to include it. ``objects`` is the project's placed list.
+        """
+        from . import object_wire as wire
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_editor_object_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            distance = wire.DISTANCE_DEFAULT if distance is None else distance
+            reserved = 0
+            if binding is not None:
+                reserved = binding.vk | binding.modifiers << 16
+            data = bytearray(wire.pack_config(odd, objects, active=active, preview=preview,
+                                              selected=selected, distance=distance))
+            # Patch the bindable action into the reserved header field (the wire
+            # packer leaves it zero so the layout stays a pure function of state).
+            reserved_offset = wire.OBJECT_CONFIG_HEADER.size - 4
+            struct.pack_into("<I", data, reserved_offset, reserved)
+            offset = wire.OBJECT_CONFIG_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_object_sequence = even
 
     def configure_editor_attach(self, offsets, attach=None, preview=False, snap_request=0, picker=False):
         """Optional attach block: schema offsets plus the selected key's state."""
@@ -846,6 +974,21 @@ class NativeBridge(MediaTransport):
                     return wire.unpack_picker(data)
             raise NativeBridgeError("The Bone Picker is updating; retry in a moment.")
 
+    def editor_object_status(self):
+        """Optional native Object Picker status; old DLLs leave it unwritten."""
+        from . import object_wire as wire
+        with self._lock:
+            self._check_open()
+            for _ in range(4):
+                first = self._load_sequence(wire.OBJECT_STATUS_OFFSET + 8)
+                if first & 1:
+                    continue
+                data = bytes(self._mapping[wire.OBJECT_STATUS_OFFSET:
+                                           wire.OBJECT_STATUS_OFFSET + wire.OBJECT_STATUS.size])
+                if first == self._load_sequence(wire.OBJECT_STATUS_OFFSET + 8):
+                    return wire.unpack_status(data)
+            raise NativeBridgeError("The Object Picker is updating; retry in a moment.")
+
     def editor_roster(self):
         """Optional native player roster for the attach target picker."""
         from . import editor_wire as wire
@@ -859,6 +1002,44 @@ class NativeBridge(MediaTransport):
                 if first != self._load_sequence(wire.ROSTER_OFFSET + 8):
                     continue
                 return wire.unpack_roster(data)
+
+    def set_prop_probe(self, request):
+        """Experimental: queue one native prop-persistence probe request.
+
+        ``request`` is 'create' or 'recount'. This is a probe, not a feature; it
+        is only used by the bounded persistence test harness.
+        """
+        from . import editor_wire as wire
+        code = {"create": wire.PROP_PROBE_CREATE, "recount": wire.PROP_PROBE_RECOUNT}.get(request)
+        if code is None:
+            raise ValueError("Prop probe request must be 'create' or 'recount'")
+        with self._lock:
+            self._check_open()
+            previous = getattr(self, "_editor_prop_probe_sequence", 0)
+            odd, even = (previous + 1) & 0xffffffff, (previous + 2) & 0xffffffff
+            data = wire.pack_prop_probe(odd, code)
+            offset = wire.PROP_PROBE_OFFSET
+            self._store(offset + 8, odd)
+            self._mapping[offset:offset + 8] = data[:8]
+            self._mapping[offset + 12:offset + len(data)] = data[12:]
+            self._store(offset + 8, even)
+            self._editor_prop_probe_sequence = even
+
+    def editor_prop_probe_status(self):
+        """Read the native prop-probe result (counts, handle, error)."""
+        from . import editor_wire as wire
+        with self._lock:
+            self._check_open()
+            offset = wire.PROP_PROBE_OFFSET + wire.PROP_PROBE_CONFIG.size
+            for _ in range(4):
+                first = self._load_sequence(offset + 8)
+                if first & 1:
+                    continue
+                data = bytes(self._mapping[offset:offset + wire.PROP_PROBE_STATUS.size])
+                if first == self._load_sequence(offset + 8):
+                    return wire.unpack_prop_probe_status(data)
+            raise NativeBridgeError("The prop probe is updating; retry in a moment.")
+
             raise NativeBridgeError("The native attach roster is busy; retry in a moment.")
 
     def editor_bones(self):
@@ -1035,7 +1216,7 @@ class NativeBridge(MediaTransport):
         self._viewer_sequence = sequence
         self._viewer_enabled = bool(struct.unpack_from("<I", packet, 16)[0])
 
-    def publish_visualization(self, project=None, *, enabled=True, selected_camera=0):
+    def publish_visualization(self, project=None, *, enabled=True, selected_camera=0, revision=0, session_id=0):
         """Publish optional in-game guides without changing camera transport.
 
         Call only after a shot, selection, or visibility change; compilation
@@ -1050,7 +1231,8 @@ class NativeBridge(MediaTransport):
                 if sequence > 0xFFFFFFFE:
                     sequence = 2
                 packet = wire.build_visualization(project, sequence=sequence,
-                                                   enabled=enabled, selected_camera=selected_camera)
+                                                   enabled=enabled, selected_camera=selected_camera,
+                                                   revision=revision, session_id=session_id)
                 if self._viewer_mapping is None:
                     # A disabled or empty shot needs no additional OS object.
                     if not struct.unpack_from("<I", packet, 16)[0]:
@@ -1114,6 +1296,104 @@ class NativeBridge(MediaTransport):
                 except Exception as exc:
                     self._viewer_error = "Path viewer close: " + str(exc)
 
+    def _preview_store_sequence(self, value):
+        from . import visualization_preview_wire as wire
+        if self._atomic32 is None:
+            struct.pack_into("<I", self._preview_mapping, wire.SEQUENCE_OFFSET, value)
+        else:
+            slot = ctypes.c_int32.from_buffer(self._preview_mapping, wire.SEQUENCE_OFFSET)
+            self._atomic32(ctypes.byref(slot), ctypes.c_int32(value))
+
+    def _preview_write(self, packet):
+        from . import visualization_preview_wire as wire
+        sequence = struct.unpack_from("<I", packet, wire.SEQUENCE_OFFSET)[0]
+        self._preview_store_sequence(sequence-1)
+        self._preview_mapping[:wire.SEQUENCE_OFFSET] = packet[:wire.SEQUENCE_OFFSET]
+        self._preview_mapping[wire.SEQUENCE_OFFSET+4:len(packet)] = packet[wire.SEQUENCE_OFFSET+4:]
+        self._preview_store_sequence(sequence)
+        self._preview_sequence = sequence
+        self._preview_enabled = bool(struct.unpack_from("<I", packet, 16)[0])
+
+    def publish_visualization_preview(self, packet=None, **identity):
+        """Publish optional render-only bytes without touching committed guides.
+
+        ``packet`` is already compiled by the bounded gesture lifecycle. Only
+        its envelope sequence changes for a stationary-drag heartbeat.
+        """
+        from . import visualization_preview_wire as wire
+        with self._lock:
+            try:
+                self._check_open()
+                sequence = self._preview_sequence+2
+                if sequence > 0xFFFFFFFE:
+                    sequence = 2
+                wrapped = wire.build_preview(packet, sequence=sequence, **identity)
+                if self._preview_mapping is None:
+                    if packet is None:
+                        self._preview_error = ""
+                        return True
+                    name = "Local\\DeadlockDollyNative_"+self.token+".viewer.preview"
+                    if self._mapping_factory is None:
+                        if os.name != "nt":
+                            raise NativeBridgeError("Path preview transport requires Windows")
+                        mapping = mmap.mmap(-1, wire.MAPPING_BYTES, tagname=name, access=mmap.ACCESS_WRITE)
+                    else:
+                        mapping = self._mapping_factory(name, wire.MAPPING_BYTES)
+                    if len(mapping) != wire.MAPPING_BYTES:
+                        close = getattr(mapping, "close", None)
+                        if close is not None:
+                            close()
+                        raise NativeBridgeError("Path preview mapping has an unexpected size")
+                    self._preview_mapping = mapping
+                    mapping[:] = b"\0"*wire.MAPPING_BYTES
+                self._preview_write(wrapped)
+                self._preview_error = ""
+                return True
+            except Exception as exc:
+                self._preview_error = str(exc)
+                # Draft failure clears only the separate optional mapping.
+                if self._preview_mapping is not None:
+                    try:
+                        sequence = self._preview_sequence+2
+                        if sequence > 0xFFFFFFFE:
+                            sequence = 2
+                        self._preview_write(wire.build_preview(sequence=sequence))
+                    except Exception:
+                        self._preview_enabled = False
+                return False
+
+    def _close_visualization_preview(self):
+        if self._preview_mapping is None:
+            return
+        from . import visualization_preview_wire as wire
+        mapping = self._preview_mapping
+        try:
+            sequence = self._preview_sequence+2
+            if sequence > 0xFFFFFFFE:
+                sequence = 2
+            self._preview_store_sequence(sequence-1)
+            packet = wire.build_preview(sequence=sequence)
+            mapping[:8] = packet[:8]
+            mapping[12:] = packet[12:]+b"\0"*(wire.MAPPING_BYTES-len(packet))
+            self._preview_store_sequence(sequence)
+            self._preview_enabled = False
+        except Exception as exc:
+            self._preview_error = "Path preview close: "+str(exc)
+        finally:
+            self._preview_mapping = None
+            close = getattr(mapping, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception as exc:
+                    self._preview_error = "Path preview close: "+str(exc)
+
+    def visualization_preview_diagnostics(self):
+        with self._lock:
+            return {"mapping_open": self._preview_mapping is not None,
+                    "enabled": self._preview_enabled, "revision": self._preview_sequence,
+                    "error": self._preview_error}
+
     def visualization_diagnostics(self):
         with self._lock:
             return {"mapping_open": self._viewer_mapping is not None,
@@ -1141,6 +1421,7 @@ class NativeBridge(MediaTransport):
         result["graphics"] = self.graphics_diagnostics()
         result["input"] = self.input_diagnostics()
         result["visualization"] = self.visualization_diagnostics()
+        result["visualization_preview"] = self.visualization_preview_diagnostics()
         try:
             result["media"] = self.media_status()
         except (NativeBridgeError, OSError, ValueError) as exc:
@@ -1173,6 +1454,7 @@ class NativeBridge(MediaTransport):
                 if self._thread is not None and self._thread is not threading.current_thread():
                     self._thread.join(timeout=0.5)
                 with self._lock:
+                    self._close_visualization_preview()
                     self._close_visualization()
                     self._closed = True
                     close = getattr(self._mapping, "close", None)
