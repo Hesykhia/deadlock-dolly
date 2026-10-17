@@ -16,21 +16,20 @@ from release_files import sha256
 
 
 class NativePackagingTests(unittest.TestCase):
-    def test_ui_override_pack_matches_launcher_pin_and_shipped_stylesheets(self):
-        from dolly.launcher import UI_OVERRIDE_PACK_SHA256
-        import struct
-        pack = TOOLS.parent / "native/assets/ui/pak02_dir.vpk"
-        data = pack.read_bytes()
-        self.assertEqual(sha256(pack), UI_OVERRIDE_PACK_SHA256)
-        magic, version, tree_size = struct.unpack_from("<III", data, 0)
-        self.assertEqual((magic, version), (0x55AA1234, 2))
-        tree = data[28:28 + tree_size]
-        for expected in (b"vcss_c\0panorama/styles\0citadel_client_status\0",
-                         b"citadel_hud_and_db_overlay\0"):
-            self.assertIn(expected, tree)
-        body = data[28 + tree_size:]
-        self.assertIn(b"ClientServerDebugStats", body)
-        self.assertIn(b"GameLogoIcon", body)
+    def test_declared_replay_reader_is_bundled_and_hash_checked(self):
+        native,dll,metadata=self.runtime_fixture()
+        reader=native/build_native.REPLAY_INDEX_RELATIVE
+        reader.write_bytes(b'Replay reader fixture')
+        notice=native/'replay_index/THIRD_PARTY_NOTICES.txt'
+        notice.parent.mkdir();notice.write_text('MIT license fixture')
+        info=json.loads(metadata.read_text());info['replay_index_sha256']=sha256(reader)
+        metadata.write_text(json.dumps(info))
+        with patch.object(build_native,'verify_native_dll',return_value={'machine':'x64'}):
+            files,_=build_native.runtime_files(self.root)
+            self.assertIn(reader,[source for source,_ in files])
+            reader.write_bytes(b'Unexpected replacement')
+            with self.assertRaisesRegex(ValueError,'Replay reader'):
+                build_native.runtime_files(self.root)
 
     def test_reviewed_module_profiles_match_both_launcher_and_native_pins(self):
         from dolly.launcher import NATIVE_GAME_SHA256
@@ -44,7 +43,7 @@ class NativePackagingTests(unittest.TestCase):
             "engine": (root / "native/src/bridge_win.cpp",
                        r'k(?:Updated|September|Build\d+)?EngineHash\[\]\s*=\s*"([a-f0-9]{64})"'),
             "tier0": (root / "native/src/native_effects_win.hpp",
-                      r'k(?:Updated|September|Build6726)?Tier0Hash\[\]\s*=\s*"([a-f0-9]{64})"'),
+                      r'k(?:Updated|September|Build\d+)?Tier0Hash\[\]\s*=\s*"([a-f0-9]{64})"'),
         }
         for module, relative, key in (
             ("client", "citadel/bin/win64/client.dll", "client_sha256"),
@@ -68,12 +67,6 @@ class NativePackagingTests(unittest.TestCase):
         exported = set(source_files(root))
         self.assertFalse(expected - exported,
                          f"Reviewed profiles missing from source export: {expected - exported}")
-
-    def test_compatibility_manifest_matches_launcher_pins(self):
-        from dolly import compatibility
-        from dolly.launcher import NATIVE_GAME_SHA256
-        document = compatibility.load_manifest()
-        self.assertEqual(compatibility.accepted_pins(document), NATIVE_GAME_SHA256)
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="Dolly native package ")

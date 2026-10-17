@@ -24,6 +24,7 @@
 #include "dolly_path.hpp"
 #include "dolly_effects.hpp"
 #include "dolly_protocol.hpp"
+#include "dolly_module_residency.hpp"
 #include "dolly_replay_clock.hpp"
 #include "dolly_editor.hpp"
 #include "dolly_bone_picker.hpp"
@@ -72,9 +73,18 @@ constexpr char kBuild6757EngineHash[] =
 // October 9: all twelve reviewed replay accessors and primary RTTI tables are unchanged.
 constexpr char kBuild6769EngineHash[] =
     "e5e4b2df76ff88d99dd9217e4ccde09bcce9b963327b38963f3ae90ce7e55ac2";
+// Build 6779 retains this replay layout; network-service changes are in the generated profile.
+constexpr char kBuild6779EngineHash[] =
+    "8cba5362c844f9c8bbeab1e54ae8bd8991c2ef54542e5a4536f4e10c7da8d493";
+// Build 6782 changes only engine debug metadata; the reviewed code/data are identical.
+constexpr char kBuild6782EngineHash[] =
+    "34901dc81a2135bb5a7932b47278b2b21550d01513924a3072b244a89bf74110";
+// Build 6793 changes only engine debug metadata; the reviewed code and data are identical.
+constexpr char kBuild6793EngineHash[] =
+    "44bb357a1baf4765043042de3234112e18ea0db7e0b637f18385bb21f8338707";
 constexpr char kSound6726Hash[] =
     "a2f20871181b240b994c3a3b9d5a61fcb52392e991b7ce984c06bf1d55fd642c";
-constexpr char kUnlockerHash[] = "aa4834d5d189743decc330d53fb07680416a0c31ab53d2a25112a464a04e72a2";
+constexpr char kUnlockerHash[] = "5f75ab3dafc73a817bd545a80a7d55110d37ed728f7ad5c0bae8c5a8863106e4";
 constexpr char kSoundSystemHash[] =
     "5f01b91485f67c980235054c8e1e517b04e34fb53491f26100c8e1c743dd0ba0";
 constexpr char kSeptemberSoundSystemHash[] =
@@ -83,6 +93,8 @@ constexpr char kSound6739Hash[] =
     "15b30cb326d8bbeb7c5fbe7a20aabd3d58d6d790ed344989f8d015c2c290981b";
 constexpr char kSound6753Hash[] =
     "1df6e097125504ac6d4863edd4169928697f1f1d440397033b20f2b1e52aa8c2";
+    constexpr char kSound6793Hash[] =
+        "5b5c6a369e4572066e3c0d8a0e7f88c33d028bab3ceffc1dc4c0ee679e252b50";
 constexpr std::uintptr_t kDemoGlobal = 0x61b618, kDemoTable = 0x535730, kEngineTable = 0x540128;
 struct EngineLayout {
     std::uintptr_t demo_global, demo_table, engine_table;
@@ -1085,6 +1097,10 @@ static void on_view(void* self, std::uintptr_t caller) noexcept {
             }
         } else if (manual_mode && !picker_active) {
             player_capture::set_hidden_handle(0, 4);
+            // A level-view request applies to this live manual pose only, in the
+            // same frame that renders it. The attach-preview branch above stays
+            // untouched so authored offset roll is preserved.
+            editor_apply_level_view(manual_pose);
             editor_integrate_flight(manual_pose, real_delta);
         }
         if (!pose_valid(manual_pose)) {
@@ -1411,9 +1427,12 @@ static DWORD WINAPI worker(void*) {
         const bool engine6739 = module_matches(engine, kBuild6739EngineHash, 0x906000);
         const bool engine6753 = module_matches(engine, kBuild6753EngineHash, 0x906000);
         const bool engine6757 = module_matches(engine, kBuild6757EngineHash, 0x906000);
+        const bool engine6779 = module_matches(engine, kBuild6779EngineHash, 0x906000);
+        const bool engine6782 = module_matches(engine, kBuild6782EngineHash, 0x906000);
+        const bool engine6793 = module_matches(engine, kBuild6793EngineHash, 0x906000);
         const bool engine6769 = module_matches(engine, kBuild6769EngineHash, 0x906000);
         const bool september_engine = module_matches(engine, kSeptemberEngineHash, 0x906000);
-        if (!engine6769 && !engine6757 && !engine6753 && !engine6739 && !engine6728 && !engine6726 && !september_engine &&
+        if (!engine6793 && !engine6782 && !engine6779 && !engine6769 && !engine6757 && !engine6753 && !engine6739 && !engine6728 && !engine6726 && !september_engine &&
             !module_matches(engine, kEngineHash, 0x969000) &&
             !module_matches(engine, kUpdatedEngineHash, 0x969000)) {
             startup_status(
@@ -1423,7 +1442,7 @@ static DWORD WINAPI worker(void*) {
         }
         gClient = reinterpret_cast<std::uintptr_t>(client);
         gEngine = reinterpret_cast<std::uintptr_t>(engine);
-        gEngineLayout = engine6769         ? kEngine6728Layout
+        gEngineLayout = (engine6793 || engine6782 || engine6779 || engine6769) ? kEngine6728Layout
                         : engine6757       ? kEngine6728Layout
                         : engine6753       ? kEngine6728Layout
                         : engine6739       ? kEngine6728Layout
@@ -1440,7 +1459,12 @@ static DWORD WINAPI worker(void*) {
         }
         attach_runtime::configure_client(client);
         confetti::initialize(gClient);
-        prop_runtime::initialize(gClient);
+        // Experimental native prop creation is reviewed only for build 6774.
+        // Common prologue bytes alone cannot admit its private create ABI.
+        if (module_matches(client,
+                           "e2bafed8ebdfd239d506b4f59b24a09719f945c6a63f69766171349b886603d4",
+                           0x4226000))
+            prop_runtime::initialize(gClient);
         if (!init_cvar_interface()) {
             startup_status(
                 State::Unsupported, 26,
@@ -1528,7 +1552,8 @@ static DWORD WINAPI worker(void*) {
                                   module_matches(sound, kSeptemberSoundSystemHash, 0x6bf000) ||
                                   module_matches(sound, kSound6726Hash, 0x6bf000) ||
                                   module_matches(sound, kSound6739Hash, 0x6bf000) ||
-                                  module_matches(sound, kSound6753Hash, 0x6bf000));
+                                  module_matches(sound, kSound6753Hash, 0x6bf000) ||
+                                  module_matches(sound, kSound6793Hash, 0x6bf000));
         // Hook and original trampoline remain resident until process exit. Losing
         // the editor only releases ownership, avoiding code-unload races in a view.
         std::shared_ptr<const NativeShot> shot;
@@ -1563,7 +1588,8 @@ static DWORD WINAPI worker(void*) {
                                     module_matches(module, kSeptemberSoundSystemHash, 0x6bf000) ||
                                     module_matches(module, kSound6726Hash, 0x6bf000) ||
                                     module_matches(module, kSound6739Hash, 0x6bf000) ||
-                                    module_matches(module, kSound6753Hash, 0x6bf000));
+                                    module_matches(module, kSound6753Hash, 0x6bf000) ||
+                                    module_matches(module, kSound6793Hash, 0x6bf000));
                 }
             }
             if (diagnostic_now >= next_renderer_probe) {
@@ -1801,6 +1827,16 @@ static DWORD WINAPI worker(void*) {
                             if (!preview->cache.picker)
                                 preview->cache.picker = std::make_shared<PickerCatalog>();
                             preview->cache.picker->sequence = attach_config.sequence;
+                            // Carry the resolver error (if any) so an empty catalog
+                            // can explain itself in the picker instead of showing
+                            // an unexplained empty bone list.
+                            preview->cache.picker->error[0] = 0;
+                            const char* picker_failure =
+                                !preview->cache.ready ? attach_error : nullptr;
+                            if (picker_failure)
+                                std::snprintf(preview->cache.picker->error,
+                                              sizeof(preview->cache.picker->error), "%s",
+                                              picker_failure);
                             picker_publish(preview->cache.picker);
                         }
                         if (!preview->cache.ready && attach_error)
@@ -1836,9 +1872,14 @@ static DWORD WINAPI worker(void*) {
     return 0;
 }
 static BOOL CALLBACK start_worker(PINIT_ONCE, PVOID, PVOID*) {
+    if (!pin_worker_module(reinterpret_cast<const void*>(&worker))) {
+        OutputDebugStringA("Dolly native: could not keep startup worker resident.\n");
+        return FALSE;
+    }
     HANDLE thread = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
-    if (thread)
-        CloseHandle(thread);
+    if (!thread)
+        return FALSE;
+    CloseHandle(thread);
     return TRUE;
 }
 static BOOL CALLBACK load_unlocker(PINIT_ONCE, PVOID, PVOID*) {

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include "dolly_path.hpp"
+#include "dolly_video.hpp"
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -16,6 +17,8 @@ constexpr std::size_t kEditorConfigOffset = 576;
 constexpr std::size_t kEditorStatusOffset = 2 * 1024 * 1024 + 2048;
 constexpr std::size_t kEditorInputDiagnosticsOffset = 2 * 1024 * 1024 + 3584;
 constexpr std::uint32_t kEditorAbi = 2;
+constexpr std::uint32_t kEditorPlaybackStateMask = 3;
+constexpr std::uint32_t kEditorPauseAfterCapture = 4;
 constexpr std::size_t kEditorBindingCount = 26, kEditorEventCount = 16;
 enum class EditorOwner : std::uint32_t {
     Disabled = 0,
@@ -133,8 +136,38 @@ enum class EditorAction : std::uint32_t {
     ObjectPlace,
     ObjectSelect,
     ObjectDelete,
-    ObjectTransform
+    ObjectTransform,
+    SaveShot,
+    SeekReplayTick,
+    ClearCameraPath,
+    FocusReplayPlayer,
+    PrepareCinematic,
+    SetPauseAfterCapture,
+    SetCameraPosition,
+    SetCameraCurveValue,
+    SelectCurveCamera,
+    SetCameraPositionTangents,
+    PreviewCameraCurveValue,
+    PreviewCameraPositionTangents,
+    ClearCameraCurvePreview,
+    // Live level-view reset. Appended so every existing action ID is unchanged.
+    LevelView
 };
+static_assert(static_cast<std::uint32_t>(EditorAction::LevelView)==118,
+              "Stable level-view action ID");
+static_assert(static_cast<std::uint32_t>(EditorAction::PreviewCameraCurveValue)==115 &&
+              static_cast<std::uint32_t>(EditorAction::PreviewCameraPositionTangents)==116 &&
+              static_cast<std::uint32_t>(EditorAction::ClearCameraCurvePreview)==117,
+              "Stable render-only curve preview action IDs");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraPositionTangents) == 114,
+              "Stable XYZ arrival/departure action ID");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraCurveValue) == 112 &&
+              static_cast<std::uint32_t>(EditorAction::SelectCurveCamera) == 113,
+              "Stable unified curve action IDs");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraPosition) == 111,
+              "Stable XYZ value-graph action ID");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetPauseAfterCapture) == 110,
+              "Stable pause-after-capture preference action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::TakeScreenshot) == 98,
               "Stable screenshot action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::ObjectPickerOpen) == 99 &&
@@ -178,7 +211,7 @@ struct EditorConfig {
     char shot_name[96], message[128];
     double duration, playhead;
     std::int32_t replay_tick;
-    std::uint32_t playback_flags;
+    std::uint32_t playback_flags; // playing, busy, pause-after-capture preference
     double playback_speed;
     std::uint32_t playback_rate;
     EditorBinding reshade_binding;
@@ -303,6 +336,15 @@ struct EditorFollowConfig {
     double distance, shoulder, height;
 };
 constexpr std::size_t kEditorCameraListOffset = 2 * 1024 * 1024 + 23360;
+constexpr std::size_t kEditorCinematicOffset = 2 * 1024 * 1024 + 60000;
+struct EditorCinematicStatus {
+    char magic[8];
+    std::uint32_t sequence, abi, token, revision, state;
+};
+static_assert(sizeof(EditorCinematicStatus) == 28, "Python cinematic completion layout");
+static_assert(kEditorCinematicOffset + sizeof(EditorCinematicStatus) <= 2 * 1024 * 1024 + 61440,
+              "Cinematic completion fits the existing mapping");
+bool editor_cinematic_status(EditorCinematicStatus& out) noexcept;
 constexpr std::size_t kEditorCameraListCount = 32;
 struct EditorCameraRow {
     double time, aspect, roll;
@@ -333,6 +375,20 @@ static_assert(kEditorFramingGridOffset + sizeof(EditorFramingGridConfig) <=
 static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraTime) == 95 &&
                   static_cast<std::uint32_t>(EditorAction::SetCameraRoll) == 96,
               "Stable inline camera edit action IDs");
+// Optional level-view block after the framing guide. Carries the bindable
+// action (same packed vk/modifier convention) and the project's normal aspect
+// ratio. The reset itself is live-only: it levels the paused camera's roll and
+// restores this framing without touching a saved camera, the project or Undo.
+constexpr std::size_t kEditorLevelViewOffset = 2 * 1024 * 1024 + 24448;
+struct EditorLevelViewConfig {
+    char magic[8];
+    std::uint32_t sequence, abi, flags, reserved;
+    double standard_aspect;
+};
+static_assert(sizeof(EditorLevelViewConfig) == 32, "Level view config layout");
+static_assert(kEditorLevelViewOffset + sizeof(EditorLevelViewConfig) <=
+                  2 * 1024 * 1024 + 24576,
+              "Level view config fits the mapping");
 static_assert(static_cast<std::uint32_t>(EditorAction::FramingGrid) == 97,
               "Stable framing guide action ID");
 // Object Picker config: its own 4 KiB page appended after the legacy tail
@@ -430,7 +486,8 @@ inline bool valid_editor_object_config(const EditorObjectConfig& c) noexcept {
 inline bool valid_editor_camera_list(const EditorCameraList& list) noexcept {
     if (std::memcmp(list.magic, "DLYCAMS1", 8) || list.abi != 1 || !list.revision ||
         list.reserved || (list.flags & ~3u) || list.count > kEditorCameraListCount ||
-        list.first % kEditorCameraListCount || list.first > list.total ||
+        (list.first % kEditorCameraListCount && list.first !=
+            (list.total > kEditorCameraListCount ? list.total - kEditorCameraListCount : 0)) || list.first > list.total ||
         (list.total && list.first == list.total) ||
         list.count != std::min<std::uint32_t>(list.total - list.first, kEditorCameraListCount))
         return false;
@@ -451,12 +508,23 @@ inline bool valid_editor_camera_action(const EditorCameraList& list, EditorActio
         return value == 0 && (list.flags & (action == EditorAction::UndoShot ? 1u : 2u));
     if (action == EditorAction::CameraPage)
         return value >= 0 && value < list.total &&
-               std::fmod(value, double(kEditorCameraListCount)) == 0;
+               (std::fmod(value, double(kEditorCameraListCount)) == 0 ||
+                value == (list.total > kEditorCameraListCount ? list.total - kEditorCameraListCount : 0));
     if (action == EditorAction::SetCameraTime || action == EditorAction::SetCameraRoll)
         return value >= list.first && value < list.first + list.count;
     return (action == EditorAction::SelectCamera || action == EditorAction::ViewCamera ||
             action == EditorAction::DeleteCamera) &&
            value >= list.first && value < list.first + list.count;
+}
+inline bool valid_editor_position_action(const EditorCameraList& list, double value,
+                                         const CameraPose& pose) noexcept {
+    if (!valid_editor_camera_action(list, EditorAction::SelectCamera, value, pose[0]))
+        return false;
+    for (double component : pose)
+        if (!std::isfinite(component)) return false;
+    const auto& row = list.rows[unsigned(value) - list.first];
+    return !row.source && pose[1] >= 0 && pose[1] <= 2 && pose[1] == std::floor(pose[1]) &&
+           std::abs(pose[2]) <= 1e8 && pose[3] == row.time;
 }
 #pragma pack(pop)
 static_assert(sizeof(EditorFollowConfig) == 48, "Python Follow config layout");
@@ -510,7 +578,7 @@ struct EditorSnapshot {
     std::uint32_t selected_camera = 0, camera_count = 0, dropped_events = 0;
     double speed = 400, sensitivity = .08, phase = 0, duration = 0, playhead = 0;
     std::int32_t tick = 0;
-    bool playing = false, busy = false;
+    bool playing = false, busy = false, pause_after_capture = false;
     double playback_speed = 1;
     std::uint32_t playback_rate = 60;
     std::uint32_t video_fps = 60, video_bitrate_mbps = 20, video_codec = 0;
@@ -552,6 +620,13 @@ struct EditorSnapshot {
     char shot_name[96]{}, message[128]{};
 };
 EditorSnapshot editor_snapshot() noexcept;
+// Native recorder state is separate from replay playback. Pausing a replay
+// leaves its recorder open until Finish recording has drained it.
+video::Status editor_recording_status() noexcept;
+inline bool editor_recording_locks_cameras(video::State state) noexcept {
+    return state == video::State::starting || state == video::State::recording ||
+           state == video::State::finalizing;
+}
 // Current binding for one editor action (zeroed when unset/unavailable). Used
 // by the overlay to render a key-cap hint without exposing the whole config.
 EditorBinding editor_binding_snapshot(EditorAction action) noexcept;
@@ -560,6 +635,13 @@ bool editor_attach_config(EditorAttachConfig& out) noexcept;
 bool editor_follow_config(EditorFollowConfig& out) noexcept;
 // Published framing-guide switch; false while no valid block has arrived.
 bool editor_framing_grid_enabled() noexcept;
+// Live level-view request: levels the paused camera and restores the published
+// normal framing. Consumed once per rendered manual frame; false when no
+// request was pending or the editor does not own the live manual camera.
+bool editor_apply_level_view(CameraPose& pose) noexcept;
+// Published level-view config (binding and normal framing); false while no
+// valid block has arrived.
+bool editor_level_view_config(EditorLevelViewConfig& out) noexcept;
 // Published Object Picker config; false while no valid block has arrived.
 bool editor_object_config(EditorObjectConfig& out) noexcept;
 bool editor_camera_list(EditorCameraList& out) noexcept;

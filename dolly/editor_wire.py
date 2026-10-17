@@ -49,6 +49,24 @@ EXTRA_ACTIONS += ("take_screenshot",)
 # action-ID ABI is unchanged. Ids 99+ are reserved for this feature.
 EXTRA_ACTIONS += ("object_picker_open", "object_picker_cancel", "object_place",
                   "object_select", "object_delete", "object_transform")
+EXTRA_ACTIONS += ("save_shot", "seek_replay_tick", "clear_camera_path")
+EXTRA_ACTIONS += ("focus_replay_player",)
+EXTRA_ACTIONS += ("prepare_cinematic",)
+EXTRA_ACTIONS += ("set_pause_after_capture",)
+EXTRA_ACTIONS += ("set_camera_position",)
+EXTRA_ACTIONS += ("set_camera_curve_value", "select_curve_camera")
+# Action 114: value = camera * 12 + XYZ axis * 4 + Auto/Flat/Linked/Broken.
+# pose = revision, incoming, outgoing, key time, session low/high uint32, zero.
+# One completed gesture carries both derivatives, so Undo remains atomic.
+EXTRA_ACTIONS += ("set_camera_position_tangents",)
+EXTRA_ACTIONS += ("preview_camera_curve_value", "preview_camera_position_tangents",
+                  "clear_camera_curve_preview")
+# Level view is appended last so every existing action ID stays fixed (118).
+EXTRA_ACTIONS += ("level_view",)
+
+# Optional completion signal in the unused mapping tail; existing offsets stay fixed.
+CINEMATIC_OFFSET = 2 * 1024 * 1024 + 60000
+CINEMATIC_STATUS = struct.Struct("<8s5I")
 
 CAMERA_LIST_OFFSET = 2 * 1024 * 1024 + 23360
 CAMERA_LIST_COUNT = 32
@@ -61,6 +79,14 @@ FRAMING_GRID_OFFSET = 2 * 1024 * 1024 + 24424
 FRAMING_GRID_ABI = 1
 FRAMING_GRID_MAGIC = b"DLYGRID1"
 FRAMING_GRID = struct.Struct("<8s4I")
+
+# Optional live level-view block after the framing guide. Carries the binding
+# plus the project's normal framing, so the native side can level the live
+# paused camera without a round trip through Python.
+LEVEL_VIEW_OFFSET = 2 * 1024 * 1024 + 24448
+LEVEL_VIEW_ABI = 1
+LEVEL_VIEW_MAGIC = b"DLYLEVL1"
+LEVEL_VIEW = struct.Struct("<8s4Id")
 
 # Experimental prop-persistence probe, appended after the object status block in
 # the object page. Offsets must match dolly_editor.hpp exactly.
@@ -117,11 +143,33 @@ def pack_framing_grid(sequence, enabled, binding=None):
                              int(enabled), reserved)
 
 
+def pack_level_view(sequence, binding=None, standard_aspect=None):
+    """Level-view binding plus the project's normal framing.
+
+    ``standard_aspect`` is the project's normal aspect ratio; native level view
+    returns the live paused camera to it. ``binding`` travels in the reserved
+    field (vk | mods << 16) exactly like the framing guide.
+    """
+    if binding is None:
+        reserved = 0
+    else:
+        from .editor_actions import EditorBinding
+        if not isinstance(binding, EditorBinding):
+            raise ValueError("Level view binding must be an EditorBinding or None")
+        reserved = binding.vk | binding.modifiers << 16
+    aspect = 0.0 if standard_aspect is None else float(standard_aspect)
+    if aspect and (not math.isfinite(aspect) or not .5 <= aspect <= 4):
+        raise ValueError("Level view framing must be between 0.5 and 4")
+    return LEVEL_VIEW.pack(LEVEL_VIEW_MAGIC, _uint(sequence, "sequence"), LEVEL_VIEW_ABI,
+                           int(binding is not None), reserved, aspect)
+
+
 def pack_camera_list(sequence, project, revision, first=0, *, can_undo=False, can_redo=False):
     revision = _uint(revision, 'camera list revision')
     first = _uint(first, 'camera list page')
     total = len(project.keyframes)
-    if not revision or first % CAMERA_LIST_COUNT or first > max(0, total - 1):
+    if (not revision or first > max(0, total - 1)
+            or first % CAMERA_LIST_COUNT and first != max(0, total - CAMERA_LIST_COUNT)):
         raise ValueError('Invalid camera list page or revision')
     keys = project.keyframes[first:first + CAMERA_LIST_COUNT]
     flags = int(bool(can_undo)) | int(bool(can_redo)) << 1
@@ -363,6 +411,9 @@ def pack_config(sequence, owner_sequence, ack_event, values):
     enabled = values.get("enabled", False)
     if not isinstance(enabled, bool):
         raise ValueError("Editor enabled must be a boolean")
+    pause_after_capture = values.get("pause_after_capture", False)
+    if type(pause_after_capture) is not bool:
+        raise ValueError("Pause after capture must be a boolean")
     owner = values.get("owner", "disabled")
     if owner not in OWNERS or owner == "unfocused":
         raise ValueError("Unknown native editor input owner")
@@ -427,7 +478,8 @@ def pack_config(sequence, owner_sequence, ack_event, values):
         *wire, _text(values.get("shot_name", "Untitled shot"), 96), _text(values.get("message", ""), 128),
         _finite(values.get("duration", 0), 0, 1e9, "duration"),
         _finite(values.get("playhead", 0), 0, 1e9, "playhead"), tick,
-        int(bool(values.get("playing", False))) | int(bool(values.get("busy", False))) << 1,
+        int(bool(values.get("playing", False))) | int(bool(values.get("busy", False))) << 1
+        | int(pause_after_capture) << 2,
         _finite(values.get("playback_speed", 1.0), .05, 4, "playback speed"),
         playback_rate, 0 if reshade is None else reshade.vk,
         0 if reshade is None else reshade.modifiers,

@@ -1,5 +1,124 @@
 # Changes
 
+## 0.6.53-alpha
+
+- Add saved XYZ arrival/departure handles to desktop and in-game Position curves: Auto,
+  Flat, Linked and Broken, with numeric slopes and fixed-time handles.
+- Apply authored handles only in Smooth; preserve them while Linear or Spline
+  is selected. Keep old shots' automatic interpolation and native path format.
+- Preserve handle intent through shot history, save/reopen, Update view,
+  recapture and tick-rate conversion. Authored handles use project format 12.
+- Fit desktop graphs to the first captured cameras and reveal later values
+  outside the current range, preserving valid time zoom and panning.
+- Use compact round handles and muted stems on both editors. Handle display
+  length does not change the saved slope; each gesture remains one Undo step.
+- Preview the in-game path and camera markers while dragging graph keys or XYZ
+  handles. Keep the current viewpoint; release saves one edit and cancel restores
+  the saved path. Desktop graph values follow the temporary drag.
+- Keep key and handle drags working after a quick second click. Double-clicking
+  empty graph space still fits the curve.
+- Level the live camera with R: it returns the paused camera you are composing
+  to a level horizon and the shot's normal aspect and zoom. The reset is
+  view-only, so saved cameras, the project and Undo stay untouched. R was
+  previously unbound; Replace keeps its Ctrl+Alt+R chord.
+- End recordings with the shot instead of the hold after it. A take that plays an
+  authored path kept capturing while the finished camera was held, so every
+  exported video ended with seconds of still frame. The held endpoint is now
+  dropped for every path take, matching the paired depth and POV takes.
+- Silence the game's replay pause/resume cue. *Before:* every pause and resume
+  played Deadlock's own replay cue, which is constant while composing with the
+  pause key and has no game setting that turns it off. *After:* Dolly declines
+  voices for a moment around its own pause and resume commands. Only Dolly
+  sessions arm it, the window closes by itself, and no game setting or file is
+  touched.
+
+- Support Deadlock build 6793. Every reviewed game module was re-derived for the new
+  build: camera anchors and curve data, the particle table, the editing baseline and the
+  console unlocker, whose server patch is rebuilt for the new build. The native bridge,
+  sound capture and preload verification accept it, and Dolly reports the new build as
+  reviewed instead of asking for an update.
+- Follow is held back on build 6793. Its camera rig needs a live check of whether the new
+  build changed the stock aim slide, so Follow reports "not reviewed for this game update"
+  and stays off until it is re-reviewed. The rest of the replay editor is unaffected; its
+  capability data was re-reviewed so hiding the game HUD, including the hero health
+  panel, keeps working.
+
+Full details: [0.6.53 release notes](RELEASE_NOTES_0.6.53-alpha.md).
+
+## 0.6.52-alpha
+
+- **Timeline height follows the view.** *Before:* saved tall layouts could leave empty space inside and below the player timeline, while its regular controls had little bottom padding. *After:* Replay and Campaths fit their controls with consistent padding, Curves grows for its graphs, and the timeline sits a small distance above the bottom of the screen while keeping its custom width. Arrange panels allows temporary positioning before it returns to the bottom dock.
+- **Graph editing with room to breathe.** *Before:* key tooltips inherited the plot's zero padding, and Escape could close Dolly while cancelling an adjustment. *After:* padded tooltips explain the controls, right-click cancels an active graph or numeric adjustment, and holding Alt aligns a dragged value with a nearby neighboring camera without changing its time.
+- **Dolly's loading notice.** *Before:* the shader-loading message looked separate from the editor. *After:* a Dolly-branded Panorama card sits at the top center of the loading screen, with no duplicate native popup, while retaining the same automatic replay-loading behavior.
+- **Readable in-game dropdowns.** *Before:* fractional playback speeds and the full recording source could be clipped by dropdown arrows or narrow Export cards. *After:* speed controls reserve room for their text and arrows, and Export cards reflow to keep source names readable.
+- **Keep camera curves in view.** *Before:* newly added cameras could retain an old graph range, short paths could leave unused timeline space, and dragging a value beyond the plot could hide its key. *After:* changed camera ranges fit the full path, positive subsecond durations keep their actual end, and accepted values expand the graph when needed. **Fit all** resets the in-game curve view without changing camera values.
+- **Clearer tab selection.** A complete rounded outline sits close to each desktop tab and fades between selections while pages open immediately. Fast clicks blend from the outlines already visible; startup waits for the sidebar layout before showing the outline.
+- **Precision scrolling at page edges.** Small wheel inputs move in single pixels and reverse immediately at the top and bottom, without accumulating outward scroll input.
+- **All desktop tools available.** Camera, Look and the shot timeline no longer require a Full editor switch. Older saved reduced-mode preferences keep working without hiding those tools.
+- **Player following through replay seeks.** The Replay timeline's player selector keeps the chosen participant through seeking and tick steps, resolving their current hero after the replay settles. **Fly camera** returns to a fixed view; unavailable heroes produce a status message instead of a guessed target.
+- **Replay startup and aligned cards.** New in-game sessions open the bottom timeline on Replay. Neighboring cards share a row height across the main panel's tabs, with normal control spacing and scrolling when needed.
+
+- **One Controls page.** *Before:* shortcut editing lived inside Settings with separate key, modifier and mouse-button selectors. *After:* a dedicated sidebar page has searchable actions, one press-and-review recorder, visible conflicts, and Clear/Reset for each action. Existing saved shortcuts carry over.
+- **Smoother desktop navigation.** *Before:* nested graph scrollers placed several rails together, repeated resize events resampled unchanged curves, and focused dropdowns could pick up a square background. *After:* Camera uses one outer content scroller, wheel and resize work is coalesced, and focused controls and scrollbar thumbs follow the rounded matte theme.
+
+- **Corner layout defaults.** *Before:* Campaths started near the lower left and the main panel was centered. *After:* fresh/reset layouts place them in the upper left and upper right with clearance for ReShade's startup banner; saved custom layouts stay in control.
+- **Recoverable layout saves.** *Before:* interrupted writes could damage the layout file. *After:* completed changes save through checked temporary files with a validated backup, and layout preferences stay outside the app folder across updates.
+- **Camera curves in one workspace.** *Before:* the desktop graphs were split and there was no shared in-game curve workspace. *After:* both editors organize Position, Rotation and Framing together, with **Stack graphs** for aligned plots and **Show original** for a faded snapshot behind current edits. Inline axis buttons replace the cramped dropdowns where space allows.
+- **Clearer graph controls.** *Before:* Compare and Show Before described different kinds of comparison, and Fit could discard an unfinished keyboard edit. *After:* **Stack graphs**, **Show original**, **Update original** and the fit controls name their separate jobs; fitting the graph completes a valid numeric edit and leaves saved camera values intact.
+- **Repeat attached-camera takes at another duration.** *Before:* recording a single attached camera added an endpoint to the shot and hid the duration selector. *After:* the endpoint belongs only to the take; the camera and its Undo history stay intact, and the next take can use a different duration.
+- **Check replay continuity when pausing.** *Before:* the playback monitor rejected every backward native tick, including a settling paused view. *After:* a suspicious tick at the pause transition is checked against the independent replay clock; actual seeks, invalid views and replay changes still stop playback.
+- **Matte panels and quieter controls.** *Before:* the replay could show through panel backgrounds. *After:* opaque graphite surfaces, softer text and mint selections keep the editor readable, using the approved preview colours in both editors.
+
+Built on the in-game UI rework contributed by Marcel,
+[@tbhtho](https://github.com/tbhtho) in [PR #20](https://github.com/cravvnn/deadlock-dolly/pull/20).
+
+Full details: [0.6.52 release notes](RELEASE_NOTES_0.6.52-alpha.md).
+
+## 0.6.51-alpha
+
+- **Choose when to update.** *Before:* opening Dolly or leaving it idle could download and install updates automatically. *After:* from this version, release checks run inside the desktop app and every update requires **Update now** before a package downloads or installs.
+- **A clear update notice.** *Before:* updates used a startup window or a small sidebar control. *After:* a mint-outlined notice shows your installed and available versions; **Later** leaves a header reminder without scheduling a restart.
+- **Read release highlights inside Dolly.** *Before:* **What's changed** opened a browser. *After:* it smoothly expands the publisher's short Before/After notes inside the update notice, with a separate full-release link.
+
+Thanks to [@Hesykhia](https://github.com/Hesykhia) for the update-control feedback.
+
+Full details: [0.6.51 release notes](RELEASE_NOTES_0.6.51-alpha.md).
+
+## 0.6.50-alpha
+
+- **Visible recording controls.** *Before:* a paused replay could leave the recorder open while Finish recording was only available on Export. *After:* Finish recording stays visible on every editor tab, with a saving status during finalization.
+- **Safe camera clearing.** *Before:* Clear All could appear available while recording and raise a misleading playback error. *After:* camera edits stay locked until the take finishes, and queued Clear requests keep the cameras intact without an error popup.
+
+Full details: [0.6.50 release notes](RELEASE_NOTES_0.6.50-alpha.md).
+
+## 0.6.49-alpha
+
+- **Deadlock build 6785 support.** *Before:* the October 14 game update was outside the reviewed compatibility profiles. *After:* Dolly recognizes the updated game.
+- **Replay preparation tolerates a brief pause delay.** *Before:* effect settling could be rejected while the replay pause was still reaching the camera view. *After:* Dolly waits within the existing time limit for a stable view at the exact shot start, then checks it again before recording. Incorrect starting ticks and cancelled preparation still block recording.
+- **Refreshed in-game UI, contributed by [@tbhtho](https://github.com/tbhtho).** *Before:* the editor used its older panel layout. *After:* dedicated Camera, Follow, Bone Picker, Look and Export tabs sit alongside a compact Campaths list and replay timeline with player kill/death markers.
+- **Saved layouts and complete F8 hiding.** *Before:* hiding Dolly could leave panels on screen. *After:* F8 hides/restores all three panels while keeping guides and the grid available. Main and Campaths headers are always draggable; **Layout > Arrange panels** enables resizing and timeline placement.
+- **Optional pause after capture.** *Before:* Capture paused playback. *After:* in-game Capture keeps it running by default, with a remembered **Pause after capture** checkbox beside Resume/Pause for the previous behavior.
+- **Safer player selection.** *Before:* selecting a hero could produce an availability error. *After:* the timeline moves freecam near an available player; absent or settling targets show a status notice without moving the camera. The hideout shader-loading notice also has clearer wording, spacing and placement.
+
+Full details: [0.6.49 release notes](RELEASE_NOTES_0.6.49-alpha.md).
+
+## 0.6.48-alpha
+
+- **Replay effects settle before camera-path shots.** *Before:* seeking could pile up fresh flashes and glow on a hero as an export started. *After:* Dolly plays two seconds of normal replay before the authored start, pauses at the same start tick, and records the shot without seeking again. The saved camera path, export speed and FPS are preserved; Stop cancels preparation.
+- **Camera-path Color exports start on the authored frame.** Setup frames are excluded using the same native frame admission already used by layered exports.
+
+## 0.6.45-alpha
+
+- **Reliable export startup.** *Before:* switching away from Deadlock or using Dolly's desktop controls could block the first recording frame and produce a misleading DirectX 11 error. *After:* recording starts from available game frames even when another window has focus.
+- **Clearer recording errors.** *Before:* a timeout waiting for the first frame looked like missing DirectX 11. *After:* the message explains the frame timeout and suggests restoring the game window, retrying, and exporting diagnostics if it persists.
+
+## 0.6.44-alpha
+
+- **Bone Picker works with skin/model mods.** *Before:* a hero whose model is replaced by a mod (a renamed model resource in the same folder) failed with "The selected model resource could not be verified" and listed no joints. *After:* a renamed same-folder model is accepted, so the skeleton and bones resolve; a genuinely different model is still rejected.
+- **The Bone Picker no longer dead-ends.** *Before:* a transient paused-editor ownership change showed "Paused editor ownership changed. Cancel and reopen Bone Picker." and the picker stayed stuck. *After:* it waits and retries, and an empty catalog states the real resolver reason.
+- **Launching recovers when the game exits early.** *Before:* a game that fataled during startup surfaced a raw "[WinError 10054] An existing connection was forcibly closed by the remote host". *After:* the console drop is retried and the game's exit is reported, so you can relaunch immediately.
+- **Saved shots reopen cleanly.** *Before:* a session that ended without Stop / restore left a pending replay-UI/HUD journal, so every later launch warned "restoration remains pending". *After:* a pending restore whose game process is gone is cleared automatically.
+
 ## 0.6.43-alpha
 
 - **Correct crash guidance for unplayable replays.** *Before:* a replay that fataled Deadlock while it loaded always got "Try the latest replay recorded on this build", even when it was recorded on the installed build. *After:* Dolly compares the replay's recorded build with the installed build (read from the game console) and only blames a build mismatch when there is one; otherwise it points at the recording itself. The installed build is also recorded in diagnostics.

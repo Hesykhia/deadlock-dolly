@@ -32,6 +32,30 @@ class Memory(bytearray):
 
 
 class NativeBridgeTests(unittest.TestCase):
+    def test_cinematic_completion_uses_reserved_tail_and_even_sequence(self):
+        from dolly import editor_wire as wire
+        self.assertLessEqual(wire.CINEMATIC_OFFSET + wire.CINEMATIC_STATUS.size, nb.MAPPING_BYTES)
+        prefix = bytes(self.memory[:wire.CINEMATIC_OFFSET])
+        for sequence, state in [(2, 1), (4, 2), (6, 3)]:
+            self.bridge.configure_editor_cinematic(42, 7, state)
+            block = wire.CINEMATIC_STATUS.unpack_from(self.memory, wire.CINEMATIC_OFFSET)
+            self.assertEqual(block, (b'DLYCIN01', sequence, 1, 42, 7, state))
+            self.assertEqual(bytes(self.memory[:wire.CINEMATIC_OFFSET]), prefix)
+        with self.assertRaises(ValueError):
+            self.bridge.configure_editor_cinematic(0, 7, 2)
+
+    def test_shader_notice_survives_metadata_refresh_and_clears(self):
+        from dolly.lite_mode import REPLAY_INFO, REPLAY_INFO_OFFSET
+        self.bridge.configure_shader_loading(True)
+        def flags():
+            return REPLAY_INFO.unpack(self.memory[REPLAY_INFO_OFFSET:REPLAY_INFO_OFFSET+REPLAY_INFO.size])[6]
+        self.assertEqual(flags() & 4, 4)
+        self.bridge.configure_lite_replay(self.project, 7, total_ticks=10000)
+        self.assertEqual(flags() & 4, 4)
+        self.bridge.configure_shader_loading(False)
+        self.assertEqual(flags() & 4, 0)
+        self.assertEqual(flags() & 2, 2)
+
     def test_optional_follow_anchor_diagnostics_and_protocol_refusal(self):
         self.publish_status()
         self.assertIsNone(self.bridge.status()["follow_anchor_diagnostics"])
@@ -150,6 +174,43 @@ class NativeBridgeTests(unittest.TestCase):
         self.assertEqual(self.header()[9], 0)
         self.assertEqual(bytes(self.memory[nb.PAYLOAD_OFFSET:nb.PAYLOAD_OFFSET + len(payload)]), payload)
         self.assertEqual(self.project.to_dict(), before)
+
+    def test_reprepare_replaces_same_size_playback_payload_after_xyz_edit(self):
+        from dolly.native_effects import SHOT_HEADER
+        from dolly.native_path import HEADER as PATH_HEADER, SEGMENT_TIMES, CHANNEL_RECORD
+
+        self.prepare()
+        first_header = self.header()
+        first = bytes(self.memory[nb.PAYLOAD_OFFSET:nb.PAYLOAD_OFFSET+first_header[9]])
+        self.prepare()  # Same shape and values still prepare a new command.
+        same_header = self.header()
+        self.assertGreater(same_header[2], first_header[2])
+        self.assertEqual(bytes(self.memory[nb.PAYLOAD_OFFSET:nb.PAYLOAD_OFFSET+same_header[9]]), first)
+        self.project.keyframes[1].x = 240
+        self.prepare()
+        changed_header = self.header()
+        changed = bytes(self.memory[nb.PAYLOAD_OFFSET:nb.PAYLOAD_OFFSET+changed_header[9]])
+        self.assertGreater(changed_header[2], same_header[2])
+        self.assertGreater(changed_header[3], same_header[3])
+        self.assertEqual(len(first), len(changed))
+        self.assertNotEqual(first, changed)
+        magic, version, camera_bytes, _effects_bytes, reserved = SHOT_HEADER.unpack_from(changed)
+        self.assertEqual((magic, version, reserved), (b'DLYSHOT2', 1, 0))
+        camera_start = SHOT_HEADER.size
+        path_header = PATH_HEADER.unpack_from(changed, camera_start)
+        self.assertEqual(path_header[:4], (b'DLYPATH\0', 1, 1, 7))
+        offset = camera_start+PATH_HEADER.size+SEGMENT_TIMES.size
+        kind, flags, left, right, depart, arrive = CHANNEL_RECORD.unpack_from(changed, offset)
+        self.assertEqual((kind, flags, left, right, depart, arrive), (1,0,0,240,0,0))
+        # Independent midpoint evaluation of the actual uploaded linear record.
+        self.assertEqual((left+right)/2, 120)
+        first_right = CHANNEL_RECORD.unpack_from(first, offset)[3]
+        self.assertEqual(first_right/2, 50)
+        self.assertEqual(changed[offset+CHANNEL_RECORD.size:camera_start+camera_bytes],
+                         first[offset+CHANNEL_RECORD.size:camera_start+camera_bytes])
+        self.bridge.play()
+        self.assertEqual(self.header()[4], 2)
+        self.assertEqual(bytes(self.memory[nb.PAYLOAD_OFFSET:nb.PAYLOAD_OFFSET+len(changed)]), changed)
 
     def test_prepare_marks_an_opt_in_confetti_shot(self):
         self.project.confetti_enabled = True

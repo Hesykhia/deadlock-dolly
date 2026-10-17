@@ -17,7 +17,7 @@ OWN_HEALTH_HUD = "citadel_hud_hide_own_health"
 
 
 class GameUiHandoffMixin:
-    def toggle_game_ui(self, enabled=None):
+    def toggle_game_ui(self, enabled=None, *, _preserve_participant=False):
         """Hand camera/mouse ownership to the game's replay UI, or return."""
         with self._op_lock:
             enabled = not self._game_ui_visible if enabled is None else enabled
@@ -43,7 +43,10 @@ class GameUiHandoffMixin:
                 if callable(configure):
                     configure(owner="game_ui")
             if enabled:
-                self._halt(native_action="release")
+                if _preserve_participant:
+                    self._halt(native_action="release", _preserve_participant=True)
+                else:
+                    self._halt(native_action="release")
                 self._invalidate_paused_camera()
                 restoration_error = self._restore_playback_settings()
                 if restoration_error:
@@ -362,6 +365,16 @@ class GameUiHandoffMixin:
     def _restore_game_ui_settings(self):
         """Restore the original automatic cursor/HUD on Stop or disconnect."""
         if not self._game_ui_restore and self._game_hero_restore is None:
+            return None
+        process = getattr(self._session, "process", None)
+        if process is None or process.poll() is not None:
+            # The process that held these temporary settings is gone; a new
+            # launch starts from the saved configuration, so drop the stale
+            # journal silently instead of warning on every future launch.
+            self._game_ui_restore.clear()
+            self._game_hero_restore = None
+            self._replay_hud_restore = {}
+            self._replay_hud_session = None
             return None
         try:
             self._require_connection()

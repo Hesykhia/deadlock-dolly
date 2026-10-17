@@ -8,6 +8,20 @@ from dolly.editor_actions import default_action_bindings, EditorBinding
 
 
 class EditorBridgeTests(unittest.TestCase):
+    def test_last_camera_window_can_backfill_across_a_wire_boundary(self):
+        from dolly.path import Project, Keyframe
+        from dolly.lite_mode import pack_replay_info, REPLAY_INFO
+        project = Project(start_tick=100, tick_rate=64,
+                          keyframes=[Keyframe(i, 1, 2, 3, 4, 5, 6) for i in range(33)])
+        self.bridge.configure_editor_cameras(project, 7, 1)
+        header = w.CAMERA_LIST_HEADER.unpack_from(self.memory, w.CAMERA_LIST_OFFSET)
+        self.assertEqual(header[4:7], (33, 1, 32))
+        ticks = REPLAY_INFO.unpack(pack_replay_info(2, project, 7, 1, 10000))
+        self.assertEqual(ticks[4:6], (1, 32))
+        self.assertEqual(ticks[10], 164)
+        self.assertEqual(ticks[41], 2148)
+        with self.assertRaises(ValueError):
+            self.bridge.configure_editor_cameras(project, 7, 2)
     def test_invalid_camera_rows_leave_the_last_complete_list_untouched(self):
         from dolly.path import Project, Keyframe
         project = Project(keyframes=[Keyframe(0, 1, 2, 3, 4, 5, 6),
@@ -63,6 +77,32 @@ class EditorBridgeTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 self.bridge.configure_framing_grid(**bad)
         self.assertEqual(bytes(self.memory[end:]), published[end:])
+
+    def test_level_view_block_round_trips_and_is_bounded(self):
+        from dolly.editor_actions import EditorBinding
+        before = bytes(self.memory)
+        self.bridge.configure_level_view(binding=EditorBinding("R"), standard_aspect=16 / 9)
+        fields = w.LEVEL_VIEW.unpack_from(self.memory, w.LEVEL_VIEW_OFFSET)
+        self.assertEqual(fields[0], b"DLYLEVL1")
+        self.assertEqual(fields[1], 2)
+        self.assertEqual(fields[2:4], (1, 1))
+        self.assertEqual(fields[4], 0x52)  # R with no modifiers
+        self.assertAlmostEqual(fields[5], 16 / 9)
+        self.assertEqual(bytes(self.memory[:w.LEVEL_VIEW_OFFSET]), before[:w.LEVEL_VIEW_OFFSET])
+        end = w.LEVEL_VIEW_OFFSET + w.LEVEL_VIEW.size
+        self.assertLessEqual(end, 2 * 1024 * 1024 + 24576)
+        self.assertEqual(bytes(self.memory[end:]), before[end:])
+        # The block sits after the framing guide and must not disturb it.
+        self.assertEqual(bytes(self.memory[w.FRAMING_GRID_OFFSET:w.FRAMING_GRID_OFFSET
+                                           + w.FRAMING_GRID.size]),
+                         before[w.FRAMING_GRID_OFFSET:w.FRAMING_GRID_OFFSET + w.FRAMING_GRID.size])
+        self.bridge.configure_level_view()
+        cleared = w.LEVEL_VIEW.unpack_from(self.memory, w.LEVEL_VIEW_OFFSET)
+        self.assertEqual(cleared[3:5], (0, 0))
+        self.assertEqual(cleared[5], 0.0)
+        for bad in ({"binding": "R"}, {"standard_aspect": 0.1}, {"standard_aspect": float("nan")}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.bridge.configure_level_view(**bad)
 
     def test_follow_settings_publish_without_touching_other_blocks(self):
         from dolly.follow_camera import FollowSettings
@@ -249,6 +289,19 @@ class EditorBridgeTests(unittest.TestCase):
         self.assertEqual(packed[0], w.CONFIG_MAGIC)
         self.assertEqual(packed[1] % 2, 0)
         self.assertEqual(packed[13:15], (5, 0))
+
+    def test_capture_pause_preference_has_its_own_flag_and_rejects_invalid_publication(self):
+        self.bridge.configure_editor(playing=False, busy=False, pause_after_capture=True)
+        self.assertEqual(struct.unpack_from('<I', self.memory, w.CONFIG_OFFSET + 412)[0], 4)
+        self.bridge.configure_editor(playing=True, busy=True)
+        self.assertEqual(struct.unpack_from('<I', self.memory, w.CONFIG_OFFSET + 412)[0], 7)
+        self.bridge.configure_editor(pause_after_capture=False)
+        self.assertEqual(struct.unpack_from('<I', self.memory, w.CONFIG_OFFSET + 412)[0], 3)
+        before = bytes(self.memory)
+        for value in (0, 1, 'true', None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'boolean'):
+                self.bridge.configure_editor(pause_after_capture=value)
+            self.assertEqual(bytes(self.memory), before)
 
     def test_manual_editor_poll_keeps_camera_history_without_shot_status_requests(self):
         self.publish()
