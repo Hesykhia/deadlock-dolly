@@ -1,11 +1,14 @@
 """Publisher-authored, bounded release previews from existing GitHub metadata."""
 from io import BytesIO
 import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from dolly import __version__
 from dolly import updater
 from dolly.release_notes import MAX_BODY_BYTES, MAX_DETAIL, MAX_ENTRIES, MAX_TITLE, parse_release_notes
+from tools.check_release_notes import validate_publish_body
 
 
 # Exact local publisher description from the 0.6.50-alpha release preparation.
@@ -37,6 +40,46 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(parse_release_notes(RELEASE_0650.replace("\n", "\r\n"), "v0.6.50-alpha"), expected)
         self.assertEqual(parse_release_notes(RELEASE_0650.replace("**0.6.50-alpha**", "## **v0.6.50-alpha**"),
                                              "0.6.50-alpha"), expected)
+
+    def test_publisher_heading_that_names_the_version_starts_the_preview(self):
+        # Andrew's published body style since 0.6.47: a plain heading with the
+        # version, blank lines, then the bullets (exact 0.6.54 shape).
+        body = ("### Deadlock Dolly v0.6.54-alpha\n\n\n"
+                + bullet("Startup that waits out a slow shader rebuild.") + "\n"
+                + bullet("Per-frame camera data for paired depth takes."))
+        self.assertEqual([entry["title"] for entry in parse_release_notes(body, "0.6.54-alpha")],
+                         ["Startup that waits out a slow shader rebuild.",
+                          "Per-frame camera data for paired depth takes."])
+
+    def test_publish_body_requires_both_opening_version_markers(self):
+        version = "0.6.57-alpha"
+        heading, legacy = f"### Deadlock Dolly v{version}", f"**{version}**"
+        first, second = bullet("First."), bullet("Second.")
+        plain = heading + "\n\n" + first + "\n" + second
+        expected = [{"title": title, "before": "The old behavior.", "after": "The new behavior."}
+                    for title in ("First.", "Second.")]
+        # Current apps can read this body, while older installed apps need the
+        # bold marker. Publishing must enforce both independently of parsing.
+        self.assertEqual(parse_release_notes(plain, version), expected)
+        invalid = {
+            "missing legacy marker": plain,
+            "wrong heading": "### Deadlock Dolly v0.6.56-alpha\n" + legacy + "\n" + first + second,
+            "late heading": "Release summary\n" + heading + "\n" + legacy + "\n" + first + second,
+            "wrong legacy version": heading + "\n**0.6.56-alpha**\n" + first + second,
+            "late legacy marker": heading + "\n" + first + legacy + "\n" + second,
+            "prefixed legacy marker": heading + f"\n**v{version}**\n" + first + second,
+            "versioned section stops older previews":
+                heading + "\n" + legacy + f"\n### Changes in {version}\n" + first + second,
+        }
+        for name, body in invalid.items():
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                validate_publish_body(body, version)
+        valid = "\n" + heading + "\n\n" + legacy + "\n\n" + first + "\n" + second
+        self.assertEqual(validate_publish_body(valid.replace("\n", "\r\n"), version), expected)
+
+    def test_publisher_heading_with_another_version_does_not_start_the_preview(self):
+        body = "### Deadlock Dolly v0.6.53-alpha\n\n" + bullet()
+        self.assertEqual(parse_release_notes(body, "0.6.54-alpha"), [])
 
     def test_wrapped_title_and_before_after_continuations_are_plain_text(self):
         body = """**0.6.50-alpha**
@@ -73,7 +116,7 @@ class ReleaseNotesTests(unittest.TestCase):
 
     def test_unknown_prose_html_and_headingless_bullets_have_no_fallback(self):
         for body in ("A faster editor with better controls.", "<h1>0.6.50-alpha</h1><p>New features.</p>",
-                     bullet(), "# Deadlock Dolly 0.6.50-alpha\n" + bullet(),
+                     bullet(), "# Release notes\n" + bullet(),
                      "**0.6.50-alpha**\n- A general release note without Before and After."):
             with self.subTest(body=body):
                 self.assertEqual(parse_release_notes(body, "0.6.50-alpha"), [])
@@ -173,3 +216,14 @@ class ReleaseNotesMetadataTests(unittest.TestCase):
         with patch.object(updater, "parse_release_notes") as parser, self.assertRaises(ValueError):
             updater.select_release(raw, "0.6.49-alpha")
         parser.assert_not_called()
+
+
+class ShippedReleaseNotesTests(unittest.TestCase):
+    """The pasted file must satisfy current and older installed preview readers."""
+
+    def test_current_release_notes_parse_into_highlight_entries(self):
+        notes = Path(__file__).resolve().parents[1] / "docs" / f"RELEASE_NOTES_{__version__}.md"
+        self.assertTrue(notes.is_file(), f"no release notes file for {__version__}")
+        entries = validate_publish_body(notes.read_text(encoding="utf-8"), __version__)
+        self.assertGreaterEqual(len(entries), 2, "the publish description needs two to four bullets")
+        self.assertLessEqual(len(entries), 4, "only the first four bullets reach the desktop preview")

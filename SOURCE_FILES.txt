@@ -3,6 +3,7 @@
 .github/workflows/windows.yml
 .gitignore
 CONTRIBUTING.md
+CREDITS.md
 LICENSE.txt
 Launch_Dolly.bat
 README.md
@@ -210,6 +211,7 @@ packaging/Portable_Start_Here.txt
 packaging/dolly.spec
 packaging/entrypoint.py
 requirements-build.txt
+tests/test_camera_export.py
 tests/test_aspect_controller.py
 tests/test_aspect_path.py
 tests/test_assert_watcher.py
@@ -287,6 +289,7 @@ tests/test_portable.py
 tests/test_preview_convergence.py
 tests/test_release_packaging.py
 tests/test_replays.py
+tests/test_runtime.py
 tests/test_screenshot.py
 tests/test_seek_boundary.py
 tests/test_seek_overshoot.py
@@ -317,6 +320,7 @@ tools/confetti_offsets.py
 tools/update_game.py
 tools/fetch_ffmpeg.py
 tools/release_files.py
+tools/check_release_notes.py
 .clang-format
 tools/format_cpp.py
 tools/generate_profile.py
@@ -465,6 +469,7 @@ docs/internal/UPDATING.md
 dolly/release_launcher.py
 dolly/gui_theme.py
 tests/test_release_launcher.py
+dolly/camera_export.py
 dolly/attach_camera.py
 dolly/bone_picker.py
 tests/test_bone_picker.py
@@ -740,6 +745,10 @@ native/ui_override/panorama/layout/hud_hideout.xml
 native/ui_override/panorama/styles/citadel_prewarm_assets_status.css
 docs/RELEASE_NOTES_0.6.52-alpha.md
 docs/RELEASE_NOTES_0.6.53-alpha.md
+docs/RELEASE_NOTES_0.6.54-alpha.md
+docs/RELEASE_NOTES_0.6.55-alpha.md
+docs/RELEASE_NOTES_0.6.56-alpha.md
+docs/RELEASE_NOTES_0.6.57-alpha.md
 tests/test_authored_tangents.py
 tests/test_tangent_ui.py
 tests/test_tangent_editor.py
@@ -748,3 +757,19 @@ dolly/curve_preview.py
 dolly/visualization_preview_wire.py
 tests/test_visualization_preview.py
 tests/test_curve_preview.py
+docs/CAMERA_BUNDLE.md
+dolly/camera_bundle.py
+tests/test_camera_bundle.py
+dolly/depth_normals.py
+tests/test_depth_normals.py
+dolly/depth_exr.py
+tests/test_depth_exr.py
+tests/fixtures/depth-frame.exr
+
+docs/README.md
+docs/UPDATING.md
+docs/LAYER_EXPORT.md
+docs/internal/README.md
+docs/RELEASE_NOTES_0.6.58-alpha.md
+docs/RELEASE_NOTES_0.6.59-alpha.md
+docs/RELEASE_NOTES_0.6.60-alpha.md

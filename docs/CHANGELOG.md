@@ -1,5 +1,113 @@
 # Changes
 
+Release history. Each section describes its own version; controls and limits
+may have changed since then. Use the [current documentation](README.md) for
+setup and operation.
+
+## 0.6.60-alpha
+
+- Add optional After Effects JSX and USD camera exports, based on @SamuelCurrid's
+  [PR #25](https://github.com/cravvnn/deadlock-dolly/pull/25), with recorded camera
+  motion for camera paths, attached cameras and Player POV.
+- Require complete camera coverage matched to the finished recording. Protect
+  existing camera files, bound optional metadata collection and keep valid video
+  when a camera export fails. Run camera conversion on the operation worker.
+- Adapt the existing calibrated depth camera bundle for both exporters, preserving
+  depth reconstruction and reporting the stable external-camera projection policy.
+  Preserve the 0.6.59 replay-seek and Players viewport fixes.
+
+Full details: [0.6.60 release notes](RELEASE_NOTES_0.6.60-alpha.md).
+
+## 0.6.59-alpha
+
+- Use the completed replay's verified packet boundaries for absolute and relative
+  replay seeks, choosing a recorded tick in the requested direction and reporting
+  any adjustment. Preserve exact targets when available and existing fallback,
+  replay-identity, cancellation and paused-state checks.
+- Let a new replay seek retire the previous Stop flag while still honoring
+  cancellation during the new operation.
+- Map the Players capture's active viewport across its exported canvas when the
+  scene allocation is larger than the rendered region. Preserve the original
+  draw, depth-based scenery occlusion and material data; reject unsupported or
+  changing viewports instead of silently exporting a misframed image.
+
+Full details: [0.6.59 release notes](RELEASE_NOTES_0.6.59-alpha.md).
+
+## 0.6.58-alpha
+
+- Accept bounded temporal projection jitter for paired depth while preserving
+  the actual camera projection and existing invalid/conflicting-sample checks.
+- Retain depth-readback failure details and distinguish frame-pairing mismatches.
+- Include current native arithmetic hardening, Steam discovery and interrupted
+  plugin-cleanup fixes in the Windows package.
+- Refresh the README demo, contributor credits, current guides and portable
+  documentation links; preserve older clients' release-highlight format.
+
+## 0.6.57-alpha
+
+- Build and tooling release; no app behaviour changes on Windows.
+- Refresh the pinned FFmpeg archive: the previous dated autobuild was pruned
+  upstream, so a fresh checkout or hosted build failed with HTTP 404 while
+  preparing the bundled encoder. Same 8.1 LGPL line, shared libraries, encoder
+  set and notices.
+- Fix the hosted Windows workflow: its temporary files no longer go through the
+  runner's 8.3 path alias, the native campaths smoke check measures the frame it
+  actually renders instead of a fixed 1080, and the C++ parity gate probes the
+  available compiler instead of assuming it can build.
+
+## 0.6.56-alpha
+
+- Seek to the selected saved camera from the Replay timeline using its exact
+  authored time and full saved view. Previously the middle Seek here button
+  sought the current replay tick and retained the current view.
+- Label that Replay action **Seek camera**. Keep Campaths **Seek here** at the
+  shot cursor and the replay slider, typed tick and event-marker seeks at their
+  selected replay ticks.
+- Bind saved-camera requests to the camera-list revision, validate selection
+  and active-operation guards, and capture the shot snapshot before queuing.
+  Support the selected camera even when browsing another camera-list page.
+- Cover the actual in-game button and native event guards, plus exact saved-time
+  and immutable-target dispatch, with regressions that fail when the old routing
+  or wrong queued target is restored.
+
+Full details: [0.6.56 release notes](RELEASE_NOTES_0.6.56-alpha.md).
+
+## 0.6.55-alpha
+
+- Restore player selection through Dolly's replay timeline on Deadlock builds
+  6793/6794 using reviewed target and observer-service contracts.
+- Restore the guarded Follow slide correction for the current game build so
+  slide start/stop no longer pulls the camera toward the map origin. Keep older
+  reviewed profiles and active-session ownership checks intact.
+- Read update highlights from the published version heading as well as a bold
+  version line; retain the existing update approval and asset checks.
+- Record live-capture validation of the paired depth camera mapping and sampled
+  reconstructed normals. Existing depth/EXR exports and offline normals
+  groundwork remain the scope; no Normals capture option is added.
+- Release graphics-panel test objects on their creating thread, preventing a
+  later worker from collecting Tk state during the source regression suite.
+
+Full details: [0.6.55 release notes](RELEASE_NOTES_0.6.55-alpha.md).
+
+## 0.6.54-alpha
+
+- Keep verifying a running map/shader preload instead of ending it on a fixed
+  120-second deadline. The wait extends while the reviewed preload job or its
+  scheduled flag is still live, or new work arrives, and stops after 120 seconds
+  of silence or at a 15-minute ceiling. Every extension is reported in the status
+  and recorded with the last batch under `preload_extensions`.
+- Raise `PreloadUnavailableError` for a stalled or ceiling-limited preload, as the
+  never-started intro already did, so the desktop offers its existing
+  "load without the preload check" choice instead of a dialog with no way forward.
+  Startup waits now raise `StartupTimeout`, a `RuntimeError` subclass.
+- Write a per-frame camera file beside every paired depth take, record it in the
+  take audit, and document the stored conventions in `docs/CAMERA_BUNDLE.md`.
+  Cancelled or failed takes keep no camera file.
+- Grey out the float EXR sequence control in both editors until the depth master
+  is on, so the tick can no longer be accepted in-game and then dropped.
+- Add the depth normal reconstruction and the float EXR reader as internal
+  groundwork; no capture option exposes them yet.
+
 ## 0.6.53-alpha
 
 - Add saved XYZ arrival/departure handles to desktop and in-game Position curves: Auto,
@@ -69,7 +177,7 @@ Full details: [0.6.53 release notes](RELEASE_NOTES_0.6.53-alpha.md).
 - **Check replay continuity when pausing.** *Before:* the playback monitor rejected every backward native tick, including a settling paused view. *After:* a suspicious tick at the pause transition is checked against the independent replay clock; actual seeks, invalid views and replay changes still stop playback.
 - **Matte panels and quieter controls.** *Before:* the replay could show through panel backgrounds. *After:* opaque graphite surfaces, softer text and mint selections keep the editor readable, using the approved preview colours in both editors.
 
-Built on the in-game UI rework contributed by Marcel,
+Built on the in-game UI rework contributed by
 [@tbhtho](https://github.com/tbhtho) in [PR #20](https://github.com/cravvnn/deadlock-dolly/pull/20).
 
 Full details: [0.6.52 release notes](RELEASE_NOTES_0.6.52-alpha.md).

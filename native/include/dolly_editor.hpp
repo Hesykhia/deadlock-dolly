@@ -151,8 +151,14 @@ enum class EditorAction : std::uint32_t {
     PreviewCameraPositionTangents,
     ClearCameraCurvePreview,
     // Live level-view reset. Appended so every existing action ID is unchanged.
-    LevelView
+    LevelView,
+    // Selected authored camera seek; existing replay/shot seek IDs stay fixed.
+    SeekCamera,
+    SetVideoAeCamera,
+    SetVideoUsdCamera
 };
+static_assert(static_cast<std::uint32_t>(EditorAction::SeekCamera) == 119,
+              "Stable selected-camera seek action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::LevelView)==118,
               "Stable level-view action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::PreviewCameraCurveValue)==115 &&
@@ -168,6 +174,10 @@ static_assert(static_cast<std::uint32_t>(EditorAction::SetCameraPosition) == 111
               "Stable XYZ value-graph action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::SetPauseAfterCapture) == 110,
               "Stable pause-after-capture preference action ID");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetVideoAeCamera) == 120,
+              "Stable After Effects camera export action ID");
+static_assert(static_cast<std::uint32_t>(EditorAction::SetVideoUsdCamera) == 121,
+              "Stable USD camera export action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::TakeScreenshot) == 98,
               "Stable screenshot action ID");
 static_assert(static_cast<std::uint32_t>(EditorAction::ObjectPickerOpen) == 99 &&
@@ -222,7 +232,9 @@ struct EditorConfig {
     std::uint8_t video_encoder, video_flags; // flags bit 0: fixed-step export
     float video_speed;
     float pov_duration;
-    unsigned char padding[2];
+    // Camera export formats beyond the full video_flags byte. Bit 0: USD (.usda).
+    std::uint8_t camera_export_flags;
+    unsigned char padding[1];
 };
 struct EditorEvent {
     std::uint32_t sequence, action;
@@ -506,6 +518,8 @@ inline bool valid_editor_camera_action(const EditorCameraList& list, EditorActio
         return false;
     if (action == EditorAction::UndoShot || action == EditorAction::RedoShot)
         return value == 0 && (list.flags & (action == EditorAction::UndoShot ? 1u : 2u));
+    if (action == EditorAction::SeekCamera)
+        return value >= 0 && value < list.total;
     if (action == EditorAction::CameraPage)
         return value >= 0 && value < list.total &&
                (std::fmod(value, double(kEditorCameraListCount)) == 0 ||
@@ -590,6 +604,8 @@ struct EditorSnapshot {
     bool video_layer_world = false;
     bool video_layer_players = false;
     bool video_layer_effects = false;
+    bool video_ae_camera = false;
+    bool video_usd_camera = false;
     double video_speed = 1;
     double horizontal_fov = 0;
     std::uint32_t view_width = 0, view_height = 0;

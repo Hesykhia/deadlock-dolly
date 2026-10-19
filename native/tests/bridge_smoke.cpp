@@ -868,6 +868,193 @@ struct Fixture {
     }
 };
 
+void follow_anchor_guard_checks(Fixture& f) {
+    // Drive the production private-layout/session gates against owned synthetic
+    // memory. Compact RVAs keep this independent of any installed game image.
+    const auto saved_profile = gFollowAnchorProfile;
+    const auto saved_installed = gFollowAnchorInstalled.load();
+    const auto saved_editor = gEditor;
+    const auto saved_follow = std::atomic_load(&dolly::gFollowConfig);
+    const auto saved_command = std::atomic_load(&gCommand);
+    const auto saved_connected = dolly::gConnected.load();
+    const auto saved_heartbeat = gHeartbeatTime.load();
+    const auto saved_error = gWorkerError.load();
+    FollowAnchorProfile profile = kFollowAnchorProfiles[0];
+    profile.controller = 0x100;
+    profile.manager = 0x200;
+    profile.rig = 0x300;
+    profile.entity_list = 0x400;
+    profile.manager_table = 0x1100;
+    profile.camera_table = 0x1200;
+    profile.controller_table = 0x1300;
+    profile.observer_table = 0x1400;
+    profile.services_table = 0x1500;
+    profile.observer_base = 0x1600;
+    profile.pawn_table = 0x1700;
+    require(profile.local_player_table == 0,
+            "Retained Follow profile unexpectedly admits a local player pawn");
+    profile.observer_services_offset = dolly::reviewed::FollowTarget::OBSERVER_SERVICES_OFFSET;
+    require(profile.observer_services_offset == 0xe98,
+            "Current Follow fixture must use the separately reviewed observer member");
+    gFollowAnchorProfile = &profile;
+    Allocation controller(0x1000), observer(0x2000), services(0x1000), old_services(0x1000);
+    Allocation camera(0x1000), pawn(0x1000), system(0x1000), chunk(0x1000), cvar(0x1000);
+    constexpr std::uint32_t observer_handle = 0x8001, target_handle = 0x10002;
+    const auto observer_identity = chunk.address() + 0x70;
+    const auto target_identity = chunk.address() + 0xe0;
+    put(gClient + profile.manager, gClient + profile.manager_table);
+    put(gClient + profile.manager + 0x28, camera.address());
+    put(gClient + profile.manager + 0x38, static_cast<unsigned char>(0));
+    put(camera.address(), gClient + profile.camera_table);
+    put(camera.address() + 0xb0, target_handle);
+    put(gClient + profile.controller, controller.address());
+    put(controller.address(), gClient + profile.controller_table);
+    put(controller.address() + 0x6bc, observer_handle);
+    put(gClient + profile.entity_list, system.address());
+    put(system.address(), chunk.address());
+    for (const auto identity : {observer_identity, target_identity}) {
+        const bool local = identity == observer_identity;
+        const auto instance = local ? observer.address() : pawn.address();
+        put(identity, instance);
+        put(identity + 0x10, local ? observer_handle : target_handle);
+        put(instance + 0x10, identity);
+    }
+    put(observer.address(), gClient + profile.observer_table);
+    put(pawn.address(), gClient + profile.pawn_table);
+    for (const auto service : {services.address(), old_services.address()}) {
+        put(service, gClient + profile.services_table);
+        put(service + 0x48, static_cast<unsigned char>(2));
+        put(service + 0x4c, target_handle);
+    }
+    put(observer.address() + 0xe98, services.address());
+    put(observer.address() + 0xe40, old_services.address());
+    const auto target_valid = [&] {
+        std::uint32_t selected = 0;
+        return follow_anchor_target(camera.address(), pawn.address(), selected) &&
+               selected == target_handle;
+    };
+    require(target_valid(), "Reviewed observer-pawn Follow chain was rejected");
+    put(observer.address(), gClient + profile.pawn_table);
+    require(!target_valid(), "Historical Follow profile silently widened its local pawn types");
+    profile.local_player_table = profile.pawn_table;
+    require(target_valid(), "Reviewed player-pawn local Follow chain was rejected");
+    put(observer.address(), gClient + profile.observer_table);
+    put(observer.address() + 0xe98, std::uintptr_t(0));
+    require(!target_valid(), "Old observer member rescued a missing current member");
+    profile.observer_services_offset = 0xe40;
+    require(target_valid(), "Retained profile lost its independent old observer member");
+    put(observer.address() + 0xe40, std::uintptr_t(0));
+    put(observer.address() + 0xe98, services.address());
+    require(!target_valid(), "Current observer member rescued a missing retained member");
+    put(observer.address() + 0xe40, old_services.address());
+    profile.observer_services_offset = 0xe98;
+
+    const auto reject_then_restore = [&](auto address, auto wrong, auto original,
+                                         const char* message) {
+        put(address, wrong);
+        require(!target_valid(), message);
+        put(address, original);
+        require(target_valid(), "Follow target fixture did not recover its valid baseline");
+    };
+    reject_then_restore(observer.address(), gClient + 0x1800, gClient + profile.observer_table,
+                        "Unknown local pawn type was accepted");
+    reject_then_restore(
+        pawn.address(), gClient + dolly::reviewed::FollowTarget::FAMILIAR_CLONE_PAWN_VTABLE,
+        gClient + profile.pawn_table, "Unreviewed native clone target was accepted");
+    reject_then_restore(target_identity + 0x10, target_handle + 0x8000, target_handle,
+                        "Recycled selected-target serial was accepted");
+    reject_then_restore(observer_identity + 0x10, observer_handle + 0x8000, observer_handle,
+                        "Recycled local-observer serial was accepted");
+    reject_then_restore(pawn.address() + 0x10, std::uintptr_t(0), target_identity,
+                        "Selected-target identity backlink was ignored");
+    reject_then_restore(observer.address() + 0x10, std::uintptr_t(0), observer_identity,
+                        "Local-observer identity backlink was ignored");
+    reject_then_restore(camera.address() + 0xb0, target_handle + 1, target_handle,
+                        "ThirdPerson camera followed a different target");
+    reject_then_restore(services.address() + 0x48, static_cast<unsigned char>(4),
+                        static_cast<unsigned char>(2), "Non-chase observer mode was accepted");
+    reject_then_restore(services.address() + 0x4c, target_handle + 1, target_handle,
+                        "Services target did not match the camera target");
+    reject_then_restore(gClient + profile.manager + 0x38, static_cast<unsigned char>(1),
+                        static_cast<unsigned char>(0), "Blending camera manager was accepted");
+    reject_then_restore(gClient + profile.manager + 0x28, pawn.address(), camera.address(),
+                        "Inactive ThirdPerson camera was accepted");
+    reject_then_restore(services.address(), gClient + 0x1900, gClient + profile.services_table,
+                        "Unknown observer services were accepted");
+    put(services.address(), gClient + profile.observer_base);
+    require(target_valid(), "Reviewed base observer services were rejected");
+    put(services.address(), gClient + profile.services_table);
+
+    constexpr char cvar_name[] = "citadel_camera_overrides_enabled";
+    std::memcpy(reinterpret_cast<void*>(cvar.address() + 0x100), cvar_name, sizeof(cvar_name));
+    put(cvar.address(), cvar.address() + 0x100);
+    put(cvar.address() + 0x28, std::uint16_t(0));
+    put(cvar.address() + 0x30, std::uint64_t(0x80080));
+    put(cvar.address() + 0x58, static_cast<unsigned char>(1));
+    put(gClient + profile.rig, CvarRef{1, cvar.address()});
+    auto config = std::make_shared<dolly::EditorFollowConfig>();
+    std::memcpy(config->magic, "DLYFOLL1", 8);
+    config->sequence = 2;
+    config->abi = 1;
+    config->flags = 3;
+    std::atomic_store(&dolly::gFollowConfig,
+                      std::shared_ptr<const dolly::EditorFollowConfig>(config));
+    gFollowAnchorInstalled = true;
+    gEditor = GetCurrentProcess();
+    dolly::gConnected = true;
+    gHeartbeatTime = now_seconds();
+    gWorkerError = 0;
+    f.command(Mode::Release);
+    const auto command = std::atomic_load(&gCommand);
+    const auto session_valid = [&] {
+        dolly::EditorFollowConfig observed{};
+        std::shared_ptr<const Command> selected;
+        return follow_anchor_session(observed, selected) && selected == command;
+    };
+    require(session_valid(), "Owned active Follow session was rejected");
+    config->flags = 1;
+    require(!session_valid(), "Inactive or cancelled Follow retained correction ownership");
+    config->flags = 7;
+    require(session_valid(), "Pending restoration data invalidated active Follow ownership");
+    config->flags = 3;
+    dolly::gConnected = false;
+    require(!session_valid(), "Disconnected editor retained Follow correction ownership");
+    dolly::gConnected = true;
+    gHeartbeatTime = now_seconds() - 3;
+    require(!session_valid(), "Expired editor lease retained Follow correction ownership");
+    gHeartbeatTime = now_seconds();
+    gWorkerError = 1;
+    require(!session_valid(), "Faulted worker retained Follow correction ownership");
+    gWorkerError = 0;
+    gEditor = nullptr;
+    require(!session_valid(), "Missing editor process retained Follow correction ownership");
+    gEditor = GetCurrentProcess();
+    seeking = true;
+    require(!session_valid(), "Seeking replay retained Follow correction ownership");
+    seeking = false;
+    std::snprintf(demo_name, sizeof(demo_name), "replays/other-demo.dem");
+    require(!session_valid(), "Changed replay retained Follow correction ownership");
+    std::snprintf(demo_name, sizeof(demo_name), "replays/native-smoke.dem");
+    f.command(Mode::Hold);
+    dolly::EditorFollowConfig rejected_config{};
+    std::shared_ptr<const Command> rejected_command;
+    require(!follow_anchor_session(rejected_config, rejected_command),
+            "Non-release camera command retained Follow correction ownership");
+    std::atomic_store(&gCommand, command);
+    put(cvar.address() + 0x58, static_cast<unsigned char>(0));
+    require(!session_valid(), "Disabled camera overrides retained correction ownership");
+    put(cvar.address() + 0x58, static_cast<unsigned char>(1));
+    require(session_valid(), "Restored Follow session did not recover its valid baseline");
+    gFollowAnchorProfile = saved_profile;
+    gFollowAnchorInstalled = saved_installed;
+    gEditor = saved_editor;
+    std::atomic_store(&dolly::gFollowConfig, saved_follow);
+    std::atomic_store(&gCommand, saved_command);
+    dolly::gConnected = saved_connected;
+    gHeartbeatTime = saved_heartbeat;
+    gWorkerError = saved_error;
+}
+
 void replay_identity() {
     require(same_demo("practice.session.01.dem", "replays/practice.session.01.dem"),
             "Full custom recording name was rejected");
@@ -1732,6 +1919,53 @@ void editor_framing_checks() {
     std::atomic_store(&dolly::gCameraList,std::shared_ptr<const EditorCameraList>(list));
     CameraPose request{};request[0]=7;
     dolly::gAcknowledged = dolly::gLastEvent;
+    {
+        const auto selected = config->selected_camera;
+        config->selected_camera = 1;
+        const auto serial = dolly::gLastEvent;
+        require(editor_enqueue(EditorAction::SeekCamera, 1, &request),
+                "Selected camera seek cannot enter the real event ring");
+        const auto& event = dolly::gEvents[serial % kEditorEventCount];
+        require(event.action == 119 && event.value == 1 && event.pose[0] == 7,
+                "Selected camera seek lost its appended action, index or revision");
+        const auto after_valid = dolly::gLastEvent;
+        for (double index : {-1., .5, 0., 2.})
+            require(!editor_enqueue(EditorAction::SeekCamera, index, &request),
+                    "Invalid or no-longer-selected camera seek entered the event ring");
+        request[0] = 6;
+        require(!editor_enqueue(EditorAction::SeekCamera, 1, &request),
+                "Stale camera revision entered the seek event ring");
+        request[0] = 7;
+        require(!editor_enqueue(EditorAction::SeekCamera, 1),
+                "Camera seek without revision identity entered the event ring");
+        editor_set_owner(EditorOwner::Flight);
+        require(!editor_enqueue(EditorAction::SeekCamera, 1, &request),
+                "Camera seek bypassed panel ownership");
+        editor_set_owner(EditorOwner::Panel);
+        editor_update_view(true, false, true, pose);
+        require(!editor_enqueue(EditorAction::SeekCamera, 1, &request),
+                "Unpaused replay accepted a selected camera seek");
+        editor_update_view(true, true, true, pose);
+        const auto playback = config->playback_flags;
+        for (unsigned flag : {1u, 2u}) {
+            config->playback_flags = flag;
+            require(!editor_enqueue(EditorAction::SeekCamera, 1, &request),
+                    "Busy or playing editor accepted a selected camera seek");
+        }
+        config->playback_flags = playback;
+        require(dolly::gLastEvent == after_valid,
+                "Rejected camera seeks advanced the real event ring");
+        config->camera_count = list->total = 40;
+        list->first = 32;
+        list->count = 8;
+        require(editor_enqueue(EditorAction::SeekCamera, 1, &request) &&
+                    !editor_enqueue(EditorAction::ViewCamera, 1, &request),
+                "Global selected camera seek changed the visible-page view contract");
+        config->camera_count = list->total = list->count = 2;
+        list->first = 0;
+        config->selected_camera = selected;
+    }
+    dolly::gAcknowledged = dolly::gLastEvent;
     const auto preparation_serial = dolly::gLastEvent;
     require(editor_enqueue(EditorAction::PrepareCinematic,42,&request),
             "Cinematic preparation cannot enter the real event ring");
@@ -1885,6 +2119,10 @@ void editor_framing_checks() {
         } cleanup;
         video::Options options{};
         options.path = output.c_str();
+        CameraPose camera_seek_request{7, 0, 0, 0, 0, 0, 0};
+        require(
+            editor_enqueue(EditorAction::SeekCamera, config->selected_camera, &camera_seek_request),
+            "Idle camera seek failed before the recording guard test");
         require(video::start(options), "Cannot start the no-Present recorder guard fixture");
         require(editor_recording_status().state == video::State::starting &&
                     editor_recording_locks_cameras(editor_recording_status().state) &&
@@ -1892,6 +2130,9 @@ void editor_framing_checks() {
                 "The recorder fixture did not keep replay and recording state separate");
         dolly::gAcknowledged = dolly::gLastEvent;
         const auto locked_serial = dolly::gLastEvent;
+        require(!editor_enqueue(EditorAction::SeekCamera, config->selected_camera,
+                                &camera_seek_request),
+                "Paused recording accepted a selected camera seek");
         for (auto action : {EditorAction::Capture, EditorAction::Replace, EditorAction::ResetCameraPath})
             require(!editor_enqueue(action), "Paused recording accepted a capture action into the real event ring");
         for (auto action : {EditorAction::ClearCameraPath, EditorAction::DeleteCamera, EditorAction::UndoShot,
@@ -2092,6 +2333,7 @@ void run() {
     independent_heartbeat();
     replay_identity();
     Fixture f;
+    follow_anchor_guard_checks(f);
     // Exercise the reviewed September engine dispatch with harmless synthetic
     // accessors, including rejection of a stale demo/engine vtable identity.
     gEngineLayout = kSeptemberEngineLayout;
@@ -2620,6 +2862,32 @@ void run() {
                     editor_snapshot().video_depth_exr && editor_snapshot().video_layer_world &&
                     editor_snapshot().video_layer_players && editor_snapshot().video_layer_effects,
                 "Depth video flag was rejected with the whole config");
+    }
+    // Camera export formats live in their own byte
+    {
+        auto base = std::atomic_load(&dolly::gConfig);
+        auto config = std::make_shared<EditorConfig>(*base);
+        config->sequence += 2;
+        config->video_flags = 255;
+        config->camera_export_flags = 1;
+        std::memcpy(f.mapping.data() + kEditorConfigOffset, config.get(), sizeof(*config));
+        editor_worker_tick(f.mapping.data(), true);
+        auto applied = std::atomic_load(&dolly::gConfig);
+        require(applied && applied->camera_export_flags == 1 && editor_snapshot().video_usd_camera &&
+                    editor_snapshot().video_ae_camera,
+                "USD camera export flag was rejected with the whole config");
+        config->sequence += 2;
+        config->camera_export_flags = 2;
+        std::memcpy(f.mapping.data() + kEditorConfigOffset, config.get(), sizeof(*config));
+        editor_worker_tick(f.mapping.data(), true);
+        require(std::atomic_load(&dolly::gConfig)->camera_export_flags == 1,
+                "An unknown camera export flag was accepted");
+        config->sequence += 2;
+        config->video_flags = 0;
+        config->camera_export_flags = 0;
+        std::memcpy(f.mapping.data() + kEditorConfigOffset, config.get(), sizeof(*config));
+        editor_worker_tick(f.mapping.data(), true);
+        require(!editor_snapshot().video_usd_camera, "USD camera export did not turn off");
     }
 
     // Run the actual camera callback against the changed view layout. Guard
