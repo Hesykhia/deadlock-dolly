@@ -63,7 +63,7 @@ class EditorSettingsTests(unittest.TestCase):
         save_settings(settings, self.path)
         self.assertEqual(load_settings(self.path), settings)
         raw = json.loads(self.path.read_text())
-        self.assertEqual(raw["version"], 6)
+        self.assertEqual(raw["version"], 8)
         self.assertNotIn("migration_warnings", raw)
         self.assertNotIn("enabled", raw)
         self.assertEqual(raw["capture_binding"]["key"], "Mouse4")
@@ -139,7 +139,8 @@ class EditorSettingsTests(unittest.TestCase):
         raw.pop("full_editor")
         raw.pop("ffmpeg_path")
         raw.pop("auto_updates")
-        raw.pop("framing_grid_enabled")
+        raw.pop("framing_grid_enabled"); raw.pop("export_folder")
+        raw.pop("pause_after_capture")
         raw.pop("reshade_binding")
         raw.pop("reshade_runtime_path")
         self.path.write_text(json.dumps(raw))
@@ -180,6 +181,11 @@ class EditorBindingTests(unittest.TestCase):
         self.assertEqual(bindings_from_dict(bindings_to_dict(defaults)), defaults)
         self.assertEqual(defaults["capture"].label, DEFAULT_BINDING.label)
         self.assertEqual(defaults["framing_grid"].label, "Alt+G")
+        # R levels the live view; Replace keeps its chord and the disabled
+        # Object Picker holds no key.
+        self.assertEqual(defaults["level_view"].label, "R")
+        self.assertEqual(defaults["replace"].label, "Ctrl+Alt+R")
+        self.assertIsNone(defaults["object_picker"])
         self.assertNotIn("F7", [binding.key for binding in defaults.values() if binding])
 
     def test_duplicates_are_rejected_with_both_action_names(self):

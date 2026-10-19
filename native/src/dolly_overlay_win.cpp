@@ -161,6 +161,11 @@ void feed_window_input(const InputMessage& message) {
     // that belongs to Deadlock's hero/replay UI. Mouse events only update ImGui.
     auto& io = ImGui::GetIO();
     const auto msg = message.message;
+    // Tab is a game key in Lite, never a request to focus ImGui controls.
+    // ImGui tabbing remains enabled even without NavEnableKeyboard.
+    if (panel_ui.lite_mode() && message.wparam == VK_TAB &&
+        (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP))
+        return;
     int button = -1;
     bool down = false;
     switch (msg) {
@@ -273,8 +278,10 @@ void release_device() noexcept {
     picker_portrait_format = DXGI_FORMAT_UNKNOWN;
     picker_portrait_captured_request = 0;
     if (imgui) {
+        panel_ui.cancel_position_graph();
         auto* previous = ImGui::GetCurrentContext();
         ImGui::SetCurrentContext(imgui);
+        panel_ui.flush_layout(true);
         if (dx11_ready)
             ImGui_ImplDX11_Shutdown();
         if (win32_ready)
@@ -460,6 +467,7 @@ bool initialize_device(IDXGISwapChain* chain) {
         io.LogFilename = nullptr;
         io.ConfigFlags = ImGuiConfigFlags_NoMouseCursorChange;
         panel_ui.style_panel();
+        panel_ui.initialize_layout();
         const float panel_scale = std::clamp(ImGui_ImplWin32_GetDpiScaleForHwnd(game_window), 1.0f, 2.5f);
         panel_ui.load_panel_fonts(panel_scale);
         ImGui::GetStyle().ScaleAllSizes(panel_scale);
@@ -547,7 +555,8 @@ void render_overlay(IDXGISwapChain* chain) {
     const bool media_live = media_session_active();
     if (!media_live)
         depth::set_white_clear(false);
-    if (!state.enabled && !media_live) {
+    if (!state.enabled && !media_live && !panel_ui.shader_notice_visible(state)) {
+        panel_ui.cancel_position_graph();
         // Playback may disable manual editor input. Only a lost session retires
         // media here; control ownership and camera readiness are transient.
         if (!media_suspended && chain == swapchain && immediate) {
@@ -564,6 +573,7 @@ void render_overlay(IDXGISwapChain* chain) {
         return;
     }
     if (renderer_pressure.load(std::memory_order_acquire)) {
+        panel_ui.cancel_position_graph();
         // The engine's DirectX 11 vertex-buffer retirement queue is near its
         // 16-bit capacity. Stop all optional Dolly rendering (effects, capture
         // and the editor) so the engine can retire queued buffers and avoid the
@@ -618,10 +628,12 @@ void render_overlay(IDXGISwapChain* chain) {
     {
         const auto editor = editor_snapshot();
         const auto snapshot = video::status();
-        // Focus gates the first frame only. Desktop controls and a transient
-        // missing editor pose must not finish an already running MP4.
+        // A requested take may start while desktop controls own focus. The
+        // validated game swapchain supplies frames independently of input focus;
+        // do not block initialization while the controller waits for recording.
         if (media_session_active() &&
-            (snapshot.state == video::State::recording || editor.focused)) {
+            (snapshot.state == video::State::starting ||
+             snapshot.state == video::State::recording || editor.focused)) {
             // The recorder reports the size only once a take exists. ReShade
             // also needs depth while merely editing, so fall back to the
             // current backbuffer dimensions.
@@ -701,7 +713,8 @@ void render_overlay(IDXGISwapChain* chain) {
         const auto editor = editor_snapshot();
         const auto snapshot = video::status();
         if (!media_session_active() ||
-            (snapshot.state != video::State::recording && !editor.focused))
+            (snapshot.state != video::State::starting &&
+             snapshot.state != video::State::recording && !editor.focused))
             return;
         const auto* sample = static_cast<const depth::SceneFrame*>(user);
         // Prefer the native path clock this view just evaluated: it is the
@@ -729,20 +742,29 @@ void render_overlay(IDXGISwapChain* chain) {
     if (!effects_handled)
         clean_frame(chain, device, immediate, frame_user);
     if (reshade_overlay_open() || reshade_overlay_pending()) {
+        panel_ui.cancel_position_graph();
         clear_pending_input();
         editor_text_input_active(false);
         return;
     }
-    if (!state.enabled) {
+    const bool draw_loading = panel_ui.shader_notice_visible(state);
+    if (!state.enabled && !draw_loading) {
+        panel_ui.cancel_position_graph();
         clear_pending_input();
         editor_text_input_active(false);
         return;
     }
     GuiContextScope gui_scope(imgui);
     const bool panel = editor_panel_visible() && state.focused;
-    const auto guides = panel_ui.guides_visible(state) ? visualization_snapshot() : nullptr;
+    const auto preview=visualization_preview_snapshot();
+    const bool use_preview=preview && panel_ui.preview_guides_visible(state,*preview);
+    const bool desktop_preview=use_preview && preview->source==1;
+    const auto guides = panel_ui.guides_visible(state,desktop_preview) ?
+        use_preview ? preview->path : visualization_snapshot() : nullptr;
     const bool draw_guides = guides && guides->enabled();
     const bool draw_grid = panel_ui.framing_grid_visible(state);
+    const bool draw_campaths = panel_ui.lite_campaths_visible(state);
+    if (!draw_campaths) panel_ui.cancel_position_graph();
     auto& io = ImGui::GetIO();
     if (panel != last_panel) {
         io.ClearInputKeys();
@@ -751,17 +773,18 @@ void render_overlay(IDXGISwapChain* chain) {
     }
     // Present must never perform OS cursor updates on the game's behalf.
     io.ConfigFlags =
-        ImGuiConfigFlags_NoMouseCursorChange | (panel ? ImGuiConfigFlags_NavEnableKeyboard : 0);
+        ImGuiConfigFlags_NoMouseCursorChange |
+        (panel && !panel_ui.lite_mode() ? ImGuiConfigFlags_NavEnableKeyboard : 0);
     io.ConfigNavMoveSetMousePos = false;
     io.WantSetMousePos = false;
     io.MouseDrawCursor = panel;
-    // Paused editing may show guides without the panel. Playback, game UI,
-    // console and unfocused windows do not draw editing guides into the scene.
+    // Paused editing keeps render-only guides while desktop controls own
+    // focus. Playback, game UI, console and capture still hide them.
     if (!panel) {
         clear_pending_input();
         io.ClearEventsQueue();
         editor_text_input_active(false);
-        if (!draw_guides && !draw_grid)
+        if (!draw_guides && !draw_grid && !draw_campaths && !draw_loading)
             return;
     } else
         feed_pending_input();
@@ -777,20 +800,31 @@ void render_overlay(IDXGISwapChain* chain) {
                                      : ImVec2(1, 1);
     ImGui::NewFrame();
     panel_ui.reset_guides();
-    if (draw_guides && !state.bone_picker)
-        panel_ui.draw_path_guides(state, guides);
-    if (draw_grid && !state.bone_picker) {
+    // The Object Picker is its own mode: it replaces the normal panel and
+    // suppresses the editing guides so the scene reads cleanly.
+    if (draw_guides && !state.bone_picker && !state.object_picker)
+        panel_ui.draw_path_guides(state, guides,desktop_preview);
+    if (draw_grid && !state.bone_picker && !state.object_picker) {
         panel_ui.draw_framing_grid(state);
         diagnostic_grid.fetch_add(1, std::memory_order_relaxed);
     }
     if (panel) {
-        if (state.bone_picker)
+        if (state.object_picker)
+            panel_ui.draw_object_picker(state);
+        else if (state.bone_picker)
             panel_ui.draw_bone_picker(state, picker_portrait);
         else
             panel_ui.draw_panel(state);
     }
+    if (draw_campaths) {
+        panel_ui.draw_lite_campaths(state);
+        panel_ui.draw_lite_timeline(state);
+    }
+    if (draw_loading)
+        panel_ui.draw_shader_notice();
     editor_text_input_active(panel && ImGui::GetIO().WantTextInput);
     ImGui::Render();
+    panel_ui.flush_layout();
     immediate->OMSetRenderTargets(1, &target, nullptr);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     diagnostic_draw.fetch_add(1, std::memory_order_relaxed);
@@ -971,6 +1005,12 @@ bool discover_swapchain_methods(void*& present, void*& resize) noexcept {
         auto table = *reinterpret_cast<void***>(dummy);
         present = table[8];
         resize = table[13];
+        // The reviewed startup worker has already configured Players support.
+        // Observe shader creation now: waiting for the game's first Present
+        // misses shaders loaded beforehand, leaving valid player draws unknown.
+        // This only records resource metadata; no capture or game draw is armed.
+        if (player_capture::layout_hook_requested())
+            player_capture::install_layout_hook(dummy_device);
     }
     release(dummy_context);
     release(dummy_device);

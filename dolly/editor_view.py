@@ -151,7 +151,8 @@ def attach_state(project, roster, selected, count):
 
 
 def editor_values(*, active, settings, project, selected, count, playhead, status,
-                  busy, playback, video, message, video_pov, pov_duration, layers):
+                  busy, playback, video, message, video_pov, pov_duration, layers,
+                  video_ae_camera=False, video_usd_camera=False):
     playback_speed, playback_rate = playback
     video_fps, video_bitrate, video_encoder, video_fixed_step, video_speed, video_depth, video_depth_exr = video
     return dict(enabled=active, bindings=settings.action_bindings,
@@ -162,6 +163,7 @@ def editor_values(*, active, settings, project, selected, count, playhead, statu
                   duration=float(project.duration), playhead=max(0.0, playhead),
                   replay_tick=int(status.get("tick") or 0),
                   playing=bool(status.get("playing")), busy=bool(busy),
+                  pause_after_capture=settings.pause_after_capture,
                   playback_speed=playback_speed, playback_rate=playback_rate,
                   video_fps=video_fps, video_bitrate_mbps=video_bitrate,
                   video_encoder=video_encoder, video_fixed_step=video_fixed_step,
@@ -169,6 +171,8 @@ def editor_values(*, active, settings, project, selected, count, playhead, statu
                   video_depth_exr=video_depth_exr,
                   video_speed=video_speed,
                   video_pov=video_pov,
+                  video_ae_camera=bool(video_ae_camera),
+                  video_usd_camera=bool(video_usd_camera),
                   pov_duration=pov_duration,
                   confetti_enabled=bool(project.confetti_enabled),
                   confetti_spawn_height=float(project.confetti_spawn_height),

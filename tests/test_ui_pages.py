@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from dolly.ui.library_page import LibraryActions, LibraryPage, LibraryState
 from dolly.ui.settings_page import (
-    SENSITIVITY_MAX, SENSITIVITY_MIN, SENSITIVITY_TICKS, SettingsActions, SettingsPage,
+    SENSITIVITY_MAX, SENSITIVITY_MIN, SENSITIVITY_TICKS, CameraFeel, SettingsActions, SettingsPage,
     SettingsState, position_to_sensitivity, sensitivity_preset_name, sensitivity_to_position,
 )
 from dolly.ui.export_page import ExportActions, ExportPage, ExportState
@@ -65,19 +65,19 @@ class PageBoundaryTests(unittest.TestCase):
         self.assertEqual(str(view.cancel_startup_button.cget('state')), 'disabled')
         self.assertEqual(tuple(view.home_camera_driver_combo.cget('values')), ('Native (experimental)', 'Console (legacy)'))
 
-    def test_settings_owns_preferences_controls_and_passes_keybind_parent_explicitly(self):
+    def test_settings_owns_preferences_and_routes_to_dedicated_controls(self):
         state = self.variables(SettingsState, auto_updates_initial=True, show_log=tk.BooleanVar(self.root, False))
         with patch('dolly.graphics_profiles.load_library', return_value={'format': 1, 'selected': '', 'profiles': []}):
             view = SettingsPage(self.root, state, self.callbacks(SettingsActions), root=self.root,
                                 on_error=lambda *args: self.fail(str(args)))
-        self.assertEqual(self.calls, [('build_keybinds', (view.keybinds_tab,), {})])
+        self.assertEqual(self.calls, [])
         self.assertTrue(view.auto_updates.get())
-        self.assertFalse(view.controls_disclosure.opened)
+        self.assertFalse(hasattr(view, 'controls_disclosure'))
         self.button('Save paths').invoke()
         self.button('Menu shortcut...').invoke()
         self.button('Browse FX library...').invoke()
         self.assertEqual([c[0] for c in self.calls],
-                         ['build_keybinds', 'save_layout_paths', 'show_reshade_keybinds', 'browse_reshade_library'])
+                         ['save_layout_paths', 'show_reshade_keybinds', 'browse_reshade_library'])
         self.assertEqual(str(view.reshade_path_entry.cget('textvariable')), str(state.reshade_runtime_path))
         self.assertEqual(str(view.reshade_disable_button.cget('state')), 'disabled')
         self.assertFalse(hasattr(view.graphics_profiles, 'app'))
@@ -102,6 +102,23 @@ class PageBoundaryTests(unittest.TestCase):
         self.assertEqual(len(view.video_layer_checkboxes), 3)
         self.assertFalse(hasattr(view, 'video_export'))
 
+    def test_export_gates_the_exr_control_on_the_depth_master(self):
+        def build(depth_on):
+            booleans = {name: tk.BooleanVar(self.root, False) for name in
+                        ('video_depth', 'video_depth_exr', 'video_fixed_step', 'video_game_audio',
+                         'video_layer_effects', 'video_layer_players', 'video_layer_world',
+                         'video_reconstructed_audio')}
+            booleans['video_depth'].set(depth_on)
+            state = self.variables(ExportState, codec_choices=('Fixture encoder',),
+                                   bitrate_choices=('Fixture rate',), **booleans)
+            return ExportPage(self.root, state, self.callbacks(ExportActions))
+
+        view = build(False)
+        self.assertTrue(view.video_depth_exr_checkbox.instate(['disabled']))
+        view.export_page.destroy()
+        view = build(True)
+        self.assertFalse(view.video_depth_exr_checkbox.instate(['disabled']))
+
     def test_page_modules_do_not_import_application_controller_or_export_backend(self):
         import subprocess
         import sys
@@ -112,19 +129,44 @@ class PageBoundaryTests(unittest.TestCase):
             capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_settings_camera_feel_presets_and_state_sync(self):
-        state = self.variables(SettingsState, auto_updates_initial=True, show_log=tk.BooleanVar(self.root, False))
-        with patch('dolly.graphics_profiles.load_library', return_value={'format': 1, 'selected': '', 'profiles': []}):
-            view = SettingsPage(self.root, state, self.callbacks(SettingsActions), root=self.root,
-                                on_error=lambda *args: self.fail(str(args)))
-        self.calls.clear()
+    def test_camera_feel_presets_and_state_sync(self):
+        sensitivity = tk.StringVar(self.root, '0.12')
+        view = CameraFeel(self.root, sensitivity, lambda: self.calls.append(('save_mouse_sensitivity', (), {})))
         self.button('Very slow').invoke()
         self.assertEqual([c[0] for c in self.calls], ['save_mouse_sensitivity'])
-        self.assertAlmostEqual(float(state.mouse_sensitivity.get()), 0.02, places=3)
-        state.mouse_sensitivity.set('0.25')
+        self.assertAlmostEqual(float(sensitivity.get()), 0.02, places=3)
+        sensitivity.set('0.25')
         self.assertAlmostEqual(view.sensitivity_position.get(),
                                sensitivity_to_position(0.25), places=3)
         self.assertIn('Fast', view.sensitivity_text.get())
+
+
+class DepthGateTests(unittest.TestCase):
+    """The desktop EXR gate follows the depth variable so both UIs agree."""
+
+    def test_sync_depth_controls_follows_the_variable(self):
+        from types import SimpleNamespace
+        from dolly.gui import DollyApp
+        try:
+            root = tk.Tk()
+        except tk.TclError as error:
+            self.skipTest(str(error))
+        self.addCleanup(root.destroy)
+        root.withdraw()
+        stub = SimpleNamespace(video_depth=tk.BooleanVar(root, False),
+                               video_depth_exr=tk.BooleanVar(root, False))
+        stub.video_depth_exr_checkbox = ttk.Checkbutton(
+            root, text="EXR sequence (float)", variable=stub.video_depth_exr)
+        DollyApp._sync_depth_controls(stub)
+        self.assertTrue(stub.video_depth_exr_checkbox.instate(["disabled"]))
+        stub.video_depth.set(True)
+        DollyApp._sync_depth_controls(stub)
+        self.assertFalse(stub.video_depth_exr_checkbox.instate(["disabled"]))
+        stub.video_depth_exr.set(True)
+        stub.video_depth.set(False)
+        DollyApp._sync_depth_controls(stub)
+        self.assertFalse(stub.video_depth_exr.get())
+        self.assertTrue(stub.video_depth_exr_checkbox.instate(["disabled"]))
 
 
 class SensitivityMappingTests(unittest.TestCase):

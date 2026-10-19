@@ -21,6 +21,30 @@ class Value:
 
 
 class EditorSessionTests(unittest.TestCase):
+    def test_pause_after_capture_preference_saves_before_publication(self):
+        from unittest.mock import patch
+        self.app.native_editor_active = True
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled), patch('dolly.editor_dispatch.save_settings') as save:
+                previous = self.app.app_settings
+                session.dispatch(self.app, {'action': 'set_pause_after_capture', 'value': int(enabled)}, self.bridge)
+                label, operation, complete = self.app._submit.call_args.args
+                self.assertIs(self.app.app_settings, previous)
+                result = operation()
+                save.assert_called_once()
+                self.assertEqual(save.call_args.args[0].pause_after_capture, enabled)
+                complete(result)
+                self.assertEqual(self.app.app_settings.pause_after_capture, enabled)
+                self.assertEqual(self.bridge.configure_editor.call_args.kwargs['pause_after_capture'], enabled)
+
+    def test_invalid_pause_after_capture_choices_do_not_save(self):
+        from unittest.mock import patch
+        for value in (-1, 2, .5, float('nan'), True, '1'):
+            with self.subTest(value=value), patch('dolly.editor_dispatch.save_settings') as save:
+                with self.assertRaisesRegex(ValueError, 'on or off'):
+                    session.dispatch(self.app, {'action': 'set_pause_after_capture', 'value': value}, self.bridge)
+                save.assert_not_called()
+
     def test_follow_capability_recovery_republishes_cached_controls(self):
         from dolly.replay_camera import CLIENT_SHA256
         self.controller.status.return_value['native_editor_active'] = True
@@ -88,6 +112,9 @@ class EditorSessionTests(unittest.TestCase):
         self.app.project = Project(keyframes=[Keyframe(0, 1, 2, 3, 4, 5, 6),
                                                Keyframe(2, 7, 8, 9, 10, 11, 12)])
         self.app.shot_history = ShotHistory(self.app.project)
+        self.app.playing = False
+        self.app._set_time = Mock()
+        self.app._play = Mock()
         self.app.camera_tree = Mock()
         self.app._select_key = Mock()
         self.app._snapshot = Mock(return_value=self.app.project)
@@ -103,6 +130,161 @@ class EditorSessionTests(unittest.TestCase):
         self.app._select_key.assert_called_once()
         self.app._submit.assert_not_called()
 
+    def test_paused_recording_rejects_clear_without_an_error_dialog(self):
+        from dolly.gui import DollyApp
+        for state in ('starting', 'recording', 'finalizing'):
+            with self.subTest(state=state):
+                self.camera_list_app()
+                self.app.native_editor_active = True
+                self.app.video_export = Mock()
+                self.app.video_export.status.return_value = {'state': state}
+                self.app._shot_edit_ready = lambda: DollyApp._shot_edit_ready(self.app)
+                self.app._commit_project = Mock()
+                self.app._native_camera_page = 32
+                self.app._error.reset_mock()
+                self.bridge.acknowledge_editor_event.reset_mock()
+                original = self.app.project.to_dict()
+                revision = self.app.shot_history.revision
+                self.bridge.editor_status.return_value = {'events': [
+                    {'sequence': 1, 'action': 'clear_camera_path', 'value': 0,
+                     'pose': (revision, 0, 0, 0, 0, 0, 0)}]}
+                session.poll(self.app)
+                self.app._error.assert_not_called()
+                self.app._commit_project.assert_not_called()
+                self.assertEqual(self.app.project.to_dict(), original)
+                self.assertEqual(self.app.shot_history.revision, revision)
+                self.assertIn('recording', self.app.status_text.set.call_args.args[0])
+                self.assertNotIn('Stop playback', self.app.status_text.set.call_args.args[0])
+                self.bridge.acknowledge_editor_event.assert_called_once_with(1)
+
+    def test_clear_during_recording_ignores_stale_confirmation(self):
+        self.camera_list_app()
+        self.app._shot_edit_ready.return_value = False
+        self.app._commit_project = Mock()
+        self.assertTrue(session.dispatch(self.app, {
+            'action': 'clear_camera_path', 'value': 0,
+            'pose': (self.app.shot_history.revision - 1, 0, 0, 0, 0, 0, 0)}, self.bridge))
+        self.app._commit_project.assert_not_called()
+
+    def test_clear_during_playback_keeps_cameras_and_reports_status(self):
+        self.camera_list_app()
+        self.app.playing = True
+        self.app._commit_project = Mock()
+        self.assertTrue(session.dispatch(self.app, {
+            'action': 'clear_camera_path', 'value': 0,
+            'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}, self.bridge))
+        self.app._commit_project.assert_not_called()
+        self.assertIn('Stop path playback', self.app.status_text.set.call_args.args[0])
+
+    def test_rejected_clear_keeps_finish_recording_available(self):
+        from dolly.gui import DollyApp
+        self.camera_list_app()
+        self.app.native_editor_active = True
+        self.app.video_export = Mock()
+        self.app.video_export.status.return_value = {'state': 'recording'}
+        self.app._shot_edit_ready = lambda: DollyApp._shot_edit_ready(self.app)
+        self.app._commit_project = Mock()
+        self.app._stop_video_recording = Mock()
+        self.bridge.editor_status.return_value = {'events': [
+            {'sequence': 1, 'action': 'clear_camera_path', 'value': 0,
+             'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)},
+            {'sequence': 2, 'action': 'stop_video', 'value': 0}]}
+        session.poll(self.app)
+        self.app._error.assert_not_called()
+        self.app._commit_project.assert_not_called()
+        self.app._stop_video_recording.assert_called_once_with(cancel=False)
+        self.assertEqual([call.args[0] for call in self.bridge.acknowledge_editor_event.call_args_list], [1, 2])
+
+    def test_clear_waits_for_queued_recording_and_then_can_be_retried(self):
+        from dolly.gui import DollyApp
+        self.camera_list_app()
+        self.app.video_export = Mock()
+        self.app.video_export.status.return_value = {'state': 'completed'}
+        self.app._shot_edit_ready = lambda: DollyApp._shot_edit_ready(self.app)
+        self.app._commit_project = Mock()
+        event = {'action': 'clear_camera_path', 'value': 0,
+                 'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}
+        for name in ('_layer_queue', '_active_layer_take'):
+            with self.subTest(name=name):
+                setattr(self.app, name, ['players'])
+                self.assertTrue(session.dispatch(self.app, event, self.bridge))
+                self.app._commit_project.assert_not_called()
+                self.assertEqual(self.app.status_text.set.call_args.args[0],
+                                 'Finish recording before editing cameras.')
+                setattr(self.app, name, None)
+        self.assertTrue(session.dispatch(self.app, event, self.bridge))
+        self.assertEqual(self.app._commit_project.call_args.args[0].keyframes, [])
+
+    def test_cinematic_preparation_waits_for_seek_completion(self):
+        self.camera_list_app()
+        revision = self.app.shot_history.revision
+        session.dispatch(self.app, {'action': 'prepare_cinematic', 'value': 7,
+                                   'pose': (revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        self.bridge.configure_editor_cinematic.assert_called_once_with(7, revision, 1)
+        _, operation, complete = self.app._submit.call_args.args
+        result = operation()
+        self.controller.seek.assert_called_once_with(self.app.project, 0)
+        self.bridge.configure_editor_cinematic.assert_called_once()
+        complete(result)
+        self.bridge.configure_editor_cinematic.assert_called_with(7, revision, 2)
+        self.app._play.assert_not_called()
+
+    def test_cinematic_preparation_failure_never_reports_ready(self):
+        self.camera_list_app()
+        revision = self.app.shot_history.revision
+        session.dispatch(self.app, {'action': 'prepare_cinematic', 'value': 7,
+                                   'pose': (revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        self.controller.seek.side_effect = RuntimeError('seek failed')
+        with self.assertRaisesRegex(RuntimeError, 'seek failed'):
+            self.app._submit.call_args.args[1]()
+        self.bridge.configure_editor_cinematic.assert_called_with(7, revision, 3)
+
+    def test_cinematic_preparation_rejects_changed_path(self):
+        self.camera_list_app()
+        revision = self.app.shot_history.revision
+        session.dispatch(self.app, {'action': 'prepare_cinematic', 'value': 7,
+                                   'pose': (revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        _, operation, complete = self.app._submit.call_args.args
+        result = operation()
+        self.app.project = Project()
+        complete(result)
+        self.bridge.configure_editor_cinematic.assert_called_with(7, revision, 3)
+
+    def test_previous_and_next_camera_select_and_view_saved_pose(self):
+        for action, initial, expected in [('previous_view', 1, 0), ('next_view', 0, 1)]:
+            with self.subTest(action=action):
+                self.camera_list_app()
+                self.app._selection_index = Mock(return_value=initial)
+                session.dispatch(self.app, {'action': action, 'value': 0}, self.bridge)
+                self.app.camera_tree.selection_set.assert_called_with(str(expected))
+                self.app._submit.call_args.args[1]()
+                self.controller.select_paused_camera.assert_called_with(
+                    self.app.project, self.app.project.keyframes[expected].time)
+
+    def test_stop_invalidates_cinematic_completion(self):
+        self.camera_list_app()
+        revision = self.app.shot_history.revision
+        session.dispatch(self.app, {'action': 'prepare_cinematic', 'value': 7,
+                                   'pose': (revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
+        _, operation, complete = self.app._submit.call_args.args
+        result = operation()
+        session.dispatch(self.app, {'action': 'stop', 'value': 0}, self.bridge)
+        self.bridge.configure_editor_cinematic.assert_called_with(7, revision, 3)
+        complete(result)
+        self.bridge.configure_editor_cinematic.assert_called_with(7, revision, 3)
+
+    def test_camera_publication_backfills_the_last_wire_block(self):
+        from dolly.shot_history import ShotHistory
+        self.camera_list_app()
+        self.app.project = Project(keyframes=[Keyframe(i, 1, 2, 3, 4, 5, 6) for i in range(33)])
+        self.app.shot_history = ShotHistory(self.app.project)
+        self.app._selection_index = Mock(return_value=32)
+        self.app._native_camera_selected = 31
+        self.app.native_editor_active = True
+        session.configure(self.app)
+        self.assertEqual(self.bridge.configure_editor_cameras.call_args.args[2], 1)
+        self.assertEqual(self.bridge.configure_lite_replay.call_args.args[2], 1)
+
     def test_view_camera_uses_paused_view_and_delete_never_moves_it(self):
         for action in ('view_camera', 'delete_camera'):
             with self.subTest(action=action):
@@ -117,12 +299,81 @@ class EditorSessionTests(unittest.TestCase):
                     self.app._delete_key.assert_called_once()
                     self.app._submit.assert_not_called()
 
+    def test_seek_camera_queues_the_selected_authored_endpoint_snapshot(self):
+        from copy import deepcopy
+        from dolly.shot_history import ShotHistory
+        self.camera_list_app()
+        self.app.project = Project(start_tick=31191, tick_rate=64, keyframes=[
+            Keyframe(0, 1, 2, 3, 4, 5, 6),
+            Keyframe(7.09375, 70, 80, 90, 10, 110, 12, aspect_ratio=1.8)])
+        self.app.shot_history = ShotHistory(self.app.project)
+        self.app._snapshot = lambda: deepcopy(self.app.project)
+        self.app.shot_time = Value(2.35)
+        saved = self.app.project.to_dict()
+        self.assertTrue(session.dispatch(self.app, {
+            'action': 'seek_camera', 'value': 1,
+            'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}, self.bridge))
+        self.assertEqual(self.app.project.to_dict(), saved)
+        self.controller.seek.assert_not_called()
+        operation = self.app._submit.call_args.args[1]
+        # Editing or replacing the live shot after dispatch cannot retarget a
+        # queued camera seek, including its authored time and full saved pose.
+        self.app.project.start_tick = 1
+        self.app.project.keyframes[1].time = 20
+        self.app.project.keyframes[1].x = 999
+        self.app.project = Project()
+        operation()
+        self.controller.seek.assert_called_once()
+        project, time = self.controller.seek.call_args.args
+        self.assertEqual(project.to_dict(), saved)
+        self.assertEqual(time, 7.09375)
+        self.assertEqual(round(project.start_tick + time * project.tick_rate), 31645)
+        frame = project.evaluate(time)
+        self.assertEqual(tuple(frame[name] for name in
+            ('x', 'y', 'z', 'pitch', 'yaw', 'roll', 'aspect_ratio')),
+            (70, 80, 90, 10, 110, 12, 1.8))
+        self.controller.select_paused_camera.assert_not_called()
+        self.controller.seek_replay_tick.assert_not_called()
+
+    def test_seek_camera_rejects_invalid_indices_and_active_operations(self):
+        from dolly.gui import DollyApp
+        self.camera_list_app()
+        event = {'action': 'seek_camera', 'value': 1,
+                 'pose': (self.app.shot_history.revision, 0, 0, 0, 0, 0, 0)}
+        for value in (-1, 2, .5, float('nan'), float('inf')):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                session.dispatch(self.app, dict(event, value=value), self.bridge)
+        self.app._snapshot.assert_not_called()
+        self.app._submit.assert_not_called()
+        for state, playing, busy in (('starting', False, False),
+                                    ('recording', False, False),
+                                    ('finalizing', False, False),
+                                    ('completed', True, False),
+                                    ('completed', False, True)):
+            with self.subTest(state=state, playing=playing, busy=busy):
+                self.app.video_export = Mock()
+                self.app.video_export.status.return_value = {'state': state}
+                self.app.playing, self.app.busy = playing, busy
+                self.app._shot_edit_ready = lambda: DollyApp._shot_edit_ready(self.app)
+                self.assertEqual(session.dispatch(self.app, event, self.bridge), not busy)
+                self.app._snapshot.assert_not_called()
+                self.app._select_key.assert_not_called()
+                self.app._submit.assert_not_called()
+        self.app.playing = self.app.busy = False
+        self.controller.status.return_value['playing'] = True
+        with self.assertRaisesRegex(ValueError, 'Pause shot playback'):
+            session.dispatch(self.app, event, self.bridge)
+        self.app._snapshot.assert_not_called()
+        self.app._submit.assert_not_called()
+        self.controller.seek.assert_not_called()
+        self.controller.select_paused_camera.assert_not_called()
+
     def test_stale_camera_action_cannot_delete_a_different_project_camera(self):
         self.camera_list_app()
         revision = self.app.shot_history.revision
         self.app.project.name = 'New edit'
         self.app.shot_history.record(self.app.project)
-        for action in ('select_camera', 'view_camera', 'delete_camera', 'undo_shot', 'redo_shot', 'camera_page'):
+        for action in ('select_camera', 'view_camera', 'seek_camera', 'delete_camera', 'undo_shot', 'redo_shot', 'camera_page'):
             with self.subTest(action=action), self.assertRaisesRegex(ValueError, 'camera list changed'):
                 session.dispatch(self.app, {'action': action, 'value': 0,
                                            'pose': (revision, 0, 0, 0, 0, 0, 0)}, self.bridge)
@@ -714,6 +965,30 @@ class EditorSessionTests(unittest.TestCase):
         self.assertFalse(self.app.video_depth.get())
         self.assertFalse(self.app.video_depth_exr.get())
 
+    def test_ae_camera_toggle_syncs_both_directions(self):
+        self.app.native_editor_active = True
+        self.app.video_ae_camera = Value(True)
+        session.configure(self.app)
+        self.assertTrue(self.bridge.configure_editor.call_args.kwargs["video_ae_camera"])
+        self.assertTrue(session.dispatch(self.app, {"action": "set_video_ae_camera", "value": 0}, self.bridge))
+        self.assertFalse(self.app.video_ae_camera.get())
+        self.assertFalse(self.bridge.configure_editor.call_args.kwargs["video_ae_camera"])
+        for invalid in (-1, 2, .5):
+            with self.assertRaises(ValueError):
+                session.dispatch(self.app, {"action": "set_video_ae_camera", "value": invalid}, self.bridge)
+
+    def test_usd_camera_toggle_syncs_both_directions(self):
+        self.app.native_editor_active = True
+        self.app.video_usd_camera = Value(False)
+        session.configure(self.app)
+        self.assertFalse(self.bridge.configure_editor.call_args.kwargs["video_usd_camera"])
+        self.assertTrue(session.dispatch(self.app, {"action": "set_video_usd_camera", "value": 1}, self.bridge))
+        self.assertTrue(self.app.video_usd_camera.get())
+        self.assertTrue(self.bridge.configure_editor.call_args.kwargs["video_usd_camera"])
+        for invalid in (-1, 2, .5):
+            with self.assertRaises(ValueError):
+                session.dispatch(self.app, {"action": "set_video_usd_camera", "value": invalid}, self.bridge)
+
     def test_layer_switches_sync_independently_and_arm_fixed_step(self):
         from dolly.gui import DollyApp
         self.app.native_editor_active = True
@@ -816,21 +1091,25 @@ class EditorSessionTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in self.bridge.acknowledge_editor_event.call_args_list], [1, 2])
 
     def test_path_guides_publish_only_when_camera_shape_or_selection_changes(self):
+        from dolly.editor_publication import visualization_session
         self.app.native_editor_active = True
         self.app.project.keyframes = [Keyframe(0, 1, 2, 3, 4, 5, 6), Keyframe(1, 7, 8, 9, 10, 11, 12)]
         session.configure(self.app)
-        self.bridge.publish_visualization.assert_called_once_with(self.app.project, enabled=True, selected_camera=0)
+        shot_session = visualization_session(self.app)
+        self.assertGreater(shot_session, 0)
+        self.bridge.publish_visualization.assert_called_once_with(self.app.project, enabled=True, selected_camera=0, revision=0, session_id=shot_session)
         self.app.shot_time = .5
         self.app.speed.set(".1")
         session.configure(self.app)
         self.bridge.publish_visualization.assert_called_once()
+        self.assertEqual(visualization_session(self.app), shot_session)
         # Mutable camera objects must not mutate the cached comparison too.
         self.app.project.keyframes[0].z += 10
         session.configure(self.app)
         self.assertEqual(self.bridge.publish_visualization.call_count, 2)
         self.app._selection_index = lambda _: 1
         session.configure(self.app)
-        self.bridge.publish_visualization.assert_called_with(self.app.project, enabled=True, selected_camera=1)
+        self.bridge.publish_visualization.assert_called_with(self.app.project, enabled=True, selected_camera=1, revision=0, session_id=shot_session)
         self.app.project.rotation_mode = "unwrapped"
         session.configure(self.app)
         self.assertEqual(self.bridge.publish_visualization.call_count, 4)
@@ -850,6 +1129,7 @@ class EditorSessionTests(unittest.TestCase):
         self.app._error.assert_not_called()
 
     def test_clear_and_new_bridge_refresh_guides_without_changing_input_owner(self):
+        from dolly.editor_publication import visualization_session
         self.app.native_editor_active = True
         self.app.project.keyframes = [Keyframe(0, 1, 2, 3, 4, 5, 6)]
         session.configure(self.app)
@@ -859,10 +1139,11 @@ class EditorSessionTests(unittest.TestCase):
         replacement = Mock()
         self.controller._native_bridge.return_value = replacement
         session.configure(self.app)
-        replacement.publish_visualization.assert_called_once_with(self.app.project, enabled=True, selected_camera=0)
+        shot_session = visualization_session(self.app)
+        replacement.publish_visualization.assert_called_once_with(self.app.project, enabled=True, selected_camera=0, revision=0, session_id=shot_session)
         self.controller.status.return_value["connected"] = False
         session.configure(self.app)
-        replacement.publish_visualization.assert_called_with(self.app.project, enabled=False, selected_camera=0)
+        replacement.publish_visualization.assert_called_with(self.app.project, enabled=False, selected_camera=0, revision=0, session_id=shot_session)
         self.assertNotIn("owner", replacement.configure_editor.call_args.kwargs)
 
     def test_attach_fields_are_published_once_per_bridge(self):

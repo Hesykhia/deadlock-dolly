@@ -51,6 +51,37 @@ class AudioRuntimeTests(unittest.TestCase):
             self.assertEqual(_ffmpeg(), Path('custom/ffmpeg.exe'))
 
 
+class AudioMuxEnvironmentTests(unittest.TestCase):
+    """The muxer launches FFmpeg like the other encoders: clean env, no console."""
+
+    def test_mux_uses_external_environment_without_a_window(self):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        seen = {}
+
+        @contextmanager
+        def environment():
+            seen["entered"] = True
+            yield {"PATH": "clean"}
+
+        def spawn(command, **kwargs):
+            seen.update(kwargs)
+            Path(command[-1]).write_bytes(b"audio")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "video.mp4"
+            video.write_bytes(b"video")
+            audio = Path(folder) / "audio.wav"
+            audio.write_bytes(b"audio")
+            with patch("dolly.clip_audio.external_program_environment", environment), \
+                    patch("dolly.clip_audio.subprocess.run", spawn):
+                _mux(video, [audio], Path("ffmpeg.exe"))
+        self.assertTrue(seen["entered"])
+        self.assertEqual(seen["env"], {"PATH": "clean"})
+        self.assertEqual(seen["creationflags"], getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
 class AudioMuxFrameTests(unittest.TestCase):
     def test_audio_rounding_does_not_remove_last_video_frame(self):
         # Exercise the shipped muxer and decode both files; a command-string

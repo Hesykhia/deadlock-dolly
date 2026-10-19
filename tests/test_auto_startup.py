@@ -4,9 +4,9 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from dolly.controller import Controller, PreloadUnavailableError
+from dolly.controller import Controller, PreloadUnavailableError, StartupTimeout
 from tests.test_native_flight_controller import configured_controller
 
 
@@ -51,6 +51,45 @@ class AutoStartupTests(unittest.TestCase):
         with patch("dolly.controller.launcher.launch", return_value=self.session), \
              patch("dolly.controller.ConsoleClient", return_value=self.console):
             return self.controller.start_editing("installation", self.demo, **kwargs)
+
+    def test_startup_exit_does_not_blame_a_queued_replay(self):
+        self.controller._session = self.session
+        self.session.process = SimpleNamespace(poll=lambda: 1)
+        self.controller._replay_requested = True
+        for context in ('waiting for the game console', 'waiting for hideout readiness'):
+            message = self.controller._game_death_message(context)
+            self.assertIn('before the selected replay was loaded', message)
+            self.assertNotIn('incompatible or incomplete', message)
+
+    def test_startup_failure_is_reported_without_an_automatic_second_launch(self):
+        self.session.session_dir = Path(self.temp.name)
+        (self.session.session_dir / 'game_stdout.log').write_text(
+            'CSteamHTMLSurface::Init - failing, no Steam process', encoding='utf-8')
+        with patch.object(self.controller, 'launch', wraps=self.controller.launch) as launch, \
+             patch.object(self.controller, '_startup_wait', side_effect=RuntimeError('startup stopped')):
+            with self.assertRaisesRegex(RuntimeError, 'startup stopped'):
+                self.start()
+        self.assertEqual(launch.call_count, 1)
+        self.assertEqual(self.controller.status()['startup_stage'], 'failed')
+        self.assertFalse(any(command.startswith('playdemo ') for command in self.console.sent))
+
+    def test_hideout_console_failure_stops_without_reconnecting_or_unlocking(self):
+        with patch.object(self.controller, '_automatic_hideout_check',
+                          side_effect=RuntimeError('The console is disconnected')), \
+             patch.object(self.console, 'connect', wraps=self.console.connect) as connect:
+            with self.assertRaisesRegex(RuntimeError, 'The console is disconnected'):
+                self.start()
+        self.assertEqual(connect.call_count, 1)
+        self.assertNotIn('cvar_unhide', self.console.requests)
+        self.assertFalse(any(command.startswith('playdemo ') for command in self.console.sent))
+
+    def test_panorama_notice_keeps_native_duplicate_clear_without_changing_stages(self):
+        self.controller._session = self.session
+        self.bridge.configure_shader_loading = MagicMock()
+        for stage in ('waiting_preload_intro', 'preloading', 'preload_ready', 'editing_ready', 'failed'):
+            self.controller._message(stage, startup_stage=stage)
+            self.bridge.configure_shader_loading.assert_called_with(False)
+            self.assertEqual(self.controller.status()['startup_stage'], stage)
 
     def test_one_click_waits_for_hideout_then_unlocks_once_before_replay(self):
         result = self.start()
@@ -195,7 +234,7 @@ class AutoStartupTests(unittest.TestCase):
         self.preload.sample.return_value = dict(self.preload.sample.return_value,
                                                 started=False, intro_phase=1, ready=False)
 
-        def wait(check, *args):
+        def wait(check, *args, **kwargs):
             for _ in range(3):
                 self.assertIsNone(check())
             raise RuntimeError('Timed out waiting for preload')
@@ -211,7 +250,7 @@ class AutoStartupTests(unittest.TestCase):
         self.controller._session, self.controller._console = self.session, self.console
         self.preload.sample.return_value = dict(self.preload.sample.return_value, ready=False)
 
-        def wait(check, *args):
+        def wait(check, *args, **kwargs):
             for _ in range(3):
                 self.assertIsNone(check())
             raise RuntimeError('Timed out waiting for preload')
@@ -222,6 +261,141 @@ class AutoStartupTests(unittest.TestCase):
                     self.controller._wait_dashboard_preload(0, None)
         self.assertNotIn('preload_unavailable', self.controller._startup_evidence)
         self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
+
+    def test_a_live_preload_job_extends_the_stall_window_instead_of_giving_up(self):
+        """A slow machine compiling one big shader batch is not a wedged preload."""
+        self.controller._session, self.controller._console = self.session, self.console
+        self.console.values['citadel_hud_visible'] = 0
+        working = {"coherent": True, "started": True, "completed": 192, "total": 192,
+                   "intro_phase": None, "scheduled": True, "job_complete": False,
+                   "resource_complete": False, "job_active": True, "ready": False}
+        done = {"coherent": True, "started": True, "completed": 384, "total": 384,
+                "intro_phase": None, "scheduled": True, "job_complete": True,
+                "resource_complete": True, "job_active": False, "ready": True}
+        self.preload.sample.side_effect = [working, working] + [done] * 8
+        windows = []
+        messages = []
+        original_message = self.controller._message
+
+        def record_message(message, **state):
+            messages.append(str(message))
+            return original_message(message, **state)
+
+        def wait(check, label, cancel, timeout=None):
+            windows.append((label, timeout))
+            if 'preload_extensions' not in self.controller._startup_evidence:
+                for _ in range(2):
+                    self.assertIsNone(check())
+                raise StartupTimeout('Timed out after 120s waiting for verified map and '
+                                     'shader preload completion.')
+            for _ in range(8):
+                result = check()
+                if result:
+                    return result
+            raise AssertionError('the extended window never verified readiness')
+
+        with patch.object(self.controller, '_startup_wait', side_effect=wait), \
+             patch.object(self.controller, '_message', side_effect=record_message):
+            self.controller._wait_dashboard_preload(0, None)
+        self.assertEqual([timeout for _, timeout in windows],
+                         [120.0, 120.0])
+        self.assertEqual([label for label, _ in windows],
+                         ['waiting for verified map and shader preload completion'] * 2)
+        evidence = self.controller._startup_evidence
+        self.assertEqual(evidence['preload_extensions']['count'], 1)
+        self.assertEqual(evidence['preload_extensions']['last_sample']['total'], 192)
+        self.assertNotIn('preload_unavailable', evidence)
+        self.assertTrue(evidence['preload']['ready'])
+        self.assertEqual(self.controller._state['startup_stage'], 'preload_ready')
+        self.preload.close.assert_called_once()
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+        # The extension is reported while it happens, never as a silent wait.
+        self.assertTrue(any('still preloading its map and shaders' in text for text in messages))
+        self.assertTrue(any('192 of 192' in text for text in messages))
+
+    def test_a_stalled_preload_offers_the_unverified_replay_with_the_last_batch(self):
+        """Silence ends the wait, and the failure must stay actionable.
+
+        A machine slower than the reviewed preload window has no other way
+        forward, so this timeout raises the same error that the desktop already
+        turns into an explicit "load without the preload check" choice.
+        """
+        self.controller._session, self.controller._console = self.session, self.console
+        self.console.values['citadel_hud_visible'] = 0
+        self.preload.sample.return_value = {
+            "coherent": True, "started": True, "completed": 192, "total": 192,
+            "intro_phase": None, "scheduled": False, "job_complete": False,
+            "resource_complete": False, "job_active": False, "ready": False}
+
+        def wait(check, label, cancel, timeout=None):
+            for _ in range(2):
+                self.assertIsNone(check())
+            raise StartupTimeout('Timed out after 120s waiting for verified map and '
+                                 'shader preload completion.')
+
+        with patch.object(self.controller, '_startup_wait', side_effect=wait):
+            with self.assertRaises(PreloadUnavailableError) as caught:
+                self.controller._wait_dashboard_preload(0, None)
+        message = str(caught.exception)
+        self.assertIn('Timed out', message)
+        self.assertIn('preload', message)
+        self.assertIn('192 of 192', message)
+        self.assertIn('without preload verification', message)
+        evidence = self.controller._startup_evidence
+        self.assertEqual(evidence['preload_unavailable']['reason'], 'preload_stalled')
+        self.assertEqual(evidence['preload_unavailable']['last_sample']['total'], 192)
+        self.assertNotIn('preload_extensions', evidence)
+        self.assertEqual(self.controller._state['startup_stage'], 'failed')
+        self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
+        self.preload.close.assert_called_once()
+        self.assertEqual(self.console.values['citadel_hud_visible'], 0)
+
+    def test_an_unreadable_preload_never_extends_its_window(self):
+        """No coherent sample means no evidence of work, so nothing is extended."""
+        self.controller._session, self.controller._console = self.session, self.console
+        self.preload.sample.return_value = {"coherent": False}
+
+        def wait(check, label, cancel, timeout=None):
+            for _ in range(2):
+                self.assertIsNone(check())
+            raise StartupTimeout('Timed out after 120s waiting for verified map and '
+                                 'shader preload completion.')
+
+        with patch.object(self.controller, '_startup_wait', side_effect=wait) as timed:
+            with self.assertRaises(PreloadUnavailableError) as caught:
+                self.controller._wait_dashboard_preload(0, None)
+        self.assertEqual(timed.call_count, 1)
+        evidence = self.controller._startup_evidence
+        self.assertEqual(evidence['preload_unavailable']['reason'], 'preload_stalled')
+        self.assertNotIn('preload_extensions', evidence)
+        self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
+
+    def test_a_preload_that_keeps_running_still_stops_at_the_absolute_ceiling(self):
+        """Endless progress cannot hold startup forever without ever being ready."""
+        self.controller._session, self.controller._console = self.session, self.console
+        self.console.values['citadel_hud_visible'] = 0
+        self.preload.sample.return_value = {
+            "coherent": True, "started": True, "completed": 96, "total": 192,
+            "intro_phase": None, "scheduled": True, "job_complete": False,
+            "resource_complete": False, "job_active": True, "ready": False}
+
+        def wait(check, label, cancel, timeout=None):
+            for _ in range(2):
+                self.assertIsNone(check())
+            raise StartupTimeout('Timed out after 120s waiting for verified map and '
+                                 'shader preload completion.')
+
+        with patch.object(self.controller, '_startup_wait', side_effect=wait), \
+             patch('dolly.controller.PRELOAD_MAX_SECONDS', 0):
+            with self.assertRaises(PreloadUnavailableError) as caught:
+                self.controller._wait_dashboard_preload(0, None)
+        self.assertIn("kept running", str(caught.exception))
+        evidence = self.controller._startup_evidence
+        self.assertEqual(evidence['preload_unavailable']['reason'], 'preload_ceiling')
+        self.assertNotIn('preload_extensions', evidence)
+        self.assertEqual(self.controller._state['startup_stage'], 'failed')
+        self.assertFalse(any(c.startswith('playdemo ') for c in self.console.sent))
+        self.preload.close.assert_called_once()
 
     def test_hidden_hud_is_shown_for_preload_and_restored_before_replay(self):
         self.console.values['citadel_hud_visible'] = 0
@@ -277,7 +451,7 @@ class AutoStartupTests(unittest.TestCase):
         invalidated = dict(active, started=False, intro_phase=0)
         self.preload.sample.side_effect = [active, invalidated, invalidated]
 
-        def wait(check, *args):
+        def wait(check, *args, **kwargs):
             for _ in range(3):
                 self.assertIsNone(check())
             raise RuntimeError('Timed out waiting for preload')
@@ -298,7 +472,7 @@ class AutoStartupTests(unittest.TestCase):
                    for i in range(70)]
         self.preload.sample.side_effect = samples
 
-        def wait(check, *args):
+        def wait(check, *args, **kwargs):
             for _ in samples:
                 self.assertIsNone(check())
             raise RuntimeError('Timed out waiting for preload')
@@ -317,6 +491,7 @@ class AutoStartupTests(unittest.TestCase):
     def test_crashed_game_during_startup_reports_exit_code_and_replay_identity(self):
         self.controller._session = self.session
         self.session.process = SimpleNamespace(poll=lambda: 3221225477)
+        self.controller._replay_requested = True
         self.controller._replay_header = {"name": "9-21Routers2.dem", "build_num": 10725,
                                           "map_name": "dl_midtown"}
         with self.assertRaises(RuntimeError) as caught:
@@ -342,6 +517,52 @@ class AutoStartupTests(unittest.TestCase):
         self.session.process = SimpleNamespace(poll=lambda: 0)
         with self.assertRaisesRegex(RuntimeError, "Deadlock closed while waiting for the selected replay"):
             self.controller._startup_wait(lambda: None, "waiting for the selected replay", None)
+
+    def test_replay_recorded_on_this_build_reports_the_file_not_a_mismatch(self):
+        self.controller._session = self.session
+        self.session.process = SimpleNamespace(poll=lambda: 3221225477)
+        self.controller._replay_requested = True
+        self.controller._replay_header = {"name": "cines.dem", "build_num": 10931,
+                                          "map_name": "dl_midtown"}
+        self.controller._game_build = 10931
+        with self.assertRaises(RuntimeError) as caught:
+            self.controller._startup_wait(lambda: None, "waiting for the selected replay", None)
+        message = str(caught.exception)
+        self.assertIn("0xC0000005", message)
+        self.assertIn("recorded on this build", message)
+        self.assertIn("cines.dem", message)
+        self.assertIn("game build 10931", message)
+        self.assertNotIn("cannot reconstruct", message)
+
+    def test_replay_from_a_different_build_keeps_the_mismatch_guidance(self):
+        self.controller._session = self.session
+        self.session.process = SimpleNamespace(poll=lambda: 3221225477)
+        self.controller._replay_requested = True
+        self.controller._replay_header = {"name": "old.dem", "build_num": 10725,
+                                          "map_name": "dl_midtown"}
+        self.controller._game_build = 10931
+        with self.assertRaises(RuntimeError) as caught:
+            self.controller._startup_wait(lambda: None, "waiting for the selected replay", None)
+        message = str(caught.exception)
+        self.assertIn("cannot reconstruct", message)
+        self.assertNotIn("The selected replay was recorded on this build", message)
+
+    def test_installed_build_is_captured_from_the_console_banner(self):
+        self.controller._console = MagicMock()
+        self.controller._console.recent_output.return_value = (
+            'Game: "Deadlock"\r\nMap: "dl_hideout"\r\nBuild: 10931 (revision 11112755)\r\n')
+        self.controller._game_build = None
+        self.controller._startup_evidence = {}
+        self.controller._capture_game_build()
+        self.assertEqual(self.controller._game_build, 10931)
+        self.assertEqual(self.controller._startup_evidence["game_build"], 10931)
+
+    def test_installed_build_is_captured_once(self):
+        self.controller._console = MagicMock()
+        self.controller._console.recent_output.side_effect = AssertionError("must not re-read")
+        self.controller._game_build = 10931
+        self.controller._capture_game_build()
+        self.assertEqual(self.controller._game_build, 10931)
 
     def test_native_rendered_tick_zero_does_not_allow_early_pause(self):
         self.console.goto_outputs.extend([0, 0, 1, 2])
@@ -395,7 +616,57 @@ class AutoStartupTests(unittest.TestCase):
         self.camera_monitor.sample_startup.side_effect = sample
         self.start()
         self.assertEqual(self.camera_monitor.sample_startup.call_count, 4)
+        # A successful handoff keeps the reviewed monitor open for the next shot
+        # preparation; it is closed on disconnect, not after every wait.
+        self.camera_monitor.close.assert_not_called()
+        self.controller.disconnect()
         self.camera_monitor.close.assert_called_once()
+
+    def test_replay_camera_monitor_is_reused_across_shot_preparation(self):
+        def make(*_args, **_kwargs):
+            built = MagicMock()
+            built.identity = {'method': 'test_camera_handoff'}
+            built.memory = object()  # Look like an open monitor.
+            built.sample_startup.return_value = {'coherent': True, 'ready': True}
+            return built
+        with patch('dolly.controller.ReplayCameraMonitor', side_effect=make) as factory:
+            first = self.controller._replay_camera()
+            second = self.controller._replay_camera()
+            self.assertIs(first, second)
+            self.assertEqual(factory.call_count, 1)
+            # A new session must never reuse a monitor bound to the old process.
+            self.controller._session = object()
+            third = self.controller._replay_camera()
+            self.assertIsNot(third, first)
+            self.assertEqual(factory.call_count, 2)
+            first.close.assert_called()
+
+    def test_preshow_accelerates_then_restores_normal_speed_before_pausing(self):
+        # The recorded match intro is played faster through the ordinary packet
+        # path, but the speed is restored to 1x before the caller pauses so the
+        # editor opens at the normal rate. A seek is never used.
+        with patch('dolly.controller.REPLAY_PRESHOW_TIMESCALE', 4.0):
+            self.start()
+        scales = [event for event in self.console.events if event.startswith('demo_timescale ')]
+        self.assertEqual(scales[0], 'demo_timescale 4')
+        self.assertEqual(scales[-1], 'demo_timescale 1')
+        # Speed is raised for the intro, then restored to 1x before the pause so
+        # the editor opens at the normal rate.
+        self.assertLess(self.console.events.index(scales[0]), self.console.events.index(scales[-1]))
+        self.assertLess(self.console.events.index(scales[-1]), self.console.events.index('demo_pause'))
+        self.assertNotIn('demo_gototick', self.console.events)
+
+    def test_preshow_acceleration_is_optional_when_timescale_is_rejected(self):
+        original = self.console.request
+
+        def request(command, *args, **kwargs):
+            if command.startswith('demo_timescale '):
+                raise RuntimeError('timescale rejected')
+            return original(command, *args, **kwargs)
+        self.console.request = request
+        with patch('dolly.controller.REPLAY_PRESHOW_TIMESCALE', 4.0):
+            self.start()  # Must still succeed without the accelerator.
+        self.assertEqual(self.controller.status()['startup_stage'], 'editing_ready')
 
     def test_camera_ready_does_not_pause_before_stock_hud_takeover_ends(self):
         counts = iter((1, 0, 1, 0, 0))
@@ -515,6 +786,31 @@ class AutoStartupTests(unittest.TestCase):
             self.start()
         self.assertNotIn("native.flight", self.console.events)
         self.assertFalse(self.controller.status()["paused_flight"])
+
+    def test_unconfirmed_console_hide_still_proceeds_on_the_dev_flood(self):
+        # A -dev data dump can hide the `help hideconsole` confirmation. Unknown
+        # availability is not a rejection: the explicit command is still issued
+        # and startup reaches the editor (the reported "did not confirm
+        # hideconsole" abort must not happen).
+        self.console.supports = lambda name: None
+        result = self.start()
+        self.assertEqual(result["startup_stage"], "editing_ready")
+        self.assertIn("hideconsole", self.console.events)
+        self.assertLess(self.console.events.index("hideconsole"),
+                        self.console.events.index("native.flight"))
+
+    def test_console_command_available_treats_unknown_as_usable(self):
+        self.controller._console = self.console
+        self.console.supports = lambda name: None
+        self.assertIsNone(self.controller._console_command_available("hideconsole"))
+        self.console.supports = lambda name: False
+        self.assertIs(self.controller._console_command_available("hideconsole"), False)
+        self.console.supports = lambda name: True
+        self.assertIs(self.controller._console_command_available("hideconsole"), True)
+        # A stub without the timeout parameter is still queried safely.
+        self.console.supports = lambda name: name == "hideconsole"
+        self.assertIs(self.controller._console_command_available("hideconsole"), True)
+        self.assertIs(self.controller._console_command_available("absent"), False)
 
     def test_preloaded_replay_refused_before_initialization(self):
         self.controller._session = self.session

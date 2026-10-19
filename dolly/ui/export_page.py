@@ -14,6 +14,8 @@ class ExportState:
     ffmpeg_path: tk.Variable
     video_bitrate: tk.Variable
     video_codec: tk.Variable
+    player_processing: tk.Variable
+    players_scratch: tk.Variable
     video_depth: tk.Variable
     video_depth_exr: tk.Variable
     video_export_speed: tk.Variable
@@ -28,6 +30,8 @@ class ExportState:
     video_reconstructed_audio: tk.Variable
     video_source: tk.Variable
     video_status_text: tk.Variable
+    video_ae_camera: tk.Variable
+    video_usd_camera: tk.Variable
     codec_choices: tuple[str, ...]
     bitrate_choices: tuple[str, ...]
 
@@ -35,6 +39,7 @@ class ExportState:
 @dataclass(frozen=True)
 class ExportActions:
     browse_ffmpeg: Callable[..., object]
+    browse_players_scratch: Callable[..., object]
     browse_video: Callable[..., object]
     depth_toggled: Callable[..., object]
     layer_toggled: Callable[..., object]
@@ -65,9 +70,16 @@ class ExportPage:
         self.video_pov_duration_combo = field(self.video_pov_controls, "Replay seconds", state.video_pov_duration,
                                            values=("1", "2", "5", "10", "15", "30", "60", "120"))
         ttk.Label(self.video_pov_controls,
-                  text="F9: select a hero and pause at the start. F8: return to Export. HUD hides automatically.",
+                  text="Select a hero with Game Follow or F9, then pause at the start. F8: return to Export. HUD hides automatically.",
                   style="CardMuted.TLabel", wraplength=760).pack(fill="x")
+        camera_options = self.video_camera_options = ttk.Frame(source, style="Card.TFrame")
+        camera_options.pack(anchor="w", pady=(0, GAP))
+        self.video_ae_camera_check = ttk.Checkbutton(camera_options, style="Card.TCheckbutton", text="Export After Effects camera (.jsx)", variable=state.video_ae_camera)
+        self.video_ae_camera_check.pack(side="left", padx=(0, 18))
+        self.video_usd_camera_check = ttk.Checkbutton(camera_options, style="Card.TCheckbutton", text="Export USD camera (.usda)", variable=state.video_usd_camera)
+        self.video_usd_camera_check.pack(side="left")
         destination = card(body, "Destination")
+        self.video_destination_card = destination
         self.video_path_entry = field(destination, "Output file", state.video_path)
         self.video_browse_button = actions(destination, (("Browse...", commands.browse_video),
                                   ("Open output folder", commands.open_output_folder)), 2)[0]
@@ -98,6 +110,9 @@ class ExportPage:
                   style="CardMuted.TLabel", wraplength=320).pack(anchor="w", pady=(0, GAP))
         self.video_depth_exr_checkbox = ttk.Checkbutton(passes, style="Card.TCheckbutton", text="EXR sequence (float)", variable=state.video_depth_exr)
         self.video_depth_exr_checkbox.pack(anchor="w", pady=(0, GAP))
+        # The sequence needs the depth master; the app keeps this in step with
+        # depth changes from either UI.
+        self.video_depth_exr_checkbox.configure(state="normal" if state.video_depth.get() else "disabled")
         self.video_layer_checkboxes = []
         for title, var in (("World layer", state.video_layer_world), ("Players layer (alpha)", state.video_layer_players), ("Effects layer (alpha)", state.video_layer_effects)):
             cb = ttk.Checkbutton(passes, style="Card.TCheckbutton", text=title, variable=var, command=commands.layer_toggled)
@@ -114,6 +129,14 @@ class ExportPage:
         quality = disclosure(capture, "Encoder & quality")
         self.video_codec_combo = field(quality.body, "Encoder", state.video_codec, values=state.codec_choices)
         self.video_bitrate_combo = field(quality.body, "Bitrate", state.video_bitrate, values=state.bitrate_choices)
+        self.player_processing_combo = field(quality.body, "Players processing", state.player_processing,
+                                             values=("Background", "Balanced", "Fast"))
+        ttk.Label(quality.body, text="Background leaves more CPU time for editing while building the Players MOV. Faster modes use more CPU.",
+                  style="CardMuted.TLabel", wraplength=320).pack(fill="x")
+        self.players_scratch_entry = field(quality.body, "Players scratch folder", state.players_scratch)
+        self.players_scratch_browse = actions(quality.body, (("Browse scratch folder...", commands.browse_players_scratch),), 1)[0]
+        ttk.Label(quality.body, text="Blank uses the output folder. Raw Players files need a fast drive with free space. Failed or cancelled captures are kept in their own folders.",
+                  style="CardMuted.TLabel", wraplength=320).pack(fill="x")
         controls = card(recording_holder, "Recording")
         buttons = actions(controls, (("Play shot", commands.play), ("Record video", commands.start_video_recording, "Primary.TButton"),
                                      ("Finish recording", commands.stop_video_recording),

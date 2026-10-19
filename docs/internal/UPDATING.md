@@ -1,26 +1,67 @@
 # Published release updates
 
-Dolly 0.5.6-alpha introduces the single-entry-point Windows updater. Earlier public
-ZIPs and the unpublished 0.5.5 preview need one manual download of this package.
-Future releases use the same startup updater. Source checkouts still use the
-local build workflow.
+Maintainer reference for packaging, publishing and updater behavior. For
+current user instructions, see [Updating and recovery](../UPDATING.md);
+the [documentation index](../README.md) covers editing workflows.
+
+Packaged Windows builds include the updater and recovery launcher in `Dolly.exe`.
+Source checkouts use the local build workflow; the packaged updater does not
+install or build source checkouts.
+
+## Moving from the older automatic updater
+
+The **Update now** choice applies once 0.6.51-alpha or a later version is
+installed. Versions through 0.6.50-alpha still use their original updater when
+opened with automatic updates enabled. They can jump directly to whichever release is Latest:
+for example, 0.6.50-alpha can automatically install 0.6.52-alpha without ever
+opening 0.6.51-alpha. New release code cannot change the launcher that is already
+running before that first upgrade.
+
+After that transition, opening the updated **Dolly.exe** opens the editor first.
+The notice appears when a newer release is available, and requires **Update
+now** before downloading or installing it. When the installed version is already
+Latest, there is no update notice. **Settings > Updates** remains available.
+
+To choose the timing of the first upgrade from an older version, extract the
+complete current Windows ZIP into a fresh folder and open its **Dolly.exe**.
+Updating a Git checkout does not replace a separately installed Windows copy,
+such as a Dolly folder on the desktop.
 
 ## For users
 
-Open `Dolly.exe`. Its startup window shows **Checking for updates...** before
-opening the editor. **Open Dolly** skips a slow check. Only this executable is
-shown at the top of the folder; its editor runtime stays under `_internal`.
+Open `Dolly.exe`. The desktop editor opens immediately, and any enabled update
+check runs in the background. The editor runtime stays under `_internal`.
 
-Dolly checks GitHub's public Latest release. A newer Windows package downloads, is verified against GitHub's SHA-256
-digest and its file manifest, then installs when the desktop has no unsaved shot,
-operation, recording, open dialog or active Deadlock session. Dolly closes,
-checks the replacement application and reopens at the same path. Shortcuts keep
-working. There is no update while a game session is active.
+Dolly checks version and release information from GitHub's public Latest release.
+When a newer release is available, a prominent notice inside the desktop app
+shows the installed and available versions, with **What's changed**, **Update
+now**, and **Later**. **What's changed** smoothly expands the short published
+Before/After notes inside the mint-outlined notice. Longer notes scroll within
+the panel; **Full release notes** opens the release page in your browser. If a
+release has no supported short notes, the panel explains that and keeps the full
+release link available. **Later** collapses
+the notice to an **Update available** button in the header for this session; the
+next launch checks again when automatic checking is enabled. The update also
+remains available in **Settings > Updates**.
 
-Settings / Updates has a manual check and an automatic-update switch. Turning
-automatic updates off leaves a downloaded update available through Restart to
-update. Offline, incomplete, missing-asset and rate-limited checks leave the
-installed application usable. Experimental pre-releases are ignored.
+Every update requires **Update now**. No package downloads or installs before
+that click, and there is no automatic-install option or countdown. If Dolly asks
+you to save your shot, close Deadlock, finish a recording or operation, or close
+an open dialog, do that first and click **Update now** again. The request is not
+queued: becoming idle does not start a download, installation or restart.
+
+After an accepted **Update now** action, Dolly downloads the Windows package,
+verifies GitHub's SHA-256 digest and the file manifest, then installs and restarts
+when safe. If the app becomes busy before installation, finish that work and
+click **Update now** again. The replacement application is checked and reopens
+at the same path, so shortcuts keep working.
+
+**Settings > Updates** has **Check for updates** and **Automatically check for
+updates**. The preference controls background release-information checks only;
+turning it off keeps automatic checks off. Manual checks remain available.
+Existing saved preference values are preserved. Offline, incomplete, missing-asset
+and rate-limited checks leave the installed application usable. Experimental
+pre-releases are ignored.
 
 Preferences and ReShade configuration stay in `%APPDATA%/DeadlockDolly`.
 Custom FFmpeg paths are saved there too. The bundled FFmpeg is found relative
@@ -43,10 +84,11 @@ the transaction, and restores the previous files on replacement or startup-check
 failure. Staging and backups are kept in a `.dolly-update-*` folder inside the
 Dolly folder, never beside it. After a successful update the following launch
 removes that folder automatically; it is kept only while a recovery is pending
-or a transaction is unfinished. A verified download is reused on a retry instead
-of downloading the same release again.
+or a transaction is unfinished. A later **Update now** attempt can reuse an
+already verified download instead of downloading the same release again.
 
-After an interrupted update, close Deadlock and open `Dolly.exe` again. This
+Recovery of an already approved, interrupted update remains automatic. Close
+Deadlock and open `Dolly.exe` again. This
 self-contained launcher can recover even if the editor runtime in `_internal`
 is incomplete. It starts a private copy of its embedded update worker, waits for
 the old processes to close, restores journaled application files, then reopens
@@ -61,14 +103,51 @@ separate folder. Ordinary recovery needs only Dolly.exe.
 
 ## For the publisher
 
+The in-app highlights use the same short publish description pasted into the
+GitHub release body. Open with the published heading that names the release —
+`### Deadlock Dolly v0.6.52-alpha` — followed by a blank line and the required
+bold version line `**0.6.52-alpha**`, then two to four bullets in the form
+`- **Short title.** *Before:* ... *After:* ...`. Wrapped lines are supported.
+Use the version being published; the example is not an assigned next version.
+No separate summary attachment or package download is needed to read highlights.
+
+The preview starts at a heading that names the version being published, plain or
+bold; a heading without the version ends the preview, so ordinary section
+headings stay out of the notes. Keep the bullets directly under that heading.
+Versions 0.6.51 through 0.6.54 parse only a bold version line. Keep both lines,
+including when editing or shortening the description: a body with only the
+plain heading previews correctly in newer clients but shows no highlights in
+those installed versions. The normal Windows builder checks this authoring
+contract before building.
+
+Validate the exact text you will paste, after any edits, with:
+
+```powershell
+python tools/check_release_notes.py path/to/publish-body.md
+```
+
+The command defaults to the checkout's version; use `--version` when checking
+another release. Running it without a file checks the current release-notes
+document. It reads local text and never publishes or downloads an update.
+
+An already open Dolly notice caches the release metadata it discovered. After
+correcting a published body, a fresh Dolly session fetches the corrected notes;
+updating the body cannot replace the parser inside an older running executable.
+
 1. Use a new increasing version in `dolly/__init__.py` for every public build.
+   Update the README's static version badge, Current source line and current
+   release-notes link to the same version.
 2. Build locally with `tools/build_windows.py`; do not build on GitHub Actions.
    The build includes Dolly.exe with embedded update/recovery, a file manifest, bundled
    FFmpeg, and matching native/Python components. Both GUI and updater smoke
    checks must pass.
 3. Create a release from the intended commit on main, using a tag such as
-   `v0.5.14-alpha`. Attach the generated
-   `Deadlock_Dolly_0.5.14-alpha_Windows_x64.zip`, source ZIP and SHA256SUMS.txt.
+   `v0.6.52-alpha`. Attach only the generated
+   `Deadlock_Dolly_0.6.52-alpha_Windows_x64.zip`: it is what users install and
+   the only asset the updater reads. Leave
+   `Deadlock_Dolly_0.6.52-alpha_Source.zip` and `SHA256SUMS.txt` in `dist/` as
+   local build records. Source is public, so developers use the tag or the
+   repository; release notes may describe them as records, not attachments.
 4. Leave GitHub's pre-release box unchecked and mark the release Latest.
    "alpha" can remain in the title and version. GitHub must expose the uploaded
    Windows asset's SHA-256 digest before the updater accepts it.

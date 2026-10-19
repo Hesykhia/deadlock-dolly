@@ -1,5 +1,9 @@
 # Shipped visual fixes — reference, do NOT re-propose
 
+Maintainer reference with versioned implementation and validation evidence.
+For current operation and controls, use the [user documentation](../README.md).
+Recorded results apply to the revisions described below.
+
 Status: **fixed, shipped and visually accepted by Andrew**. Raised twice now, so
 this file exists to stop future chats from re-opening them as bugs. Treat them
 as closed unless a *game update* regresses them (see "Update-fragility" at the
@@ -80,6 +84,28 @@ player's** camera state while Dolly owns the free camera after F9 → F8.
   `citadel_death_replay_enabled`, `spec_replay_on_death`, `spec_replay_enable`
   (see `HANDOFF-camera-fov-death-20260926.md`). The shipped fixes above do **not**
   depend on them. If these are suggested again as the fix, point here.
+
+## 4. The game-side UI override pack (not an unfinished experiment)
+
+- **What ships:** `native/assets/ui/pak02_dir.vpk`, built from `native/ui_override`
+  by `tools/build_ui_override.py`, hash-pinned in `dolly/launcher.py`
+  (`UI_OVERRIDE_PACK_SHA256`) and mounted beside the confetti pack in **every
+  native-camera session only** (console-camera sessions keep the stock UI).
+- **What it changes:** it replaces five of the game's own resources - the hideout
+  HUD layout, the shader-prewarm layout, and three stylesheets. Its three visible
+  effects are the Dolly loading card at top center, the Deadlock client-status
+  watermark hidden (`#DefaultStatus .GameLogoIcon`), and the dev
+  match/server debug stats hidden (`#ClientServerDebugStats`). The watermark and
+  debug-stat suppression were validated when the pack was introduced (0.6.22);
+  the card was added and accepted in 0.6.52.
+- **Do not re-open as "the Panorama experiment leaked into the product."** The
+  source comment in `citadel_prewarm_assets_status.xml` still reads
+  "Private opt-in Dolly Panorama loading experiment V2" from the prototype that
+  produced the card. The card was deliberately promoted into the normal product;
+  the label is historical, and the pack is unchanged since 0.6.52.
+- **Real remaining work:** these are same-path stock replacements, so a Deadlock
+  UI update must refresh both the sources and `STOCK_UI_SHA256` in
+  `dolly/panorama_assets.py`, or Dolly refuses to launch native mode (fail-closed).
 
 ## Update-fragility (the only open, optional item)
 

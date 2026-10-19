@@ -8,6 +8,7 @@ import struct
 from copy import deepcopy
 
 from . import media_wire as wire
+from .native_errors import NativeBridgeError
 
 
 class MediaTransport:
@@ -31,7 +32,6 @@ class MediaTransport:
             self._atomic32(ctypes.byref(slot), ctypes.c_int32(value))
 
     def _ensure_media(self):
-        from .native_bridge import NativeBridgeError
         self._check_open()
         if self._media_mapping is not None:
             return
@@ -51,7 +51,6 @@ class MediaTransport:
         self._media_mapping = mapping
 
     def media_status(self):
-        from .native_bridge import NativeBridgeError
         with self._lock:
             if self._media_mapping is None or self._closed:
                 return deepcopy(self._media_last)
@@ -72,8 +71,7 @@ class MediaTransport:
     def video_status(self):
         return self.media_status()
 
-    def _media_command(self, command, **options):
-        from .native_bridge import NativeBridgeError
+    def _media_command(self, command, *, wait=True, timeout=5, required=True, **options):
         with self._operations:
             with self._lock:
                 self._ensure_media()
@@ -87,7 +85,9 @@ class MediaTransport:
                 self._media_atomic(8, seq)
                 self._media_sequence = seq
                 self._media_last_command = command
-            deadline = self._clock() + 5
+            if not wait:
+                return None
+            deadline = self._clock() + timeout
             while self._clock() < deadline:
                 self._check_open()
                 status = self.media_status()
@@ -96,17 +96,19 @@ class MediaTransport:
                         raise NativeBridgeError(status.get("command_message") or "Native media command was rejected")
                     return status
                 self._sleep(.02)
+            if not required:
+                return None
             raise NativeBridgeError("Native media did not acknowledge the request. Reconnect with the complete matching Dolly build.")
 
     def start_video(self, path, *, fps=60, bitrate=20000000, encoder=0, codec=0,
                     quality=0, preset=0, ffmpeg_path="", fixed_step=False, depth=False,
-                    depth_exr=False, shot_only=False, white_clear=False, max_frames=0):
+                    depth_exr=False, shot_only=False, white_clear=False, max_frames=0, camera_track=False):
         return self._media_command("start_video", path=str(path), fps=fps, bitrate=bitrate,
                                    encoder=encoder, codec=codec, quality=quality,
                                    preset=preset, ffmpeg_path=str(ffmpeg_path) if ffmpeg_path else "",
                                    fixed_step=bool(fixed_step), depth=bool(depth),
                                    depth_exr=bool(depth_exr), shot_only=bool(shot_only),
-                                   white_clear=bool(white_clear), max_frames=max_frames)
+                                   white_clear=bool(white_clear), max_frames=max_frames, camera_track=camera_track)
 
     def stop_video(self, cancel=False):
         if type(cancel) is not bool:
@@ -131,6 +133,20 @@ class MediaTransport:
         status = self._media_command("stop_source_audio")
         self._source_audio_recording = False
         return status
+
+    def silence_ui(self, timeout=0.25):
+        """Arm Dolly's interface-voice window and confirm it before the pause.
+
+        This runs immediately before a replay pause/resume, so it must resolve
+        quickly: the window has to be open before the game processes the pause,
+        and a slow media worker must never delay the pause itself. The window is
+        self-expiring, and a build without the sound hooks simply keeps the game's
+        own cue. Returns True when the native side acknowledged the arm.
+        """
+        try:
+            return self._media_command("silence_ui", timeout=timeout, required=False) is not None
+        except Exception:
+            return False
 
     def _close_media(self):
         """Request finalization while the game worker still has our heartbeat."""

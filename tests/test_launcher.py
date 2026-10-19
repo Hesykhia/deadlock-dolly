@@ -10,6 +10,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from dolly import launcher
+from dolly import panorama_assets
+from test_panorama_assets import write_vpk
 
 
 GAMEINFO = '''\ufeff"GameInfo"
@@ -49,6 +51,14 @@ GRIMOIRE_GAMEINFO = GAMEINFO.replace('Game "citadel"', '''Game "citadel/grimoire
             Game "citadel"
             Mod "core"
             Write "core"''')
+
+HYPERLINE_GAMEINFO = GAMEINFO.replace('Game "citadel"', '''// HYPERLINE PANORAMA BEGIN
+            Game "citadel/hyperline/5dff341cdedf6cda8525a90c4ed21800e26f2052e17535f793a929c8275cdb76"
+            Mod "citadel"
+            Write "citadel"
+            AddonRoot citadel/hyperline_addons
+            // HYPERLINE PANORAMA END
+            Game "citadel"''')
 
 
 def fake_game(root: Path, executable_name: str = "citadel.exe") -> launcher.GamePaths:
@@ -93,6 +103,14 @@ class GameInfoTests(unittest.TestCase):
         reviewed = load_manifest(root / 'native/profiles/manifest.json')['modules']
         for relative, digest in profile['modules'].items():
             self.assertIn(digest, reviewed[relative]['accepted'])
+        # Being accepted historically is insufficient: startup's current client
+        # and tier0 contracts must also pass this separate editing-profile gate.
+        contracts = json.loads((root / 'native/profiles/runtime-contracts.json').read_text())
+        for name in ('client', 'tier0'):
+            module = contracts['modules'][name]
+            current = json.loads((root / 'native/profiles' / module['profile']).read_text())
+            self.assertEqual(profile['modules'][module['path']],
+                             current[module['section']][module['hash_key']])
         result = launcher.make_gameinfo(data.decode('utf-8'), 'citadel_dolly_test')
         self.assertIn('citadel_dolly_test/cvar_unlocker', result)
         self.assertNotIn('Game                citadel/cvar_unlocker', result)
@@ -187,6 +205,14 @@ class GameInfoTests(unittest.TestCase):
         merged = launcher.merge_addon_mounts(user, GAMEINFO)
         self.assertIn('Game\t"citadel/addons/profile_x"', merged)
         self.assertIn('Game\t"citadel/addons2/profile_x"', merged)
+
+    def test_hyperline_panorama_mount_is_carried(self):
+        merged = launcher.merge_addon_mounts(HYPERLINE_GAMEINFO, GAMEINFO)
+        self.assertIn('Game\t"citadel/hyperline/5dff341cdedf6cda8525a90c4ed21800e26f2052e17535f793a929c8275cdb76"', merged)
+        self.assertIn('Mod\t"citadel"', merged)
+        self.assertIn('Write\t"citadel"', merged)
+        self.assertIn('AddonRoot\t"citadel/hyperline_addons"', merged)
+        self.assertLess(merged.index('citadel/hyperline/5dff341c'), merged.index('Game "citadel"'))
 
     def test_addon_mounts_without_write_paths_get_the_manager_defaults(self):
         user = GAMEINFO.replace('Game "citadel"', 'Game "citadel/addons"\n            Game "citadel"', 1)
@@ -750,6 +776,21 @@ class LauncherTests(unittest.TestCase):
         with patch.object(launcher, "_steam_roots", return_value=[steam]):
             self.assertEqual(launcher.discover_game(), install.root)
 
+    def test_discovery_follows_manifests_of_listed_libraries(self):
+        # Proton's prefix Steam folder lists only the Linux Steam root, whose
+        # own manifest lists the library that holds the game.
+        prefix_steam = self.folder / "Prefix Steam"
+        (prefix_steam / "steamapps").mkdir(parents=True)
+        linux_steam = self.folder / "Linux Steam"
+        (linux_steam / "steamapps").mkdir(parents=True)
+        library = self.folder / "Linux Games"
+        install = fake_game(library / "steamapps/common/Deadlock", "deadlock.exe")
+        (prefix_steam / "steamapps/libraryfolders.vdf").write_text('"LibraryFolders" { "0" { "path" "' + str(linux_steam) + '" } }')
+        (linux_steam / "steamapps/libraryfolders.vdf").write_text(
+            '"libraryfolders" { "0" { "path" "' + str(linux_steam) + '" } "1" { "path" "' + str(library) + '" } }')
+        with patch.object(launcher, "_steam_roots", return_value=[prefix_steam]):
+            self.assertEqual(launcher.discover_game(), install.root)
+
     def test_discovery_finds_current_executable_in_primary_and_secondary_libraries(self):
         steam = self.folder / "Current Primary Steam"
         primary = fake_game(steam / "steamapps/common/Deadlock", "deadlock.exe")
@@ -768,7 +809,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(dll.read_bytes()).hexdigest(), meta["bundled_file_sha256"])
         self.assertEqual(meta["bundled_file_sha256"], launcher.UNLOCKER_SHA256)
         self.assertEqual(meta["license"], "MIT")
-        self.assertEqual(meta["version"], "v0.5.2-dolly-build-6753")
+        self.assertEqual(meta["version"], "v0.5.2-dolly-build-6793")
         self.assertEqual(dll.stat().st_size, meta["bundled_file_size"])
         self.assertIn("unlocker-build-6712.patch", meta["patches"])
         self.assertIn("unlocker-build-6722.patch", meta["patches"])
@@ -781,6 +822,10 @@ class LauncherTests(unittest.TestCase):
         self.assertIn("unlocker-build-6742.patch", meta["patches"])
         self.assertIn("unlocker-build-6745.patch", meta["patches"])
         self.assertIn("unlocker-build-6746.patch", meta["patches"])
+        self.assertIn("unlocker-build-6769.patch", meta["patches"])
+        self.assertIn("unlocker-build-6774.patch", meta["patches"])
+        self.assertIn("unlocker-build-6785.patch", meta["patches"])
+        self.assertIn("unlocker-build-6793.patch", meta["patches"])
         for patch in meta["patches"]:
             self.assertTrue((launcher.UNLOCKER_ROOT / patch).is_file(), patch)
 
@@ -803,7 +848,59 @@ class LauncherTests(unittest.TestCase):
         (native_root / "build_info.json").write_text(json.dumps({
             "abi": launcher.NATIVE_ABI, "sha256": hashlib.sha256(binary).hexdigest()}))
         editing_fixture(self.paths, self.folder)
+        stock = {name: ('reviewed stock UI fixture ' + name).encode('ascii')
+                 for name in panorama_assets.STOCK_UI_SHA256}
+        write_vpk(self.paths.citadel_dir / 'pak01_dir.vpk', stock)
+        stock_pins = {name: hashlib.sha256(payload).hexdigest() for name, payload in stock.items()}
+        stock_patch = patch.object(panorama_assets, 'STOCK_UI_SHA256', stock_pins)
+        stock_patch.start(); self.addCleanup(stock_patch.stop)
         return native_root, pins, dll
+
+    def test_native_ui_refusal_preserves_old_recovery_before_any_new_deployment(self):
+        native_root, pins, _ = self._native_fixture()
+        original = self.paths.gameinfo.read_bytes()
+        self.paths.gameinfo.write_bytes(b'pending old owned session')
+        index = self.paths.citadel_dir / 'pak01_dir.vpk'
+        damaged = bytearray(index.read_bytes()); damaged[-1] ^= 1; index.write_bytes(damaged)
+        def recover(root):
+            self.assertEqual(root, self.paths.root)
+            self.paths.gameinfo.write_bytes(original)
+        with patch.object(launcher, '_check_runtime'), \
+             patch.object(launcher, 'running_processes', return_value={'steam.exe'}), \
+             patch.object(launcher, 'NATIVE_ROOT', native_root), \
+             patch.object(launcher, 'NATIVE_GAME_SHA256', pins), \
+             patch.object(launcher, 'PACKAGE_ROOT', self.package), \
+             patch.object(launcher, 'recover_pending', side_effect=recover) as recovered, \
+             patch.object(launcher.NativeBridge, 'create') as create, \
+             patch.object(launcher.subprocess, 'Popen') as popen:
+            with self.assertRaisesRegex(launcher.LaunchError, 'shader loading UI'):
+                launcher.launch(self.paths.root, native=True)
+        recovered.assert_called_once_with(self.paths.root)
+        create.assert_not_called(); popen.assert_not_called()
+        self.assertEqual(self.paths.gameinfo.read_bytes(), original)
+        self.assertFalse(self.package.exists())
+        self.assertFalse(list(self.paths.game_dir.glob('citadel_dolly_*')))
+
+    def test_native_bundled_ui_hash_refused_before_new_bridge_or_mount(self):
+        native_root, pins, _ = self._native_fixture()
+        original = self.paths.gameinfo.read_bytes()
+        bad_pack = self.folder / 'bad-ui.vpk'; bad_pack.write_bytes(b'changed UI pack')
+        with patch.object(launcher, '_check_runtime'), \
+             patch.object(launcher, 'running_processes', return_value={'steam.exe'}), \
+             patch.object(launcher, 'NATIVE_ROOT', native_root), \
+             patch.object(launcher, 'NATIVE_GAME_SHA256', pins), \
+             patch.object(launcher, 'PACKAGE_ROOT', self.package), \
+             patch.object(launcher, 'UI_OVERRIDE_PACK', bad_pack), \
+             patch.object(launcher, 'recover_pending') as recovered, \
+             patch.object(launcher.NativeBridge, 'create') as create, \
+             patch.object(launcher.subprocess, 'Popen') as popen:
+            with self.assertRaisesRegex(launcher.LaunchError, 'UI override pack failed its SHA-256'):
+                launcher.launch(self.paths.root, native=True)
+        recovered.assert_called_once_with(self.paths.root)
+        create.assert_not_called(); popen.assert_not_called()
+        self.assertEqual(self.paths.gameinfo.read_bytes(), original)
+        self.assertFalse(self.package.exists())
+        self.assertFalse(list(self.paths.game_dir.glob('citadel_dolly_*')))
 
     def test_native_game_hash_mismatch_is_refused_before_any_recovery_or_mount(self):
         native_root, pins, dll = self._native_fixture()

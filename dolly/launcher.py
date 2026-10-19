@@ -1,4 +1,4 @@
-"""Windows-only Deadlock development launcher with recoverable config mounting.
+﻿"""Windows-only Deadlock development launcher with recoverable config mounting.
 
 ``game_path`` may be the Deadlock installation root, its ``game`` or ``citadel``
 directory, or ``game/bin/win64/deadlock.exe`` (legacy ``citadel.exe`` is also
@@ -34,6 +34,7 @@ from .file_ops import _atomic_write
 from .keyvalues import _Token, _Entry, _tokens, _parse, _named
 from .runtime import application_root, resource_root, external_program_environment
 from .native_bridge import NativeBridge, ABI as NATIVE_ABI
+from .panorama_assets import verify_stock_ui_assets
 from . import __version__ as DOLLY_VERSION
 from .compatibility import (
     CompatibilityError,
@@ -50,8 +51,8 @@ EDITING_ROOT = resource_root(Path(__file__).resolve().parent.parent) / "assets" 
 CONFETTI_PACK = NATIVE_ROOT / "assets" / "confetti" / "pak01_dir.vpk"
 CONFETTI_PACK_SHA256 = "99c0325fe333bfa12c3f23a2808767c2fd27b49fe0e5abe4531fa472519f8ae6"
 UI_OVERRIDE_PACK = NATIVE_ROOT / "assets" / "ui" / "pak02_dir.vpk"
-UI_OVERRIDE_PACK_SHA256 = "160c23f2b4ef670469833a193b2fa3d4ed5f027a4b9310607391008f39054cc0"
-UNLOCKER_SHA256 = "1d491c14e335ec38f279475ce03bfa9d98f5b444f0250d4cdb1dc35e63018a8a"
+UI_OVERRIDE_PACK_SHA256 = "0af30912a471efc984e653ebc57a4c05f210e07f707f42d3bec997fc945b2fe1"
+UNLOCKER_SHA256 = "5f75ab3dafc73a817bd545a80a7d55110d37ed728f7ad5c0bae8c5a8863106e4"
 # Accepted game-module SHA-256 pins come from native/profiles/manifest.json, the
 # single source of truth shared with the native bridge and its build tests.
 try:
@@ -70,7 +71,7 @@ ADDON_MOUNT_KEYS = {
     "addonroot": "AddonRoot",
     "officialaddonroot": "OfficialAddonRoot",
 }
-ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons)(?:/.*)?$", re.IGNORECASE)
+ADDON_GAME_MOUNTS = re.compile(r"^citadel/(?:addons\d*|grimoire|deadworks_addons|hyperline)(?:/.*)?$", re.IGNORECASE)
 ADDON_WRITE_PATHS = {"citadel", "core"}
 
 
@@ -305,26 +306,38 @@ def _steam_roots() -> list[Path]:
     return list(dict.fromkeys(roots))
 
 
+def _library_path(value: str) -> Path:
+    """Map a Linux Steam library path onto Wine's Z: drive, which Proton roots at /."""
+    if os.name == "nt" and value.startswith("/"):
+        return Path("Z:" + value)
+    return Path(value)
+
+
 def discover_game() -> Path | None:
-    """Return the installation root from Steam registry/library manifests."""
-    roots = _steam_roots()
-    libraries = list(roots)
-    for root in roots:
+    """Return the installation root from Steam registry/library manifests.
+
+    Each library's manifest is read in turn. Under Proton the prefix's Steam
+    folder lists only the Linux Steam root, whose manifest lists the rest.
+    """
+    libraries = _steam_roots()
+    for root in libraries:
         manifest = root / "steamapps" / "libraryfolders.vdf"
         try:
             entries = _parse(manifest.read_text(encoding="utf-8-sig"))
-            sections = _named(entries, "libraryfolders")
-            for section in sections:
-                for entry in section.children or []:
-                    if entry.children:
-                        for folder in _named(entry.children, "path"):
-                            if folder.value:
-                                libraries.append(Path(folder.value.value))
-                    elif entry.key.value.isdigit() and entry.value:
-                        libraries.append(Path(entry.value.value))
         except (OSError, UnicodeError, LaunchError):
-            pass
-    for library in dict.fromkeys(libraries):
+            continue
+        for section in _named(entries, "libraryfolders"):
+            for entry in section.children or []:
+                if entry.children:
+                    folders = [folder.value.value for folder in _named(entry.children, "path") if folder.value]
+                elif entry.key.value.isdigit() and entry.value:
+                    folders = [entry.value.value]
+                else:
+                    folders = []
+                for folder in map(_library_path, folders):
+                    if folder not in libraries:
+                        libraries.append(folder)
+    for library in libraries:
         install_name = "Deadlock"
         try:
             app = _parse((library / "steamapps" / f"appmanifest_{STEAM_APP_ID}.acf").read_text(encoding="utf-8-sig"))
@@ -765,13 +778,6 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     from .replays import parse_launch_options
     parse_launch_options(launch_options)  # Validate before changing game files.
     paths = validate_game(game_path)
-    try:
-        original_data = paths.gameinfo.read_bytes()
-        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
-    except (OSError, UnicodeError) as exc:
-        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
-    addon_mounts = tuple(mod_search_paths(original_text))
-    _refuse_loose_ui_sources(paths, addon_mounts)
     port = _validate_port(port)
     if protocol not in ("vconsole", "netcon"):
         raise LaunchError("Console protocol must be vconsole or netcon.")
@@ -782,9 +788,18 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
     if not isinstance(native, bool):
         raise LaunchError("Native camera selection must be a boolean.")
     native_dll = _verified_native(paths) if native else None
+    # Recover any unfinished previous session first, so the original we back up
+    # and journal is the user's true file, not a still-mounted Dolly session.
     recover_pending(paths.root)
     if "steam.exe" not in processes:
         raise LaunchError("Open Steam and sign in before launching Deadlock through Dolly.")
+    try:
+        original_data = paths.gameinfo.read_bytes()
+        original_text = original_data.decode("utf-8")  # Validate before preparing any replacement.
+    except (OSError, UnicodeError) as exc:
+        raise LaunchError("Could not read the installed UTF-8 gameinfo.gi; no game files were changed.") from exc
+    addon_mounts = tuple(mod_search_paths(original_text))
+    _refuse_loose_ui_sources(paths, addon_mounts)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         try:
             # Exclusive bind on Windows prevents claiming another app's listener.
@@ -794,6 +809,14 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         except OSError as exc:
             raise LaunchError(f"Console port {port} is busy. Close the previous Dolly/game session or choose another port.") from exc
     dll = _verified_unlocker()
+    # Keep previous-session recovery above intact. Verify the same-path stock
+    # UI inputs before creating a new bridge, session journal or deployment.
+    ui_override_pack = _verified_ui_override_pack() if native else None
+    if native:
+        try:
+            verify_stock_ui_assets(paths.citadel_dir)
+        except (OSError, ValueError) as exc:
+            raise LaunchError(str(exc)) from exc
     process = None
     bridge = None
     ident = time.strftime("%Y%m%d_%H%M%S", time.gmtime()) + "_" + uuid.uuid4().hex[:10]
@@ -819,14 +842,14 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
             # This mounted game search path exists before Deadlock starts, so
             # Source 2 resolves the custom particle systems as native assets.
             shutil.copyfile(_verified_confetti_pack(), target.parents[1] / "pak01_dir.vpk")
-            # The UI override pack loads beside it and hides the development
-            # HUD overlay's client-status mark and match/server debug label.
-            shutil.copyfile(_verified_ui_override_pack(), target.parents[1] / "pak02_dir.vpk")
+            # The verified pack also presents the Panorama shader-loading card
+            # and hides the development client-status/debug capture overlays.
+            shutil.copyfile(ui_override_pack, target.parents[1] / "pak02_dir.vpk")
             (target / "dolly_native.cfg").write_text(
                 f"DOLLY_NATIVE_1\n{bridge.token}\n{bridge.editor_pid}\n",
                 encoding="ascii", newline="\n")
         command = build_command(paths, overlay, port, demo, protocol, launch_options, native=native)
-        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6753", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
+        metadata = {**marker, "command": command, "selected_demo": str(demo) if demo is not None else None, "port": port, "protocol": protocol, "dolly_version": DOLLY_VERSION, "overlay_dir": str(overlay), "unlocker_version": "v0.5.2-dolly-build-6793", "unlocker_sha256": UNLOCKER_SHA256, "validation": "Windows game startup and selected console protocol require a local probe.", "backup_name": "original.gameinfo.gi", "patched_sha256": hashlib.sha256(patched_data).hexdigest(), "original_mode": stat.S_IMODE(paths.gameinfo.stat().st_mode), "config_state": "prepared"}
         metadata["editing_gameinfo_sha256"] = hashlib.sha256(editing.encode("utf-8")).hexdigest()
         metadata["carried_addon_mounts"] = [{"key": key, "path": path} for key, path in addon_mounts]
         if native:
@@ -845,6 +868,10 @@ def launch(game_path: str | os.PathLike[str], demo_path: str | os.PathLike[str] 
         if hashlib.sha256(paths.gameinfo.read_bytes()).hexdigest() != metadata["original_sha256"]:
             raise LaunchError("Deadlock gameinfo.gi changed while Dolly was preparing. Launch was refused without overwriting the newer file.")
         _atomic_write(paths.gameinfo, patched_data, metadata["original_mode"])
+        if hashlib.sha256(paths.gameinfo.read_bytes()).hexdigest() != metadata["patched_sha256"]:
+            raise LaunchError("Dolly's gameinfo.gi swap did not read back correctly. Another program may be "
+                              "rewriting the file (close mod managers or Steam), or the file is locked; "
+                              "the original was backed up in this session's logs.")
         metadata["config_state"] = "mounted"
         _save_record(session_dir, metadata)
         if graphics_profile:
@@ -969,3 +996,4 @@ def _main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_main())
+

@@ -41,11 +41,44 @@ class ReleasePackagingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Non-source"):
                     release_files.source_files(self.root)
 
+    def test_portable_guides_resolve_repository_links_without_missing_neighbors(self):
+        docs = self.root / "docs"
+        docs.mkdir()
+        source = ('[Guide](USER_GUIDE.md#controls)\n'
+                  '[Credits](../CREDITS.md "Project credits")\n'
+                  '![Logo](../assets/dolly.png)\n'
+                  '[Here](#controls)\n'
+                  '[Web](https://example.com/guide?q=1#controls)\n'
+                  '[Mail](mailto:help@example.com)\n')
+        for name in ("VIDEO_AND_RESHADE.md", "LAYER_EXPORT.md", "UPDATING.md",
+                     "SUPPORTED_CAMERA_CVARS.md"):
+            (docs / name).write_text(source, encoding="utf-8")
+        (docs / "SUPPORTED_CAMERA_CVARS.json").write_bytes(b'{"controls": []}\n')
+        bundle = self.root / "portable"
+        bundle.mkdir()
+        build_windows.stage_user_guides(self.root, bundle)
+        expected = ('[Guide](https://github.com/cravvnn/deadlock-dolly/blob/main/docs/USER_GUIDE.md#controls)\n'
+                    '[Credits](https://github.com/cravvnn/deadlock-dolly/blob/main/CREDITS.md "Project credits")\n'
+                    '![Logo](https://github.com/cravvnn/deadlock-dolly/blob/main/assets/dolly.png)\n'
+                    '[Here](#controls)\n'
+                    '[Web](https://example.com/guide?q=1#controls)\n'
+                    '[Mail](mailto:help@example.com)\n')
+        self.assertEqual({path.name for path in bundle.iterdir()}, {
+            "Video_and_ReShade.md", "LAYER_EXPORT.md", "Updating.md",
+            "Supported_Camera_Cvars.md", "Supported_Camera_Cvars.json"})
+        for path in bundle.glob("*.md"):
+            with self.subTest(guide=path.name):
+                self.assertEqual(path.read_text(encoding="utf-8"), expected)
+        self.assertEqual((bundle / "Supported_Camera_Cvars.json").read_bytes(), b'{"controls": []}\n')
+
     def test_source_manifest_missing_and_duplicate_files_fail_release(self):
-        for contents in ["missing.py\n", "one.py\none.py\n"]:
-            (self.root / "SOURCE_FILES.txt").write_text(contents)
-            with self.assertRaises(ValueError):
-                release_files.source_files(self.root)
+        (self.root / "one.py").write_text("fixture")
+        for contents, message in [("missing.py\n", "Missing or unsafe source file"),
+                                  ("one.py\none.py\n", "duplicate paths")]:
+            with self.subTest(contents=contents):
+                (self.root / "SOURCE_FILES.txt").write_text(contents)
+                with self.assertRaisesRegex(ValueError, message):
+                    release_files.source_files(self.root)
 
     def test_source_manifest_covers_every_shipped_source_file(self):
         # SOURCE_FILES.txt is an explicit allowlist, so a new module or test can
@@ -63,7 +96,7 @@ class ReleasePackagingTests(unittest.TestCase):
         missing = [name for name in shipped if name not in listed]
         self.assertEqual(missing, [], "SOURCE_FILES.txt is missing shipped source files: %s" % missing)
 
-    def test_windows_bundle_omits_runtime_logs_demos_and_update_staging(self):
+    def test_windows_bundle_zip_prefixes_and_never_archives_runtime_data(self):
         for name in ["Dolly.exe", "BUILD_INFO.json", "_internal/base_library.zip",
                      "_internal/python312.dll", "logs/Dolly.log",
                      "logs/20260912_065349_ccf753618f/session.json",
@@ -72,20 +105,11 @@ class ReleasePackagingTests(unittest.TestCase):
             file = self.root / name
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_text("fixture")
-        expected = {"Dolly.exe", "BUILD_INFO.json", "_internal/base_library.zip", "_internal/python312.dll"}
-        names = {path.relative_to(self.root).as_posix() for path in release_files.bundle_files(self.root)}
-        self.assertEqual(names, expected)
-
-    def test_windows_bundle_zip_prefixes_and_never_archives_runtime_data(self):
-        for name in ["Dolly.exe", "_internal/base_library.zip", "logs/Dolly.log",
-                     "logs/20260912_065349_ccf753618f/session.json", "shot.dem"]:
-            file = self.root / name
-            file.parent.mkdir(parents=True, exist_ok=True)
-            file.write_text("fixture")
         archive = release_files.bundle_zip(self.root, self.root / "windows.zip")
         with zipfile.ZipFile(archive) as package:
             self.assertEqual(set(package.namelist()),
-                             {"DeadlockDolly/Dolly.exe", "DeadlockDolly/_internal/base_library.zip"})
+                             {"DeadlockDolly/Dolly.exe", "DeadlockDolly/BUILD_INFO.json",
+                              "DeadlockDolly/_internal/base_library.zip", "DeadlockDolly/_internal/python312.dll"})
             self.assertIsNone(package.testzip())
 
     def test_windows_bundle_zip_guard_rejects_a_leaked_excluded_path(self):

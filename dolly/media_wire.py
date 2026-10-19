@@ -12,7 +12,7 @@ STATUS = struct.Struct("<8s10I3Q2I768s768s768s2Q")
 VIDEO_STATES = ("idle", "starting", "recording", "finalizing", "completed", "cancelled", "failed")
 COMMANDS = {"start_video": 1, "stop_video": 2, "cancel_video": 3,
             "configure_reshade": 4, "disable_reshade": 5, "toggle_reshade": 6,
-            "start_source_audio": 7, "stop_source_audio": 8}
+            "start_source_audio": 7, "stop_source_audio": 8, "silence_ui": 9}
 # Encoder values match native dolly::video::Encoder.
 ENCODERS = ("media_foundation", "ffmpeg")
 # Codec values match native dolly::video::Codec. libx264/libx265 require a GPL
@@ -37,7 +37,7 @@ def _path(value: str, required: bool = False) -> bytes:
 
 def pack_command(sequence, command, *, path="", config_path="", fps=60, bitrate=20000000,
                  encoder=0, codec=0, quality=0, preset=0, ffmpeg_path="", fixed_step=False,
-                 depth=False, depth_exr=False, shot_only=False, white_clear=False, max_frames=0):
+                 depth=False, depth_exr=False, shot_only=False, white_clear=False, max_frames=0, camera_track=False):
     if type(sequence) is not int or not 0 < sequence <= 0xfffffffe or sequence & 1:
         raise ValueError("Invalid media command sequence")
     if command not in COMMANDS:
@@ -77,9 +77,12 @@ def pack_command(sequence, command, *, path="", config_path="", fps=60, bitrate=
     # Bit 2: also write the float EXR sequence. Bit 3: capture only frames
     # with a replay time so layered takes stay aligned. Bit 4: force a white
     # clear for the matte pass. Bits 16..31: hard admission limit (0 unlimited).
-    # Bits 5..15 remain invalid. Older native builds reject a nonzero limit.
+    # Bit 5 requests camera metadata; bits 6..15 remain invalid.
+    # Older native builds reject an unsupported camera flag or nonzero limit.
+    if type(camera_track) is not bool:
+        raise ValueError("Camera track must be on or off")
     reserved = ((1 if fixed_step else 0) | (2 if depth else 0) | (4 if depth_exr else 0)
-                | (8 if shot_only else 0) | (16 if white_clear else 0) | (max_frames << 16))
+                | (8 if shot_only else 0) | (16 if white_clear else 0) | (32 if camera_track else 0) | (max_frames << 16))
     return COMMAND.pack(b"DLYMED01", sequence, ABI, COMMANDS[command], fps, bitrate,
                         reserved,
                         encoder, codec, quality, preset,

@@ -424,15 +424,15 @@ inline bool find_bone_vector(std::uintptr_t object, std::uintptr_t& data, std::u
                 --name_budget;
                 std::uintptr_t text = 0;
                 char name[65]{};
-                if (!read_value(pointer + index * stride, text) ||
+                if (!read_value(pointer + std::uintptr_t(index) * stride, text) ||
                     !read_c_string(text, name, sizeof(name)) || !valid_bone_name(name))
                     break;
                 if (index == 0)
                     root_first = std::strcmp(name, "root_motion") == 0;
                 if (stride == 16) {
                     std::uint32_t length = 0;
-                    if (!read_value(pointer + index * stride + 8, length) || length < 1 ||
-                        length > 96)
+                    if (!read_value(pointer + std::uintptr_t(index) * stride + 8, length) ||
+                        length < 1 || length > 96)
                         break;
                 }
             }
@@ -483,7 +483,8 @@ inline unsigned skeleton_name_score(std::uintptr_t data, std::uint32_t entries,
     for (std::uint32_t entry = 0; entry < limit; ++entry) {
         std::uintptr_t text = 0;
         char name[65]{};
-        if (!read_value(data + entry * stride, text) || !read_c_string(text, name, sizeof(name)))
+        if (!read_value(data + std::uintptr_t(entry) * stride, text) ||
+            !read_c_string(text, name, sizeof(name)))
             continue;
         for (unsigned marker = 0; marker < 8; ++marker)
             if (!seen[marker] && std::strcmp(name, kMarkers[marker]) == 0) {
@@ -565,6 +566,55 @@ inline bool locate_bone_array(const Offsets& offsets, std::uintptr_t node,
     out[2] = std::atan2(-r21, r22) * 180.0 / pi;
 }
 
+// A texture/skin mod may replace a hero model with a resource whose internal
+// name differs (for example "magician_default.vmdl") while it still occupies
+// the same model slot. The exact name token is the strict identity; when it
+// differs, accept only a resource in the SAME folder whose file stem is a
+// "_"-suffixed variant of the selected player's reported model stem (or the
+// reverse), which still rejects an unrelated model.
+inline bool same_model_variant(const char* resource, const char* reported) noexcept {
+    if (!resource || !reported)
+        return false;
+    auto fold = [](char c) { return c >= 'A' && c <= 'Z' ? char(c + 32) : c; };
+    auto folder_end = [](const char* text) -> int {
+        int last = -1;
+        for (int index = 0; text[index]; ++index)
+            if (text[index] == '/' || text[index] == '\\')
+                last = index;
+        return last;
+    };
+    auto stem_end = [](const char* text, int start) -> int {
+        int end = start;
+        while (text[end] && text[end] != '.')
+            ++end;
+        return end;
+    };
+    auto extends = [&](const char* base, int base_begin, int base_end, const char* full,
+                       int full_begin, int full_end) -> bool {
+        const int base_len = base_end - base_begin;
+        const int full_len = full_end - full_begin;
+        if (base_len <= 0 || full_len <= base_len + 1)
+            return false;
+        for (int index = 0; index < base_len; ++index)
+            if (fold(base[base_begin + index]) != fold(full[full_begin + index]))
+                return false;
+        return full[full_begin + base_len] == '_';
+    };
+    const int resource_folder = folder_end(resource);
+    const int reported_folder = folder_end(reported);
+    if (resource_folder <= 0 || resource_folder != reported_folder)
+        return false;
+    for (int index = 0; index < resource_folder; ++index)
+        if (fold(resource[index]) != fold(reported[index]))
+            return false;
+    const int resource_stem = resource_folder + 1;
+    const int reported_stem = reported_folder + 1;
+    const int resource_end = stem_end(resource, resource_stem);
+    const int reported_end = stem_end(reported, reported_stem);
+    return extends(resource, resource_stem, resource_end, reported, reported_stem, reported_end) ||
+           extends(reported, reported_stem, reported_end, resource, resource_stem, resource_end);
+}
+
 // Worker thread: resolve the attach bone for a target whose node is known.
 // Weapon points pick the best-ranked candidate bone; bone points match the
 // authored 64-bit name hash against the skeleton name vector.
@@ -585,9 +635,20 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
     if (!read_value(model_state + 0xa0, binding) || !binding || !read_value(binding, object) ||
         !object || !read_value(object + 8, resource_name) ||
         !read_memory(resource_name, resource_path, sizeof(resource_path) - 1) ||
-        !text_looks_like_model(resource_path) || model_token(resource_path) != cache.model) {
+        !text_looks_like_model(resource_path)) {
         error = "The selected model resource could not be verified. Choose Eyes.";
         return false;
+    }
+    if (model_token(resource_path) != cache.model) {
+        // A skin/mod may replace the model with a differently named resource in
+        // the same folder; accept it as the same model family so its skeleton
+        // can still be resolved.
+        char reported_path[256]{};
+        if (!read_c_string(cache.name_pointer, reported_path, sizeof(reported_path)) ||
+            !same_model_variant(resource_path, reported_path)) {
+            error = "The selected model resource could not be verified. Choose Eyes.";
+            return false;
+        }
     }
     VectorHit hit{};
     if (!find_bone_vector(object, hit.data, hit.entries, hit.stride)) {
@@ -605,7 +666,7 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
     for (std::uint32_t entry = 0; entry < hit.entries; ++entry) {
         std::uintptr_t text = 0;
         char name[65]{};
-        if (!read_value(hit.data + entry * hit.stride, text) ||
+        if (!read_value(hit.data + std::uintptr_t(entry) * hit.stride, text) ||
             !read_c_string(text, name, sizeof(name)) || !valid_bone_name(name) ||
             !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') ||
               name[0] == '_' || name[0] == '$'))
@@ -627,7 +688,7 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
         for (std::uint32_t entry = 0; entry < hit.entries && !found; ++entry) {
             std::uintptr_t text = 0;
             char name[65]{};
-            if (!read_value(hit.data + entry * hit.stride, text) ||
+            if (!read_value(hit.data + std::uintptr_t(entry) * hit.stride, text) ||
                 !read_c_string(text, name, sizeof(name)))
                 continue;
             if (model_token(name) == segment.bone_hash) {
@@ -644,7 +705,7 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
         for (std::uint32_t entry = 0; entry < hit.entries; ++entry) {
             std::uintptr_t text = 0;
             char name[65]{};
-            if (!read_value(hit.data + entry * hit.stride, text) ||
+            if (!read_value(hit.data + std::uintptr_t(entry) * hit.stride, text) ||
                 !read_c_string(text, name, sizeof(name)))
                 continue;
             for (unsigned candidate = 0; candidate < candidate_count; ++candidate)
@@ -699,7 +760,7 @@ inline bool resolve_bone(const Offsets& offsets, std::uintptr_t node,
                 std::uintptr_t text = 0;
                 dolly::PickerBone bone{};
                 bone.source_index = entry;
-                if (!read_value(hit.data + entry * hit.stride, text) ||
+                if (!read_value(hit.data + std::uintptr_t(entry) * hit.stride, text) ||
                     !read_c_string(text, bone.name, sizeof(bone.name)) ||
                     !valid_bone_name(bone.name)) {
                     error = "The full bone catalog changed while it was read. Reopen the picker.";
